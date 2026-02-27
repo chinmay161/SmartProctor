@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Integer
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.sql import func
 from ..database import Base
 import uuid
@@ -6,14 +6,22 @@ import uuid
 
 class Violation(Base):
     __tablename__ = "violations"
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('minor', 'major', 'severe')",
+            name="ck_violations_severity",
+        ),
+    )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    session_id = Column(String, nullable=False)
+    session_id = Column(String, nullable=True)
+    attempt_id = Column(String, ForeignKey("exam_attempts.id"), nullable=True)
     student_id = Column(String, nullable=False)
 
     type = Column(String, nullable=True)
-    severity = Column(String, nullable=False)  # 'minor'|'major'|'severe' or numeric levels as strings
+    severity = Column(String, nullable=False)
     source = Column(String, nullable=True)  # client | ai | proctor
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     count = Column(Integer, nullable=False, default=1)
     details = Column(String, nullable=True)

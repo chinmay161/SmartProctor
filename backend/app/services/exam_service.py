@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from fastapi import HTTPException, status
 
 from ..models.exam import Exam
@@ -116,12 +117,6 @@ def auto_terminate_on_violation(db: Session, session_id: str, severity: str, inc
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
 
-    # Load rules for exam
-    rules = db.query(ExamRules).filter_by(exam_id=session.exam_id).first()
-    if not rules:
-        # No rules configured => default conservative behavior: do not auto-terminate
-        return session
-
     # Persist the violation event
     try:
         v = Violation(session_id=session_id, student_id=session.student_id, severity=severity, count=increment)
@@ -129,6 +124,18 @@ def auto_terminate_on_violation(db: Session, session_id: str, severity: str, inc
         db.commit()
     except Exception:
         db.rollback()
+
+    # Load rules for exam
+    rules = db.query(ExamRules).filter_by(exam_id=session.exam_id).first()
+    if not rules:
+        # No rules configured => record only; do not auto-terminate.
+        session.last_heartbeat = datetime.utcnow()
+        try:
+            db.commit()
+            db.refresh(session)
+        except Exception:
+            db.rollback()
+        return session
 
     # Compute cumulative counts by severity for this session
     severe_count = db.query(Violation).filter_by(session_id=session_id, severity="severe").with_entities(func.sum(Violation.count)).scalar() or 0

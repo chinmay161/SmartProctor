@@ -3,19 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
-const CompletedExamCard = ({ exam }) => {
+const CompletedExamCard = ({ exam, onReleaseResults, releasing = false }) => {
   const navigate = useNavigate();
-
-  const getGradeDistribution = () => {
-    const total = exam?.gradeDistribution?.A + exam?.gradeDistribution?.B + exam?.gradeDistribution?.C + exam?.gradeDistribution?.D + exam?.gradeDistribution?.F;
-    return [
-      { grade: 'A', count: exam?.gradeDistribution?.A, percentage: (exam?.gradeDistribution?.A / total * 100)?.toFixed(0), color: 'bg-success' },
-      { grade: 'B', count: exam?.gradeDistribution?.B, percentage: (exam?.gradeDistribution?.B / total * 100)?.toFixed(0), color: 'bg-primary' },
-      { grade: 'C', count: exam?.gradeDistribution?.C, percentage: (exam?.gradeDistribution?.C / total * 100)?.toFixed(0), color: 'bg-accent' },
-      { grade: 'D', count: exam?.gradeDistribution?.D, percentage: (exam?.gradeDistribution?.D / total * 100)?.toFixed(0), color: 'bg-warning' },
-      { grade: 'F', count: exam?.gradeDistribution?.F, percentage: (exam?.gradeDistribution?.F / total * 100)?.toFixed(0), color: 'bg-error' }
-    ];
-  };
+  const submittedCount = exam?.submitted_count ?? 0;
+  const attemptCount = exam?.attempt_count ?? 0;
+  const evaluatedCount = exam?.evaluated_count ?? 0;
+  const averageScore = exam?.average_score_percent;
+  const totalViolations = exam?.violation_count ?? 0;
+  const completedDate = exam?.end_time
+    ? new Date(exam.end_time).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'N/A';
+  const alreadyReleased = Boolean(exam?.results_visible);
 
   return (
     <div className="bg-card border border-border rounded-lg shadow-md overflow-hidden transition-smooth hover:shadow-lg">
@@ -32,15 +36,15 @@ const CompletedExamCard = ({ exam }) => {
             <div className="flex flex-wrap items-center gap-3 text-xs md:text-sm text-muted-foreground">
               <div className="flex items-center space-x-1.5">
                 <Icon name="Calendar" size={16} />
-                <span>{exam?.completedDate}</span>
+                <span>{completedDate}</span>
               </div>
               <div className="flex items-center space-x-1.5">
                 <Icon name="Users" size={16} />
-                <span>{exam?.submittedCount}/{exam?.totalStudents} submitted</span>
+                <span>{submittedCount}/{attemptCount} submitted</span>
               </div>
               <div className="flex items-center space-x-1.5">
                 <Icon name="TrendingUp" size={16} />
-                <span>Avg: {exam?.averageScore}%</span>
+                <span>Avg: {averageScore == null ? 'N/A' : `${averageScore}%`}</span>
               </div>
             </div>
           </div>
@@ -49,51 +53,33 @@ const CompletedExamCard = ({ exam }) => {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center space-x-2 mb-1">
-              <Icon name="Award" size={16} className="text-success" />
-              <span className="text-xs text-muted-foreground">Highest</span>
+              <Icon name="ClipboardCheck" size={16} className="text-success" />
+              <span className="text-xs text-muted-foreground">Evaluated</span>
             </div>
-            <p className="text-base md:text-lg font-data font-semibold text-foreground">{exam?.highestScore}%</p>
+            <p className="text-base md:text-lg font-data font-semibold text-foreground">{evaluatedCount}</p>
           </div>
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center space-x-2 mb-1">
-              <Icon name="TrendingDown" size={16} className="text-error" />
-              <span className="text-xs text-muted-foreground">Lowest</span>
+              <Icon name="FileCheck2" size={16} className="text-primary" />
+              <span className="text-xs text-muted-foreground">Results</span>
             </div>
-            <p className="text-base md:text-lg font-data font-semibold text-foreground">{exam?.lowestScore}%</p>
+            <p className="text-base md:text-lg font-data font-semibold text-foreground">
+              {alreadyReleased ? 'Released' : 'Not Released'}
+            </p>
           </div>
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center space-x-2 mb-1">
               <Icon name="AlertTriangle" size={16} className="text-warning" />
               <span className="text-xs text-muted-foreground">Violations</span>
             </div>
-            <p className="text-base md:text-lg font-data font-semibold text-foreground">{exam?.totalViolations}</p>
+            <p className="text-base md:text-lg font-data font-semibold text-foreground">{totalViolations}</p>
           </div>
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center space-x-2 mb-1">
               <Icon name="Clock" size={16} className="text-primary" />
-              <span className="text-xs text-muted-foreground">Avg Time</span>
+              <span className="text-xs text-muted-foreground">Attempts</span>
             </div>
-            <p className="text-xs md:text-sm font-medium text-foreground">{exam?.averageTime}</p>
-          </div>
-        </div>
-
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs md:text-sm font-medium text-foreground">Grade Distribution</span>
-          </div>
-          <div className="space-y-2">
-            {getGradeDistribution()?.map((item) => (
-              <div key={item?.grade} className="flex items-center space-x-3">
-                <span className="text-xs font-medium text-foreground w-6">{item?.grade}</span>
-                <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
-                  <div
-                    className={`h-full ${item?.color} transition-smooth`}
-                    style={{ width: `${item?.percentage}%` }}
-                  ></div>
-                </div>
-                <span className="text-xs text-muted-foreground w-12 text-right">{item?.count} ({item?.percentage}%)</span>
-              </div>
-            ))}
+            <p className="text-xs md:text-sm font-medium text-foreground">{attemptCount}</p>
           </div>
         </div>
 
@@ -103,6 +89,7 @@ const CompletedExamCard = ({ exam }) => {
             size="sm"
             iconName="BarChart"
             iconPosition="left"
+            onClick={() => navigate(`/teacher-dashboard/completed/${encodeURIComponent(exam?.id)}/analytics`)}
             className="flex-1"
           >
             View Analytics
@@ -112,6 +99,7 @@ const CompletedExamCard = ({ exam }) => {
             size="sm"
             iconName="FileText"
             iconPosition="left"
+            onClick={() => navigate(`/teacher-dashboard/completed/${encodeURIComponent(exam?.id)}/violation-report`)}
             className="flex-1"
           >
             Violation Report
@@ -119,11 +107,14 @@ const CompletedExamCard = ({ exam }) => {
           <Button
             variant="default"
             size="sm"
-            iconName="Download"
+            iconName={alreadyReleased ? 'CheckCircle2' : 'Send'}
             iconPosition="left"
             className="flex-1"
+            disabled={alreadyReleased || releasing}
+            loading={releasing}
+            onClick={() => onReleaseResults?.(exam)}
           >
-            Export Results
+            {alreadyReleased ? 'Results Released' : 'Release Results'}
           </Button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Boolean, Integer
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.sql import func
 from ..database import Base
 import uuid
@@ -13,8 +13,9 @@ class ExamSession(Base):
     __tablename__ = "exam_sessions"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    exam_id = Column(String, nullable=False)
+    exam_id = Column(String, ForeignKey("exams.id"), nullable=False)
     student_id = Column(String, nullable=False)
+    attempt_id = Column(String, ForeignKey("exam_attempts.id"), nullable=True)
 
     status = Column(String, default=SessionStatus.CREATED)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

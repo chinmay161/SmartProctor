@@ -11,6 +11,9 @@ import QuestionBankManagement from './pages/question-bank-management';
 import ExamCreation from './pages/exam-creation';
 import StudentDashboard from './pages/student-dashboard';
 import TeacherDashboard from './pages/teacher-dashboard';
+import TeacherExamAnalyticsPage from './pages/teacher-exam-analytics';
+import TeacherAttemptReviewPage from './pages/teacher-attempt-review';
+import TeacherViolationReportPage from './pages/teacher-violation-report';
 import ExamPortal from './pages/exam-portal';
 
 const Routes = () => {
@@ -46,6 +49,18 @@ const Routes = () => {
           <Route
             path="/teacher-dashboard"
             element={<ProtectedRoute component={TeacherDashboard} requiredRoles={['teacher']} />}
+          />
+          <Route
+            path="/teacher-dashboard/completed/:examId/analytics"
+            element={<ProtectedRoute component={TeacherExamAnalyticsPage} requiredRoles={['teacher']} />}
+          />
+          <Route
+            path="/teacher-dashboard/completed/:examId/attempts/:attemptId/review"
+            element={<ProtectedRoute component={TeacherAttemptReviewPage} requiredRoles={['teacher']} />}
+          />
+          <Route
+            path="/teacher-dashboard/completed/:examId/violation-report"
+            element={<ProtectedRoute component={TeacherViolationReportPage} requiredRoles={['teacher']} />}
           />
           <Route
             path="/exam-creation"

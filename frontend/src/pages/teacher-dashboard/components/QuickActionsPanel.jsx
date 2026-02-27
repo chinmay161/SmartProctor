@@ -2,8 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../../../components/AppIcon';
 
-
-const QuickActionsPanel = () => {
+const QuickActionsPanel = ({ onCreateExam }) => {
   const navigate = useNavigate();
 
   const quickActions = [
@@ -13,7 +12,13 @@ const QuickActionsPanel = () => {
       description: 'Set up a new assessment',
       color: 'text-primary',
       bg: 'bg-primary/20',
-      action: () => navigate('/exam-creation')
+      action: () => {
+        if (onCreateExam) {
+          onCreateExam();
+          return;
+        }
+        navigate('/exam-creation');
+      }
     },
     {
       icon: 'Database',
@@ -64,39 +69,6 @@ const QuickActionsPanel = () => {
               </div>
             </button>
           ))}
-        </div>
-
-        <div className="mt-6 pt-6 border-t border-border">
-          <h3 className="text-sm font-heading font-semibold text-foreground mb-3">Recent Activity</h3>
-          <div className="space-y-3">
-            <div className="flex items-start space-x-3 p-3 bg-muted/30 rounded-lg">
-              <div className="w-8 h-8 bg-success/20 rounded-full flex items-center justify-center shrink-0">
-                <Icon name="CheckCircle" size={16} className="text-success" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs md:text-sm text-foreground font-medium">Physics Midterm graded</p>
-                <p className="text-xs text-muted-foreground mt-0.5">2 hours ago</p>
-              </div>
-            </div>
-            <div className="flex items-start space-x-3 p-3 bg-muted/30 rounded-lg">
-              <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center shrink-0">
-                <Icon name="FilePlus" size={16} className="text-primary" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs md:text-sm text-foreground font-medium">New exam created</p>
-                <p className="text-xs text-muted-foreground mt-0.5">5 hours ago</p>
-              </div>
-            </div>
-            <div className="flex items-start space-x-3 p-3 bg-muted/30 rounded-lg">
-              <div className="w-8 h-8 bg-accent/20 rounded-full flex items-center justify-center shrink-0">
-                <Icon name="Database" size={16} className="text-accent" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs md:text-sm text-foreground font-medium">Question bank updated</p>
-                <p className="text-xs text-muted-foreground mt-0.5">1 day ago</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

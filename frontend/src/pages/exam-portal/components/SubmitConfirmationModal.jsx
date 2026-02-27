@@ -7,6 +7,8 @@ const SubmitConfirmationModal = ({
   unansweredCount,
   reviewCount,
   totalQuestions,
+  submitting = false,
+  submitError = '',
   onConfirm,
   onCancel
 }) => {
@@ -72,6 +74,7 @@ const SubmitConfirmationModal = ({
               variant="outline"
               fullWidth
               onClick={onCancel}
+              disabled={submitting}
             >
               Go Back
             </Button>
@@ -80,10 +83,15 @@ const SubmitConfirmationModal = ({
               fullWidth
               iconName="CheckCircle"
               onClick={onConfirm}
+              loading={submitting}
+              disabled={submitting}
             >
               Submit Exam
             </Button>
           </div>
+          {submitError && (
+            <p className="mt-3 text-xs text-error">{submitError}</p>
+          )}
         </div>
       </div>
     </div>

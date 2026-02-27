@@ -1,14 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Icon from '../../../components/AppIcon';
 
-const ExamTimer = ({ duration, onTimeUp }) => {
-  const [timeRemaining, setTimeRemaining] = useState(duration * 60); // Convert minutes to seconds
+const getInitialSeconds = ({ initialSeconds, durationMinutes }) => {
+  if (Number.isFinite(initialSeconds) && initialSeconds >= 0) {
+    return Math.max(0, Math.floor(initialSeconds));
+  }
+  if (Number.isFinite(durationMinutes) && durationMinutes > 0) {
+    return Math.floor(durationMinutes * 60);
+  }
+  return 0;
+};
+
+const ExamTimer = ({ initialSeconds, durationMinutes, onTimeUp }) => {
+  const [timeRemaining, setTimeRemaining] = useState(
+    getInitialSeconds({ initialSeconds, durationMinutes })
+  );
+  const hasFiredTimeUpRef = useRef(false);
 
   useEffect(() => {
+    setTimeRemaining(getInitialSeconds({ initialSeconds, durationMinutes }));
+    hasFiredTimeUpRef.current = false;
+  }, [initialSeconds, durationMinutes]);
+
+  useEffect(() => {
+    if (hasFiredTimeUpRef.current) {
+      return undefined;
+    }
+
     const timer = setInterval(() => {
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
+          hasFiredTimeUpRef.current = true;
           onTimeUp?.();
           return 0;
         }
@@ -17,7 +40,7 @@ const ExamTimer = ({ duration, onTimeUp }) => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onTimeUp]);
+  }, [onTimeUp, initialSeconds, durationMinutes]);
 
   const hours = Math.floor(timeRemaining / 3600);
   const minutes = Math.floor((timeRemaining % 3600) / 60);
