@@ -1,262 +1,304 @@
-# **SmartProctor – Setup Guide**
+# SmartProctor – AI-Assisted Online Examination System
 
-SmartProctor is a secure, mobile-optimized examination platform designed to enforce academic integrity.  
-This document explains how one should set up the project, follow coding standards, and collaborate efficiently.
-
----
-
-# **1. Project Structure**
-```
-SmartProctor/
-│
-├── backend/                     # FastAPI app
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── core/                # Core configs
-│   │   │   ├── config.py        # DB, OAuth, CORS setup
-│   │   │   └── security.py      # JWT, password hashing
-│   │   ├── models/              # SQLAlchemy or Pydantic models
-│   │   │   ├── user.py
-│   │   │   ├── quiz.py
-│   │   │   └── response.py
-│   │   ├── schemas/             # Pydantic request/response schemas
-│   │   │   ├── user_schema.py
-│   │   │   ├── quiz_schema.py
-│   │   │   └── response_schema.py
-│   │   ├── routes/              # API endpoints
-│   │   │   ├── auth_routes.py
-│   │   │   ├── teacher_routes.py
-│   │   │   ├── student_routes.py
-│   │   │   └── exam_routes.py
-│   │   ├── services/            # Business logic
-│   │   │   ├── auth_service.py
-│   │   │   ├── quiz_service.py
-│   │   │   └── monitor_service.py
-│   │   ├── database/
-│   │   │   ├── connection.py    # MySQL/Mongo connection
-│   │   │   └── init_db.py
-│   │   └── utils/
-│   │       ├── anti_cheat.py    # tab-switch, focus tracking validation
-│   │       └── oauth_client.py  # OAuth (Google/Institutional)
-│   │
-│   ├── tests/
-│   │   ├── test_auth.py
-│   │   ├── test_exam.py
-│   │   └── test_quiz.py
-│   ├── requirements.txt
-│   ├── .env.example
-│   └── README.md
-│
-├── frontend/                    # React app
-│   ├── public/
-│   ├── src/
-│   │   ├── api/                 # Axios calls to backend
-│   │   │   ├── authApi.js
-│   │   │   ├── quizApi.js
-│   │   │   └── examApi.js
-│   │   ├── components/
-│   │   │   ├── common/          # Navbar, footer, protected route
-│   │   │   ├── teacher/         # Quiz builder, results
-│   │   │   └── student/         # Quiz interface, timer, warnings
-│   │   ├── context/             # Auth, Theme, Exam state
-│   │   │   ├── AuthContext.js
-│   │   │   └── ExamContext.js
-│   │   ├── hooks/               # Custom React hooks
-│   │   │   └── useAntiCheat.js
-│   │   ├── pages/
-│   │   │   ├── LoginPage.jsx
-│   │   │   ├── TeacherDashboard.jsx
-│   │   │   ├── StudentDashboard.jsx
-│   │   │   ├── QuizPage.jsx
-│   │   │   └── ResultPage.jsx
-│   │   ├── styles/
-│   │   │   └── global.css
-│   │   ├── App.js
-│   │   ├── main.jsx
-│   │   └── config.js            # Base URLs, constants
-│   ├── .env.example
-│   ├── package.json
-│   └── README.md
-│
-├── docs/                        # Project documentation
-│   ├── architecture.md
-│   ├── api_reference.md
-│   ├── setup_guide.md
-│   └── demo_plan.md
-│
-├── .gitignore
-├── .vscode/
-│   └── extensions.json
-└── README.md                    # Overview, setup, and usage
-
-```
+SmartProctor is a full-stack online examination platform designed to conduct, monitor, evaluate, and analyze exams securely.
+It integrates backend lifecycle enforcement, role-based access control, WebSocket proctoring, analytics dashboards, and automated grading workflows.
 
 ---
 
-# **2. Getting Started**
+# 🚀 Current Implementation Status
 
-## **2.1 Clone the Repository**
-```bash
-git clone https://github.com/chinmay161/SmartProctor.git
-cd SmartProctor
-```
+The system now supports a complete **exam lifecycle workflow**, including backend enforcement and frontend integration.
+
+
+## 1️⃣ Authentication & Role System
+
+### Implemented
+
+* JWT-based authentication
+* Role-based access control
+* Roles:
+
+  * Admin
+  * Teacher
+  * Student
+* Protected routes (frontend & backend)
+* Role-aware UI rendering
+* Session dependency injection
+* WebSocket authentication support
+
+### Architecture
+
+* Centralized role service
+* Permission layers:
+
+  * Exam permissions
+  * Student permissions
+  * Proctor permissions
+  * Attempt permissions
+* Session middleware for request validation
+
+
+## 2️⃣ Exam Lifecycle Management
+
+The exam system now follows a structured lifecycle.
+
+### Implemented States
+
+* Draft
+* Scheduled
+* Active
+* Completed
+* Graded
+
+### Backend Enforcement
+
+* Lifecycle rules defined at service layer
+* Attempt creation restrictions
+* Submission locking
+* Auto state transitions
+* Grading flow enforcement
+* Backward compatibility for older session logic
+
+### Database Layer
+
+* SQLAlchemy models
+* Alembic migration system (baseline + lifecycle + grading flow)
+* Proper relational mapping:
+
+  * Exam
+  * ExamSession
+  * ExamAttempt
+  * ExamAnswer
+  * ExamQuestion
+  * Question
+  * Violation
+
+
+
+## 3️⃣ Student Features
+
+### Dashboard
+
+* Upcoming exams
+* Exam history
+* Results overview
+
+### Exam Portal
+
+* Timer system
+* Question navigation
+* Secure submission confirmation
+* Lifecycle-based UI rendering
+
+### Attempt Handling
+
+* One active attempt enforcement
+* Submission tracking
+* Violation logging
+
+
+
+## 4️⃣ Teacher Features
+
+### Teacher Dashboard
+
+* Scheduled exams
+* Active exams
+* Completed exams
+
+### Attempt Review System
+
+* View student attempts
+* Access answer data
+* Review grading results
+
+### Exam Analytics
+
+* Performance metrics
+* Exam statistics
+* Aggregated data insights
+
+### Violation Reporting
+
+* Review violations per student
+* Monitor suspicious activity
+
+
+
+## 5️⃣ Proctoring Infrastructure
+
+* WebSocket signaling layer
+* Proctor-student channel separation
+* Violation recording
+* Snapshot tracking
+* Session manager
+
+
+
+## 6️⃣ Auto Submit Worker
+
+* Background worker for automatic submission
+* Handles expired attempts
+* Ensures integrity of timed exams
+
+
+
+## 7️⃣ Testing Coverage
+
+Backend tests implemented for:
+
+* Attempt service
+* Exam endpoints
+* Lifecycle enforcement
+* Backward compatibility
+* Session validation
+
+
+
+# 🧠 Architecture Overview
+
+## Backend
+
+* FastAPI
+* SQLAlchemy
+* Alembic migrations
+* JWT authentication
+* WebSocket manager
+* Service-layer architecture
+* Permission-based authorization
+
+## Frontend
+
+* React
+* Role-based routing
+* Protected routes
+* Modular UI components
+* Analytics pages
+* Teacher review interfaces
+
+## AI Worker (Initial Structure Added)
+
+* Inference pipeline
+* Head pose detection
+* Phone detection
+* Face tracking modules
+* Schema definitions for inference
+
+
+# 🔒 Security Design Principles
+
+* Strict lifecycle enforcement at backend
+* Server-controlled exam state transitions
+* Role-based permission guards
+* Authenticated WebSocket communication
+* Auto-submit for time enforcement
+* Violation tracking system
 
 ---
 
-## **2.2 Backend Setup (FastAPI)**
-```bash
+# 🔮 Planned Features
+
+The following features are planned for future implementation:
+
+
+
+## 1️⃣ Advanced AI Proctoring
+
+* Real-time cheating detection scoring
+* Multi-face detection
+* Suspicious movement alerts
+* Audio-based anomaly detection
+* Behavior confidence scoring
+
+
+
+## 2️⃣ Enhanced Analytics
+
+* Per-question performance analysis
+* Difficulty index calculation
+* Student ranking system
+* Exportable reports (PDF/CSV)
+* Time-per-question analysis
+
+
+
+## 3️⃣ Improved Security
+
+* Secure browser / kiosk mode integration
+* Screenshot detection research
+* Window resize detection tracking
+* Clipboard monitoring
+* Multi-device session blocking
+
+
+
+## 4️⃣ Exam Authoring Improvements
+
+* Rich text editor for questions
+* Image-based questions
+* Randomized question pools
+* Adaptive exams
+* Question tagging & filtering
+
+
+
+## 5️⃣ Infrastructure Enhancements
+
+* Redis for real-time session handling
+* Celery or task queue for background jobs
+* Dockerized deployment
+* CI/CD pipeline
+* Production database migration strategy
+
+
+
+## 6️⃣ Reporting & Compliance
+
+* Audit logs dashboard
+* Exportable violation reports
+* Institution-level analytics
+* Activity traceability
+
+
+
+# 🛠 Setup Instructions (Development)
+
+### Backend
+
+```
 cd backend
-python -m venv venv
-venv\Scripts\activate    # Windows
 pip install -r requirements.txt
-```
-
-Run backend:
-```bash
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Open in browser:
-```
-http://127.0.0.1:8000
-```
+### Frontend
 
-Expected response:
-```json
-{"message": "SmartProctor backend is running"}
 ```
-
----
-
-## **2.3 Frontend Setup (React + Vite)**
-```bash
-cd ../frontend
+cd frontend
 npm install
 npm run dev
 ```
 
-Open:
+
+
+# 🧪 Running Tests
+
 ```
-http://localhost:5173
-```
-
----
-
-# **3. Git Workflow (Important)**
-
-## **Branch Model**
-| Branch | Purpose |
-|--------|----------|
-| `main` | Fully stable, demo-ready code |
-| `dev` | Active development |
-| `feature/<name>` | Individual features |
-
----
-
-## **Daily Workflow**
-```bash
-git checkout dev
-git pull origin dev
-
-git checkout -b feature-login
-# Code...
-
-git add .
-git commit -m "Added login UI"
-git push origin feature-login
+pytest
 ```
 
-Then open a **Pull Request** into `dev`.  
-A teammate reviews it before merging.
 
-**Never commit directly to `main` or `dev`.**
 
----
+# 📌 Current Development Focus
 
-# **4. VS Code Setup**
+Active branch:
+`feature/exam-lifecycle`
 
-Create `.vscode/extensions.json`:
+Current priority:
 
-```json
-{
-  "recommendations": [
-    "ms-vsliveshare.vsliveshare",
-    "eamodio.gitlens",
-    "github.vscode-pull-request-github",
-    "esbenp.prettier-vscode",
-    "editorconfig.editorconfig",
-    "humao.rest-client",
-    "ms-python.python",
-    "ritwickdey.liveserver"
-  ]
-}
-```
-
----
-
-# **5. Coding Standards**
-
-### **General**
-- Prettier must format everything.
-- Use `.env` files for secrets (never push to GitHub).
-- Use clear naming conventions:
-  - Components → `PascalCase`
-  - Variables → `camelCase`
-
-### **Backend**
-- Routes go inside `/app/routes/`
-- Services inside `/app/services/`
-- Use Pydantic schemas
-
-### **Frontend**
-- Place API calls in `src/api/`
-- Use React Context for auth/exam state
-- Anti-cheat logic in custom hooks
-
----
-
-# **6. Collaboration Do’s & Don’ts**
-
-### **Do**
-- Pull latest work before starting.
-- Commit small and descriptive changes.
-- Use feature branches.
-- Review PRs for teammates.
-- Update documentation when APIs change.
-
-### **Don’t**
-- Push directly to `main` or `dev`.
-- Commit `venv/`, `node_modules/`, or `.env`.
-- Override someone else’s code without talking to them.
-- Ignore merge conflicts.
-
----
-
-# **7. Running Both Apps Together**
-
-Backend:
-```bash
-uvicorn app.main:app --reload
-```
-
-Frontend:
-```bash
-npm run dev
-```
-
-Ensure CORS is configured in FastAPI:
-
-```python
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
+* Stabilizing grading flow
+* Refining attempt review UI
+* Hardening lifecycle enforcement rules
 
 ---

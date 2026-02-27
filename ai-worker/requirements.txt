@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+opencv-python
+numpy
+mediapipe
+torch
+ultralytics
+pydantic
