@@ -8,6 +8,8 @@ except ImportError:
         return False
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 # Load backend/app/.env before importing routers/services that read env vars
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
@@ -19,9 +21,11 @@ from .models.question import Question
 from .models.exam_answer import ExamAnswer
 from .models.exam_attempt import ExamAttempt
 from .models.exam_question import ExamQuestion
-from .routes import exams, enrollments, sessions, proctoring
+from .routes import exams, enrollments, sessions, proctoring, ai
 from .routes import session_management
 from .routes import questions
+from .routes import analytics
+from .routes import ws_proctoring, ws_signaling
 from .middleware.session_middleware import (
     SessionTrackingMiddleware,
     SessionSecurityMiddleware,
@@ -64,6 +68,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount evidence static files
+os.makedirs("data/evidence", exist_ok=True)
+app.mount("/evidence", StaticFiles(directory="data/evidence"), name="evidence")
+
 # Add session middleware (order matters - process in reverse order of addition)
 # Security validation happens first
 app.add_middleware(SessionValidationMiddleware)
@@ -81,10 +89,14 @@ app.include_router(enrollments.router)
 app.include_router(sessions.router)
 app.include_router(attempts.router)
 app.include_router(proctoring.router)
+app.include_router(ai.router)
 app.include_router(violations.router)
+app.include_router(ws_proctoring.router)
+app.include_router(ws_signaling.router)
 # Include secure session management routes
 app.include_router(session_management.router)
 app.include_router(questions.router)
+app.include_router(analytics.router)
 from .routes import profile
 app.include_router(profile.router)
 

@@ -16,6 +16,28 @@ import SecuritySettings from './components/SecuritySettings';
 import AdvancedSettings from './components/AdvancedSettings';
 import ExamPreview from './components/ExamPreview';
 
+const supportedTimezones = new Set([
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'Europe/London',
+  'Asia/Kolkata',
+  'Asia/Tokyo',
+]);
+
+const getDefaultExamTimezone = () => {
+  try {
+    const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (supportedTimezones.has(browserTimezone)) {
+      return browserTimezone;
+    }
+  } catch {
+    // Fall back to the existing default if browser timezone detection is unavailable.
+  }
+  return 'America/New_York';
+};
+
 const defaultExamData = {
   title: '',
   course: '',
@@ -29,7 +51,7 @@ const defaultExamData = {
   startTime: '',
   endDate: '',
   endTime: '',
-  timezone: 'America/New_York',
+  timezone: getDefaultExamTimezone(),
   allowLateSubmission: false,
   gracePeriod: '',
   latePenalty: '',
@@ -39,6 +61,7 @@ const defaultExamData = {
   enableScreenRecording: true,
   browserLockdown: true,
   detectTabSwitch: true,
+  enableProctoredWatermark: false,
   detectMultipleFaces: true,
   detectNoFace: true,
   detectMobilePhone: false,
@@ -133,10 +156,79 @@ const zonedLocalDateTimeToUtcIso = (dateString, timeString, timeZone) => {
   return Number.isNaN(result.getTime()) ? null : result.toISOString();
 };
 
+const getMinimumEndByDuration = ({ startDate, startTime, duration, timezone }) => {
+  const durationMinutes = Number(duration);
+  if (!startDate || !startTime || !Number.isFinite(durationMinutes) || durationMinutes <= 0) return null;
+
+  try {
+    const startIso = zonedLocalDateTimeToUtcIso(startDate, startTime, timezone || defaultExamData.timezone);
+    if (!startIso) return null;
+
+    const minimumEnd = new Date(startIso);
+    minimumEnd.setUTCMinutes(minimumEnd.getUTCMinutes() + durationMinutes);
+
+    return {
+      endDate: formatDateForInputInTimeZone(minimumEnd.toISOString(), timezone || defaultExamData.timezone),
+      endTime: formatTimeForInputInTimeZone(minimumEnd.toISOString(), timezone || defaultExamData.timezone),
+      endIso: minimumEnd.toISOString(),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const isScheduleBefore = (leftDate, leftTime, rightDate, rightTime) => {
+  if (!leftDate || !leftTime || !rightDate || !rightTime) return false;
+  return `${leftDate}T${leftTime}` < `${rightDate}T${rightTime}`;
+};
+
+const getScheduleRangeError = ({ startDate, startTime, endDate, endTime, timezone, duration }) => {
+  if (!startDate || !startTime || !endDate || !endTime) return null;
+
+  const minimumEnd = getMinimumEndByDuration({ startDate, startTime, duration, timezone });
+  if (minimumEnd && isScheduleBefore(endDate, endTime, minimumEnd.endDate, minimumEnd.endTime)) {
+    const durationMinutes = Number(duration);
+    return `End time must be at least ${durationMinutes} minutes after start time`;
+  }
+
+  return null;
+};
+
+const normalizeScheduleFromDuration = (nextData, previousData) => {
+  const minimumEnd = getMinimumEndByDuration(nextData);
+  if (!minimumEnd) return nextData;
+
+  const startChanged =
+    previousData?.startDate !== nextData.startDate ||
+    previousData?.startTime !== nextData.startTime ||
+    previousData?.duration !== nextData.duration ||
+    previousData?.timezone !== nextData.timezone;
+
+  const endMissing = !nextData.endDate || !nextData.endTime;
+  const endTooEarly = isScheduleBefore(nextData.endDate, nextData.endTime, minimumEnd.endDate, minimumEnd.endTime);
+
+  if (startChanged || endMissing || endTooEarly) {
+    return {
+      ...nextData,
+      endDate: minimumEnd.endDate,
+      endTime: minimumEnd.endTime,
+    };
+  }
+
+  return nextData;
+};
+
+const scrollToTop = () => {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+};
+
 const ExamCreation = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const editExamId = searchParams.get('edit');
+  const templateExamId = searchParams.get('template');
+  const [currentExamId, setCurrentExamId] = useState(editExamId);
+  const [isTemplateMode, setIsTemplateMode] = useState(false);
 
   const [currentStep, setCurrentStep] = useState(0);
   const { logout } = useLogout();
@@ -147,6 +239,15 @@ const ExamCreation = () => {
   const [isLoadingExam, setIsLoadingExam] = useState(Boolean(editExamId));
 
   const [examData, setExamData] = useState(defaultExamData);
+  const minimumEnd = getMinimumEndByDuration(examData);
+
+  const handleExamDataChange = (nextData) => {
+    setExamData((previousData) => normalizeScheduleFromDuration(nextData, previousData));
+  };
+
+  useEffect(() => {
+    setCurrentExamId(editExamId);
+  }, [editExamId]);
 
   const steps = [
     { id: 'details', label: 'Exam Details', icon: 'FileText' },
@@ -172,12 +273,13 @@ const ExamCreation = () => {
     let mounted = true;
 
     const loadExamForEdit = async () => {
-      if (!editExamId) return;
+      const sourceExamId = currentExamId || templateExamId;
+      if (!sourceExamId) return;
 
       try {
         setIsLoadingExam(true);
         const token = await getToken();
-        const exam = await apiRequest(`/exams/${editExamId}`, 'GET', null, token);
+        const exam = await apiRequest(`/exams/${sourceExamId}`, 'GET', null, token);
 
         if (!mounted) return;
 
@@ -203,6 +305,7 @@ const ExamCreation = () => {
 
         setExamData(merged);
         setSelectedQuestions(Array.isArray(exam?.question_ids) ? exam.question_ids : []);
+        setIsTemplateMode(Boolean(exam?.is_template));
       } catch (err) {
         if (!mounted) return;
         setBanner({ type: 'error', text: err?.detail || err?.message || 'Failed to load exam for editing' });
@@ -213,54 +316,83 @@ const ExamCreation = () => {
 
     loadExamForEdit();
     return () => { mounted = false; };
-  }, [editExamId]);
+  }, [currentExamId, templateExamId]);
 
   const validateStep = (step) => {
-    const newErrors = {};
+    const newErrors = getValidationErrorsForStep(step);
+    setErrors(newErrors);
+    return Object.keys(newErrors)?.length === 0;
+  };
+
+  const getValidationErrorsForStep = (step) => {
+    const nextErrors = {};
 
     if (step === 0) {
-      if (!examData?.title) newErrors.title = 'Exam title is required';
-      if (!examData?.course) newErrors.course = 'Course selection is required';
-      if (!examData?.duration) newErrors.duration = 'Duration is required';
-      if (!examData?.maxAttempts) newErrors.maxAttempts = 'Maximum attempts is required';
-      if (!examData?.totalMarks) newErrors.totalMarks = 'Total marks is required';
-      if (!examData?.passingMarks) newErrors.passingMarks = 'Passing marks is required';
-      if (!examData?.difficulty) newErrors.difficulty = 'Difficulty level is required';
+      if (!examData?.title) nextErrors.title = 'Exam title is required';
+      if (!examData?.course) nextErrors.course = 'Course selection is required';
+      if (!examData?.duration) nextErrors.duration = 'Duration is required';
+      if (!examData?.maxAttempts) nextErrors.maxAttempts = 'Maximum attempts is required';
+      if (!examData?.totalMarks) nextErrors.totalMarks = 'Total marks is required';
+      if (!examData?.passingMarks) nextErrors.passingMarks = 'Passing marks is required';
+      if (!examData?.difficulty) nextErrors.difficulty = 'Difficulty level is required';
     }
 
     if (step === 1) {
-      if (!examData?.startDate) newErrors.startDate = 'Start date is required';
-      if (!examData?.startTime) newErrors.startTime = 'Start time is required';
-      if (!examData?.endDate) newErrors.endDate = 'End date is required';
-      if (!examData?.endTime) newErrors.endTime = 'End time is required';
-      if (!examData?.timezone) newErrors.timezone = 'Timezone is required';
+      if (!examData?.startDate) nextErrors.startDate = 'Start date is required';
+      if (!examData?.startTime) nextErrors.startTime = 'Start time is required';
+      if (!examData?.endDate) nextErrors.endDate = 'End date is required';
+      if (!examData?.endTime) nextErrors.endTime = 'End time is required';
+      if (!examData?.timezone) nextErrors.timezone = 'Timezone is required';
+
+      const scheduleError = getScheduleRangeError(examData);
+      if (scheduleError) {
+        nextErrors.endTime = scheduleError;
+      }
     }
 
     if (step === 2) {
       if (selectedQuestions?.length === 0) {
-        newErrors.questions = 'Please select at least one question';
+        nextErrors.questions = 'Please select at least one question';
       }
     }
 
     if (step === 3) {
-      if (!examData?.violationThreshold) newErrors.violationThreshold = 'Violation threshold is required';
-      if (!examData?.violationAction) newErrors.violationAction = 'Violation action is required';
+      if (!examData?.violationThreshold) nextErrors.violationThreshold = 'Violation threshold is required';
+      if (!examData?.violationAction) nextErrors.violationAction = 'Violation action is required';
     }
 
     if (step === 4) {
-      if (!examData?.gradingMethod) newErrors.gradingMethod = 'Grading method is required';
-      if (!examData?.resultVisibility) newErrors.resultVisibility = 'Result visibility is required';
+      if (!examData?.gradingMethod) nextErrors.gradingMethod = 'Grading method is required';
+      if (!examData?.resultVisibility) nextErrors.resultVisibility = 'Result visibility is required';
     }
 
-    setErrors(newErrors);
-    return Object.keys(newErrors)?.length === 0;
+    return nextErrors;
+  };
+
+  const validateAllSteps = () => {
+    const combinedErrors = {};
+    let firstInvalidStep = null;
+
+    for (let step = 0; step < steps.length - 1; step += 1) {
+      const stepErrors = getValidationErrorsForStep(step);
+      if (Object.keys(stepErrors).length > 0 && firstInvalidStep === null) {
+        firstInvalidStep = step;
+      }
+      Object.assign(combinedErrors, stepErrors);
+    }
+
+    setErrors(combinedErrors);
+    return {
+      isValid: firstInvalidStep === null,
+      firstInvalidStep,
+    };
   };
 
   const handleNext = () => {
     if (validateStep(currentStep)) {
       if (currentStep < steps?.length - 1) {
         setCurrentStep(currentStep + 1);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollToTop();
       }
     }
   };
@@ -268,24 +400,26 @@ const ExamCreation = () => {
   const handlePrevious = () => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollToTop();
     }
   };
 
   const handleStepClick = (stepIndex) => {
     if (stepIndex <= currentStep) {
       setCurrentStep(stepIndex);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      scrollToTop();
     }
   };
 
   const buildPayload = () => {
+    const isDraft = !examData.startDate || !examData.startTime || !examData.endDate || !examData.endTime;
     const duration = Number(examData.duration);
     const payload = {
       title: examData.title.trim(),
       description: examData.instructions?.trim() || null,
       duration_minutes: Number.isFinite(duration) && duration > 0 ? duration : null,
       question_ids: selectedQuestions,
+      is_draft: isDraft,
       wizard_config: {
         ...examData,
       },
@@ -309,18 +443,30 @@ const ExamCreation = () => {
     return payload;
   };
 
-  const saveExam = async ({ navigateAfterSave = false } = {}) => {
+  const saveExam = async ({ navigateAfterSave = false, isDraftOverride = null, isTemplateOverride = null } = {}) => {
     setBanner(null);
     setIsSubmitting(true);
 
     try {
       const token = await getToken();
       const payload = buildPayload();
+      if (typeof isDraftOverride === 'boolean') {
+        payload.is_draft = isDraftOverride;
+      }
+      if (typeof isTemplateOverride === 'boolean') {
+        payload.is_template = isTemplateOverride;
+      }
 
-      if (editExamId) {
-        await apiRequest(`/exams/${editExamId}`, 'PUT', payload, token);
+      const shouldUpdateExisting = Boolean(currentExamId) && !(isTemplateMode && payload.is_template !== true);
+
+      if (shouldUpdateExisting) {
+        await apiRequest(`/exams/${currentExamId}`, 'PUT', payload, token);
       } else {
-        await apiRequest('/exams/', 'POST', payload, token);
+        const createdExam = await apiRequest('/exams/', 'POST', payload, token);
+        if (createdExam?.id) {
+          setCurrentExamId(createdExam.id);
+          navigate(`/exam-creation?edit=${encodeURIComponent(createdExam.id)}`, { replace: true });
+        }
       }
 
       if (navigateAfterSave) {
@@ -328,9 +474,10 @@ const ExamCreation = () => {
         return;
       }
 
-      setBanner({ type: 'success', text: editExamId ? 'Exam updated successfully' : 'Exam draft saved successfully' });
+      setBanner({ type: 'success', text: currentExamId ? 'Exam updated successfully' : 'Exam draft saved successfully' });
     } catch (err) {
       setBanner({ type: 'error', text: err?.detail || err?.message || 'Failed to save exam' });
+      scrollToTop();
     } finally {
       setIsSubmitting(false);
     }
@@ -341,12 +488,28 @@ const ExamCreation = () => {
       setCurrentStep(0);
       return;
     }
-    await saveExam({ navigateAfterSave: false });
+    await saveExam({ navigateAfterSave: false, isDraftOverride: true, isTemplateOverride: false });
   };
 
   const handleCreateExam = async () => {
-    if (!validateStep(currentStep)) return;
-    await saveExam({ navigateAfterSave: true });
+    const { isValid, firstInvalidStep } = validateAllSteps();
+    if (!isValid) {
+      if (firstInvalidStep !== null) {
+        setCurrentStep(firstInvalidStep);
+      }
+      setBanner({ type: 'error', text: 'Please complete the required fields before creating the exam.' });
+      scrollToTop();
+      return;
+    }
+    await saveExam({ navigateAfterSave: true, isDraftOverride: false, isTemplateOverride: false });
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!validateStep(0)) {
+      setCurrentStep(0);
+      return;
+    }
+    await saveExam({ navigateAfterSave: true, isDraftOverride: true, isTemplateOverride: true });
   };
 
   const handleLogout = () => {
@@ -366,15 +529,29 @@ const ExamCreation = () => {
   const renderStepContent = () => {
     switch (currentStep) {
       case 0:
-        return <ExamDetailsForm formData={examData} onChange={setExamData} errors={errors} />;
+        return <ExamDetailsForm formData={examData} onChange={handleExamDataChange} errors={errors} />;
       case 1:
-        return <SchedulingConfiguration formData={examData} onChange={setExamData} errors={errors} />;
+        return (
+          <SchedulingConfiguration
+            formData={examData}
+            onChange={handleExamDataChange}
+            errors={errors}
+            minEndDate={minimumEnd?.endDate}
+            minEndTime={minimumEnd?.endTime}
+          />
+        );
       case 2:
-        return <QuestionBankPanel selectedQuestions={selectedQuestions} onQuestionsChange={setSelectedQuestions} />;
+        return (
+          <QuestionBankPanel
+            selectedQuestions={selectedQuestions}
+            onQuestionsChange={setSelectedQuestions}
+            targetTotalMarks={examData?.totalMarks}
+          />
+        );
       case 3:
-        return <SecuritySettings formData={examData} onChange={setExamData} errors={errors} />;
+        return <SecuritySettings formData={examData} onChange={handleExamDataChange} errors={errors} />;
       case 4:
-        return <AdvancedSettings formData={examData} onChange={setExamData} errors={errors} />;
+        return <AdvancedSettings formData={examData} onChange={handleExamDataChange} errors={errors} />;
       case 5:
         return <ExamPreview formData={examData} selectedQuestions={selectedQuestions} />;
       default:
@@ -396,7 +573,7 @@ const ExamCreation = () => {
               <span>Back to Dashboard</span>
             </button>
             <h1 className="text-3xl md:text-4xl font-heading font-semibold text-foreground mb-2">
-              {editExamId ? 'Edit Exam' : 'Create New Exam'}
+              {editExamId ? (isTemplateMode ? 'Edit Template' : 'Edit Exam') : templateExamId ? 'Create Exam From Template' : 'Create New Exam'}
             </h1>
             <p className="text-sm md:text-base text-muted-foreground">
               Configure your exam with comprehensive anti-cheating measures and automated grading
@@ -428,6 +605,9 @@ const ExamCreation = () => {
 
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-card border border-border rounded-lg p-6 shadow-md">
                 <div className="flex items-center space-x-3">
+                  <Button variant="secondary" onClick={handleSaveTemplate} iconName="Copy" iconPosition="left" loading={isSubmitting}>
+                    {currentExamId && isTemplateMode ? 'Update Template' : 'Save as Template'}
+                  </Button>
                   <Button variant="outline" onClick={handleSaveDraft} iconName="Save" iconPosition="left" loading={isSubmitting}>
                     Save Draft
                   </Button>
@@ -445,7 +625,7 @@ const ExamCreation = () => {
                     </Button>
                   ) : (
                     <Button onClick={handleCreateExam} variant="success" iconName="Check" iconPosition="left" loading={isSubmitting}>
-                      {editExamId ? 'Update Exam' : 'Create Exam'}
+                      {currentExamId && !isTemplateMode ? 'Update Exam' : 'Create Exam'}
                     </Button>
                   )}
                 </div>

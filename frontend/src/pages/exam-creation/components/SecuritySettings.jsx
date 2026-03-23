@@ -52,6 +52,12 @@ const SecuritySettings = ({ formData, onChange, errors }) => {
             checked={formData?.detectTabSwitch}
             onChange={(e) => handleInputChange('detectTabSwitch', e?.target?.checked)}
           />
+          <Checkbox
+            label="Enable proctored watermark"
+            description="Overlay a visible proctoring watermark across the student's exam screen"
+            checked={formData?.enableProctoredWatermark}
+            onChange={(e) => handleInputChange('enableProctoredWatermark', e?.target?.checked)}
+          />
         </CheckboxGroup>
 
         <div className="bg-muted/30 border border-border rounded-lg p-4 md:p-6">

@@ -2,9 +2,9 @@
 from pydantic import BaseModel
 from typing import Optional
 
-
 class SnapshotInferenceRequest(BaseModel):
-    snapshot_path: str
+    snapshot_path: Optional[str] = None
+    image_base64: Optional[str] = None
     session_id: str
     student_id: str
 

@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from datetime import timedelta, timezone, datetime
 
 from backend.app.database import Base, engine, ensure_schema_compatibility
 from backend.app.auth.dependencies import get_current_user
@@ -101,3 +102,23 @@ def test_student_available_and_single_attempt_constraints():
 
     restart = client.post(f"/sessions/{exam_id}/start")
     assert restart.status_code in (403, 409)
+
+
+def test_teacher_cannot_create_scheduled_exam_that_is_already_over():
+    current_user.update({"sub": "teacher-1", "roles": ["teacher"]})
+    now = datetime.now(timezone.utc)
+    start_time = (now - timedelta(hours=2)).isoformat().replace("+00:00", "Z")
+    end_time = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+
+    created = client.post(
+        "/exams/",
+        json={
+            "title": "Past Exam",
+            "duration_minutes": 30,
+            "start_time": start_time,
+            "end_time": end_time,
+        },
+    )
+
+    assert created.status_code == 400
+    assert "end_time must be in the future" in created.json()["detail"]

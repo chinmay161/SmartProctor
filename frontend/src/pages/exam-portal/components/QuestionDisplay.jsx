@@ -8,19 +8,19 @@ const QuestionDisplay = ({ question, answer, onAnswerChange }) => {
     <div className="space-y-3">
       {question?.options?.map((option) => (
         <label
-          key={option?.id}
+          key={option?.value || option?.id}
           className="flex items-start space-x-3 p-4 border border-border rounded-lg cursor-pointer hover:bg-accent/50 transition-colors"
         >
           <Input
             type="radio"
             name={`question-${question?.id}`}
-            value={option?.id}
-            checked={answer === option?.id}
+            value={option?.value || option?.id}
+            checked={answer === (option?.value || option?.id)}
             onChange={(e) => onAnswerChange(e?.target?.value)}
             className="mt-1"
           />
           <span className="flex-1 text-sm text-foreground">
-            <strong className="mr-2">{option?.id?.toUpperCase()}.</strong>
+            <strong className="mr-2">{(option?.label || option?.id)?.toUpperCase()}.</strong>
             {option?.text}
           </span>
         </label>

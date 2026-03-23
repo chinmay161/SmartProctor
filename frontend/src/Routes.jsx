@@ -10,11 +10,13 @@ import Signup from './pages/signup';
 import QuestionBankManagement from './pages/question-bank-management';
 import ExamCreation from './pages/exam-creation';
 import StudentDashboard from './pages/student-dashboard';
+import StudentResultReviewPage from './pages/student-result-review';
 import TeacherDashboard from './pages/teacher-dashboard';
 import TeacherExamAnalyticsPage from './pages/teacher-exam-analytics';
 import TeacherAttemptReviewPage from './pages/teacher-attempt-review';
 import TeacherViolationReportPage from './pages/teacher-violation-report';
 import ExamPortal from './pages/exam-portal';
+import TeacherMonitoringPage from './pages/exam-monitoring';
 
 const Routes = () => {
   return (
@@ -41,6 +43,10 @@ const Routes = () => {
             element={<ProtectedRoute component={StudentDashboard} requiredRoles={['student']} />}
           />
           <Route
+            path="/student-dashboard/results/:examId"
+            element={<ProtectedRoute component={StudentResultReviewPage} requiredRoles={['student']} />}
+          />
+          <Route
             path="/exam-portal"
             element={<ProtectedRoute component={ExamPortal} requiredRoles={['student']} />}
           />
@@ -62,6 +68,11 @@ const Routes = () => {
             path="/teacher-dashboard/completed/:examId/violation-report"
             element={<ProtectedRoute component={TeacherViolationReportPage} requiredRoles={['teacher']} />}
           />
+          <Route
+            path="/exam-monitoring/:examId"
+            element={<ProtectedRoute component={TeacherMonitoringPage} requiredRoles={['teacher']} />}
+          />
+
           <Route
             path="/exam-creation"
             element={<ProtectedRoute component={ExamCreation} requiredRoles={['teacher']} />}

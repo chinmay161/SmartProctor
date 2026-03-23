@@ -25,10 +25,16 @@ class Violation(Base):
 
     count = Column(Integer, nullable=False, default=1)
     details = Column(String, nullable=True)
+    reason = Column(String, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
 
-    # Avoid using the reserved class attribute name `metadata` with Declarative API.
     # Store in the DB column named 'metadata' but expose it on the instance as `metadata_`.
     metadata_ = Column('metadata', String, nullable=True)
+    evidence_files = Column(String, nullable=True) # JSON wrapper for array
+    
+    dispute_status = Column(String, default="NONE") # NONE, PENDING, ACCEPTED, REJECTED
+    dispute_reason = Column(String, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def __init__(self, *args, **kwargs):

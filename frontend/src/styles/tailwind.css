@@ -2,86 +2,136 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  /* ── Global Design Tokens (light mode / default) ── */
   :root {
-    --color-primary: #2563EB; /* blue-600 */
-    --color-primary-foreground: #FFFFFF; /* white */
-    --color-secondary: #64748B; /* slate-500 */
-    --color-secondary-foreground: #FFFFFF; /* white */
-    --color-accent: #F59E0B; /* amber-500 */
-    --color-accent-foreground: #1F2937; /* gray-800 */
-    --color-background: #FFFFFF; /* white */
-    --color-foreground: #0F172A; /* slate-900 */
-    --color-card: #F8FAFC; /* slate-50 */
-    --color-card-foreground: #1E293B; /* slate-800 */
-    --color-popover: #FFFFFF; /* white */
-    --color-popover-foreground: #0F172A; /* slate-900 */
-    --color-muted: #F1F5F9; /* slate-100 */
-    --color-muted-foreground: #64748B; /* slate-500 */
-    --color-border: #E2E8F0; /* slate-200 */
-    --color-input: #F1F5F9; /* slate-100 */
-    --color-ring: #2563EB; /* blue-600 */
-    --color-success: #059669; /* emerald-600 */
-    --color-success-foreground: #FFFFFF; /* white */
-    --color-warning: #D97706; /* amber-600 */
-    --color-warning-foreground: #FFFFFF; /* white */
-    --color-error: #DC2626; /* red-600 */
-    --color-error-foreground: #FFFFFF; /* white */
-    --color-destructive: #DC2626; /* red-600 */
-    --color-destructive-foreground: #FFFFFF; /* white */
+    /* Core Tailwind semantic colors */
+    --color-primary:              #3B82F6; /* electric blue */
+    --color-primary-foreground:   #FFFFFF;
+    --color-secondary:            #4B5C7E;
+    --color-secondary-foreground: #FFFFFF;
+    --color-accent:               #3B82F6;
+    --color-accent-foreground:    #0B0F1A;
+    --color-background:           #F4F7FF; /* light navy-white */
+    --color-foreground:           #0B0F1A; /* deep navy */
+    --color-card:                 #FFFFFF;
+    --color-card-foreground:      #0B0F1A;
+    --color-popover:              #FFFFFF;
+    --color-popover-foreground:   #0B0F1A;
+    --color-muted:                #EBF0FF;
+    --color-muted-foreground:     #4B5C7E;
+    --color-border:               #D1DCEF;
+    --color-input:                #EBF0FF;
+    --color-ring:                 #3B82F6;
+    --color-success:              #059669;
+    --color-success-foreground:   #FFFFFF;
+    --color-warning:              #D97706;
+    --color-warning-foreground:   #FFFFFF;
+    --color-error:                #DC2626;
+    --color-error-foreground:     #FFFFFF;
+    --color-destructive:          #DC2626;
+    --color-destructive-foreground: #FFFFFF;
 
-    --font-heading: 'Source Serif Pro', serif;
-    --font-body: 'IBM Plex Sans', sans-serif;
-    --font-caption: 'JetBrains Mono', monospace;
-    --font-data: 'Fira Code', monospace;
+    /* Typography */
+    --font-display:  'DM Serif Display', 'Source Serif Pro', Georgia, serif;
+    --font-heading:  'DM Serif Display', 'Source Serif Pro', serif;
+    --font-body:     'DM Sans', 'IBM Plex Sans', system-ui, sans-serif;
+    --font-caption:  'JetBrains Mono', monospace;
+    --font-data:     'Fira Code', 'JetBrains Mono', monospace;
 
+    /* Border radius */
     --radius-sm: 6px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
     --radius-xl: 20px;
 
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
-    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
-    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.15);
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(11,15,26,0.06), 0 1px 2px rgba(11,15,26,0.04);
+    --shadow-md: 0 4px 12px rgba(11,15,26,0.08), 0 2px 4px rgba(11,15,26,0.04);
+    --shadow-lg: 0 10px 28px rgba(11,15,26,0.10), 0 4px 8px rgba(11,15,26,0.06);
+    --shadow-xl: 0 20px 48px rgba(11,15,26,0.14), 0 8px 16px rgba(11,15,26,0.08);
+
+    /* Global accents — shared with auth pages */
+    --sp-accent:       #3B82F6;
+    --sp-accent-hover: #2563EB;
+    --sp-accent-glow:  rgba(59,130,246,0.14);
+    --sp-surface:      #FFFFFF;
+    --sp-surface-2:    #EBF0FF;
+    --sp-bg:           #F4F7FF;
+    --sp-border:       #D1DCEF;
+    --sp-text:         #0B0F1A;
+    --sp-text-muted:   #4B5C7E;
+    --sp-success:      #059669;
+    --sp-warning:      #D97706;
+    --sp-error:        #DC2626;
+
+    /* Auth pages aliases (kept for backwards-compat) */
+    --auth-bg:             var(--sp-bg);
+    --auth-surface:        var(--sp-surface);
+    --auth-surface-2:      var(--sp-surface-2);
+    --auth-border:         var(--sp-border);
+    --auth-accent:         var(--sp-accent);
+    --auth-accent-hover:   var(--sp-accent-hover);
+    --auth-accent-glow:    var(--sp-accent-glow);
+    --auth-text-primary:   var(--sp-text);
+    --auth-text-secondary: var(--sp-text-muted);
+    --auth-success:        var(--sp-success);
+    --auth-error:          var(--sp-error);
+    --auth-font-display:   var(--font-display);
+    --auth-font-body:      var(--font-body);
   }
 
+  /* ── Dark mode overrides ── */
   .dark {
-    --color-primary: #3B82F6; /* blue-500 */
-    --color-primary-foreground: #FFFFFF; /* white */
-    --color-secondary: #64748B; /* slate-500 */
-    --color-secondary-foreground: #FFFFFF; /* white */
-    --color-accent: #FBBF24; /* amber-400 */
-    --color-accent-foreground: #111827; /* gray-900 */
-    --color-background: #020617; /* slate-950 */
-    --color-foreground: #F1F5F9; /* slate-100 */
-    --color-card: #0F172A; /* slate-900 */
-    --color-card-foreground: #E2E8F0; /* slate-200 */
-    --color-popover: #0F172A; /* slate-900 */
-    --color-popover-foreground: #E2E8F0; /* slate-200 */
-    --color-muted: #1E293B; /* slate-800 */
-    --color-muted-foreground: #94A3B8; /* slate-400 */
-    --color-border: #1E293B; /* slate-800 */
-    --color-input: #1E293B; /* slate-800 */
-    --color-ring: #3B82F6; /* blue-500 */
-    --color-success: #10B981; /* emerald-500 */
-    --color-success-foreground: #FFFFFF; /* white */
-    --color-warning: #F59E0B; /* amber-500 */
-    --color-warning-foreground: #FFFFFF; /* white */
-    --color-error: #EF4444; /* red-500 */
-    --color-error-foreground: #FFFFFF; /* white */
-    --color-destructive: #EF4444; /* red-500 */
-    --color-destructive-foreground: #FFFFFF; /* white */
+    --color-primary:              #3B82F6;
+    --color-primary-foreground:   #FFFFFF;
+    --color-secondary:            #8B9BBE;
+    --color-secondary-foreground: #FFFFFF;
+    --color-accent:               #3B82F6;
+    --color-accent-foreground:    #F0F4FF;
+    --color-background:           #0B0F1A; /* deep navy-black */
+    --color-foreground:           #F0F4FF;
+    --color-card:                 #111827; /* card surface */
+    --color-card-foreground:      #F0F4FF;
+    --color-popover:              #111827;
+    --color-popover-foreground:   #F0F4FF;
+    --color-muted:                #1A2236; /* elevated panel */
+    --color-muted-foreground:     #8B9BBE;
+    --color-border:               #1E2D45;
+    --color-input:                #1A2236;
+    --color-ring:                 #3B82F6;
+    --color-success:              #10B981;
+    --color-success-foreground:   #FFFFFF;
+    --color-warning:              #F59E0B;
+    --color-warning-foreground:   #FFFFFF;
+    --color-error:                #EF4444;
+    --color-error-foreground:     #FFFFFF;
+    --color-destructive:          #EF4444;
+    --color-destructive-foreground: #FFFFFF;
 
-    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.25);
-    --shadow-md: 0 6px 12px rgba(0, 0, 0, 0.3);
-    --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.35);
-    --shadow-xl: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 2px 4px rgba(0,0,0,0.30);
+    --shadow-md: 0 6px 16px rgba(0,0,0,0.36);
+    --shadow-lg: 0 14px 32px rgba(0,0,0,0.42);
+    --shadow-xl: 0 28px 56px rgba(0,0,0,0.50);
+
+    --sp-accent:       #3B82F6;
+    --sp-accent-hover: #2563EB;
+    --sp-accent-glow:  rgba(59,130,246,0.18);
+    --sp-surface:      #111827;
+    --sp-surface-2:    #1A2236;
+    --sp-bg:           #0B0F1A;
+    --sp-border:       #1E2D45;
+    --sp-text:         #F0F4FF;
+    --sp-text-muted:   #8B9BBE;
+    --sp-success:      #10B981;
+    --sp-warning:      #F59E0B;
+    --sp-error:        #EF4444;
   }
 
   * {
@@ -172,3 +222,197 @@
     scroll-padding-top: 80px;
   }
 }
+
+/* ============================================================
+   SmartProctor Global Animations & Component Utilities
+   Auth tokens are now in :root / .dark above.
+   ============================================================ */
+
+/* ---------- Keyframes ---------- */
+
+@keyframes auth-shake {
+  0%, 100% { transform: translateX(0); }
+  15%       { transform: translateX(-6px); }
+  30%       { transform: translateX(6px); }
+  45%       { transform: translateX(-4px); }
+  60%       { transform: translateX(4px); }
+  75%       { transform: translateX(-2px); }
+  90%       { transform: translateX(2px); }
+}
+
+@keyframes auth-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes auth-scan {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 100vh; }
+}
+
+@keyframes auth-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--auth-accent-glow); }
+  50%       { box-shadow: 0 0 24px 4px var(--auth-accent-glow); }
+}
+
+@keyframes auth-grid-drift {
+  0%   { background-position: 0 0; }
+  100% { background-position: 40px 40px; }
+}
+
+/* ---------- Utilities ---------- */
+
+.auth-shake {
+  animation: auth-shake 0.55s cubic-bezier(.36,.07,.19,.97) forwards;
+}
+
+.auth-fade-up {
+  animation: auth-fade-up 0.5s ease-out both;
+}
+
+.auth-fade-up-1  { animation: auth-fade-up 0.5s 0.05s ease-out both; }
+.auth-fade-up-2  { animation: auth-fade-up 0.5s 0.15s ease-out both; }
+.auth-fade-up-3  { animation: auth-fade-up 0.5s 0.25s ease-out both; }
+.auth-fade-up-4  { animation: auth-fade-up 0.5s 0.35s ease-out both; }
+.auth-fade-up-5  { animation: auth-fade-up 0.5s 0.45s ease-out both; }
+.auth-fade-up-6  { animation: auth-fade-up 0.5s 0.55s ease-out both; }
+
+/* Animated scanline / grid background for the left brand panel */
+.auth-brand-bg {
+  background-color: var(--auth-bg);
+  background-image:
+    linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  animation: auth-grid-drift 8s linear infinite;
+}
+
+/* Field focus glow */
+.auth-input-wrap:focus-within .auth-input {
+  border-color: var(--auth-accent);
+  background-color: rgba(59,130,246,0.04);
+  box-shadow: inset 3px 0 0 var(--auth-accent);
+}
+
+/* Primary CTA glow on hover */
+.auth-cta-btn:hover {
+  box-shadow: 0 0 22px 4px var(--auth-accent-glow);
+  transform: scale(1.012);
+}
+
+/* Password strength bar */
+.auth-strength-bar {
+  height: 4px;
+  border-radius: 2px;
+  transition: width 0.4s ease, background-color 0.4s ease;
+}
+
+/* ── Global stagger fade-up classes (dashboard + any page) ── */
+@keyframes sp-fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sp-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sp-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes sp-count-up {
+  from { opacity: 0; transform: translateY(8px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.sp-fade-up    { animation: sp-fade-up  0.45s ease-out both; }
+.sp-fade-in    { animation: sp-fade-in  0.4s  ease-out both; }
+.sp-scale-in   { animation: sp-scale-in 0.4s  ease-out both; }
+.sp-count-up   { animation: sp-count-up 0.5s  ease-out both; }
+
+.sp-fade-up-1  { animation: sp-fade-up 0.45s 0.05s ease-out both; }
+.sp-fade-up-2  { animation: sp-fade-up 0.45s 0.12s ease-out both; }
+.sp-fade-up-3  { animation: sp-fade-up 0.45s 0.19s ease-out both; }
+.sp-fade-up-4  { animation: sp-fade-up 0.45s 0.26s ease-out both; }
+.sp-fade-up-5  { animation: sp-fade-up 0.45s 0.33s ease-out both; }
+.sp-fade-up-6  { animation: sp-fade-up 0.45s 0.40s ease-out both; }
+.sp-fade-up-7  { animation: sp-fade-up 0.45s 0.47s ease-out both; }
+.sp-fade-up-8  { animation: sp-fade-up 0.45s 0.54s ease-out both; }
+
+/* Glassmorphism panel — used for dashboard header & cards */
+.sp-glass {
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(59,130,246,0.12);
+}
+.dark .sp-glass {
+  background: rgba(17,24,39,0.72);
+  border: 1px solid rgba(59,130,246,0.1);
+}
+
+/* Card hover lift */
+.sp-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.2s, box-shadow 0.25s, transform 0.2s;
+}
+.sp-card:hover {
+  border-color: rgba(59,130,246,0.3);
+  box-shadow: 0 8px 28px var(--sp-accent-glow), var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Accent glow badge */
+.sp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--font-body);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* Pulsing dot */
+@keyframes sp-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.7); }
+}
+.sp-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  animation: sp-pulse-dot 1.8s ease-in-out infinite;
+}
+
+/* Navigation item hover glow */
+.sp-nav-item {
+  border-radius: var(--radius-md);
+  transition: background 0.2s, color 0.2s;
+}
+.sp-nav-item:hover, .sp-nav-item.active {
+  background: rgba(59,130,246,0.10);
+  color: var(--sp-accent);
+}
+
+/* Grid background for dashboard hero zone */
+.sp-grid-bg {
+  background-image:
+    linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+  background-size: 36px 36px;
+  animation: auth-grid-drift 10s linear infinite;
+}

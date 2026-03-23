@@ -5,6 +5,7 @@ import uuid
 
 
 class ExamStatus:
+    DRAFT = "DRAFT"
     SCHEDULED = "SCHEDULED"
     ACTIVE = "ACTIVE"
     ENDED = "ENDED"
@@ -18,7 +19,7 @@ class Exam(Base):
             name="ck_exams_time_window",
         ),
         CheckConstraint(
-            "status IN ('SCHEDULED', 'ACTIVE', 'ENDED')",
+            "status IN ('DRAFT', 'SCHEDULED', 'ACTIVE', 'ENDED')",
             name="ck_exams_status",
         ),
     )
@@ -31,7 +32,8 @@ class Exam(Base):
     wizard_config = Column(Text, nullable=True)  # JSON object for exam wizard settings
     start_time = Column(DateTime(timezone=True), nullable=True)
     end_time = Column(DateTime(timezone=True), nullable=True)
-    status = Column(String, nullable=False, default=ExamStatus.SCHEDULED)
+    status = Column(String, nullable=False, default=ExamStatus.DRAFT)
+    is_template = Column(Boolean, nullable=False, default=False)
     results_visible = Column(Boolean, nullable=False, default=False)
     created_by = Column(String, nullable=False)  # teacher user_id
     created_at = Column(DateTime(timezone=True), server_default=func.now())

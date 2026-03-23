@@ -20,8 +20,12 @@ const CreateQuestionModal = ({ onClose, onSave }) => {
     correctAnswer: '',
     acceptedAnswers: [''],
     explanation: '',
-    tags: []
+    tags: [],
+    tagsInput: '',
+    marks: 1,
   });
+  const [saveError, setSaveError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   const typeOptions = [
     { value: 'mcq', label: 'Multiple Choice' },
@@ -58,9 +62,25 @@ const CreateQuestionModal = ({ onClose, onSave }) => {
     setFormData({ ...formData, options: newOptions });
   };
 
-  const handleSave = () => {
-    onSave(formData);
-    onClose();
+  const handleSave = async () => {
+    setSaveError('');
+    setIsSaving(true);
+
+    try {
+      await onSave({
+        ...formData,
+        tags: String(formData.tagsInput || '')
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+        marks: Number(formData.marks) > 0 ? Number(formData.marks) : 1,
+      });
+      onClose();
+    } catch (error) {
+      setSaveError(error?.detail || error?.message || 'Failed to save question');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -180,6 +200,15 @@ const CreateQuestionModal = ({ onClose, onSave }) => {
           )}
 
           <Input
+            type="number"
+            label="Marks"
+            min="1"
+            required
+            value={formData?.marks}
+            onChange={(e) => setFormData({ ...formData, marks: e?.target?.value })}
+          />
+
+          <Input
             type="text"
             label="Explanation (Optional)"
             placeholder="Provide an explanation for the correct answer..."
@@ -192,14 +221,22 @@ const CreateQuestionModal = ({ onClose, onSave }) => {
             label="Tags (Optional)"
             placeholder="Enter tags separated by commas"
             description="e.g., algebra, equations, midterm"
+            value={formData?.tagsInput}
+            onChange={(e) => setFormData({ ...formData, tagsInput: e?.target?.value })}
           />
+
+          {saveError && (
+            <div className="rounded-md border border-error/30 bg-error/10 px-3 py-2 text-sm text-error">
+              {saveError}
+            </div>
+          )}
         </div>
 
         <div className="p-4 md:p-6 border-t border-border flex flex-col md:flex-row justify-end gap-3">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} disabled={isSaving}>
             Cancel
           </Button>
-          <Button variant="default" onClick={handleSave}>
+          <Button variant="default" onClick={handleSave} loading={isSaving}>
             Create Question
           </Button>
         </div>

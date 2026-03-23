@@ -43,5 +43,25 @@ def monitor_sessions(
         .all()
     )
 
+    from ..models.exam_attempt import ExamAttempt
+    result = []
+    for s in sessions:
+        base = {
+            "id": s.id,
+            "exam_id": s.exam_id,
+            "student_id": s.student_id,
+            "status": s.status,
+            "attempt_id": s.attempt_id,
+            "trust_score": 100,
+            "violation_count": 0,
+        }
+        if s.attempt_id:
+            attempt = db.query(ExamAttempt).filter_by(id=s.attempt_id).first()
+            if attempt:
+                base["trust_score"] = attempt.integrity_score
+                base["integrity_score"] = attempt.integrity_score
+                base["violation_count"] = attempt.violation_count
+        result.append(base)
+
     db.close()
-    return sessions
+    return result

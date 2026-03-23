@@ -14,6 +14,28 @@ const renderValue = (value) => {
   }
 };
 
+const renderAnswerValue = (question, value) => {
+  const base = renderValue(value);
+  const options = Array.isArray(question?.options) ? question.options : [];
+  const raw = typeof value === 'string' ? value.trim() : '';
+
+  if (!raw || options.length === 0) return base;
+
+  const normalized = raw.toLowerCase();
+  const indexedOption = options.find((option, index) => {
+    const optionId = String(option?.id ?? String.fromCharCode(97 + index)).trim().toLowerCase();
+    const optionText = String(option?.text ?? option ?? '').trim().toLowerCase();
+    return normalized === optionId || normalized === optionText;
+  });
+
+  if (!indexedOption) return base;
+
+  const optionIndex = options.indexOf(indexedOption);
+  const optionId = String(indexedOption?.id ?? String.fromCharCode(97 + optionIndex)).toUpperCase();
+  const optionText = String(indexedOption?.text ?? indexedOption ?? '').trim();
+  return optionText ? `${optionId}. ${optionText}` : optionId;
+};
+
 const TeacherAttemptReviewPage = () => {
   const navigate = useNavigate();
   const { examId, attemptId } = useParams();
@@ -194,11 +216,16 @@ const TeacherAttemptReviewPage = () => {
 
                   <div className="text-sm text-muted-foreground">Type: {question.question_type}</div>
                   <div className="text-sm text-foreground">
-                    <span className="font-medium">Student answer:</span> {renderValue(question.student_answer)}
+                    <span className="font-medium">Student answer:</span> {renderAnswerValue(question, question.student_answer)}
                   </div>
                   {isObjective && (
                     <div className="text-sm text-foreground">
-                      <span className="font-medium">Correct answer:</span> {renderValue(question.correct_answer)}
+                      <span className="font-medium">Correct answer:</span> {renderAnswerValue(question, question.correct_answer)}
+                    </div>
+                  )}
+                  {question.explanation && (
+                    <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-foreground">
+                      <span className="font-medium">Explanation:</span> {question.explanation}
                     </div>
                   )}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

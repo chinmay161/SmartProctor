@@ -1,0 +1,184 @@
+{
+  "questions": [
+    {
+      "id": "q101",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which data structure uses FIFO (First In First Out) principle?",
+      "options": [
+        { "text": "Stack", "isCorrect": false },
+        { "text": "Queue", "isCorrect": true },
+        { "text": "Tree", "isCorrect": false },
+        { "text": "Graph", "isCorrect": false }
+      ],
+      "correctAnswer": "Queue",
+      "acceptedAnswers": [],
+      "explanation": "Queue follows FIFO where the first inserted element is removed first.",
+      "tags": ["queue", "fifo"],
+      "marks": 1
+    },
+    {
+      "id": "q102",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which data structure uses LIFO (Last In First Out)?",
+      "options": [
+        { "text": "Queue", "isCorrect": false },
+        { "text": "Stack", "isCorrect": true },
+        { "text": "Array", "isCorrect": false },
+        { "text": "Tree", "isCorrect": false }
+      ],
+      "correctAnswer": "Stack",
+      "acceptedAnswers": [],
+      "explanation": "Stack follows LIFO where the last inserted element is removed first.",
+      "tags": ["stack", "lifo"],
+      "marks": 1
+    },
+    {
+      "id": "q103",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which data structure is used for hierarchical data?",
+      "options": [
+        { "text": "Array", "isCorrect": false },
+        { "text": "Queue", "isCorrect": false },
+        { "text": "Tree", "isCorrect": true },
+        { "text": "Stack", "isCorrect": false }
+      ],
+      "correctAnswer": "Tree",
+      "acceptedAnswers": [],
+      "explanation": "Tree represents hierarchical relationships between elements.",
+      "tags": ["tree", "hierarchy"],
+      "marks": 1
+    },
+    {
+      "id": "q104",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which data structure allows direct access using index?",
+      "options": [
+        { "text": "Linked List", "isCorrect": false },
+        { "text": "Array", "isCorrect": true },
+        { "text": "Stack", "isCorrect": false },
+        { "text": "Queue", "isCorrect": false }
+      ],
+      "correctAnswer": "Array",
+      "acceptedAnswers": [],
+      "explanation": "Arrays allow accessing elements directly using index.",
+      "tags": ["array", "indexing"],
+      "marks": 1
+    },
+    {
+      "id": "q105",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which data structure consists of nodes connected by pointers?",
+      "options": [
+        { "text": "Array", "isCorrect": false },
+        { "text": "Stack", "isCorrect": false },
+        { "text": "Linked List", "isCorrect": true },
+        { "text": "Queue", "isCorrect": false }
+      ],
+      "correctAnswer": "Linked List",
+      "acceptedAnswers": [],
+      "explanation": "Linked lists are made of nodes connected via pointers.",
+      "tags": ["linked list", "nodes"],
+      "marks": 1
+    },
+    {
+      "id": "q106",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "What is the top element of a stack called?",
+      "options": [
+        { "text": "Front", "isCorrect": false },
+        { "text": "Rear", "isCorrect": false },
+        { "text": "Top", "isCorrect": true },
+        { "text": "Middle", "isCorrect": false }
+      ],
+      "correctAnswer": "Top",
+      "acceptedAnswers": [],
+      "explanation": "The accessible end of a stack is called the top.",
+      "tags": ["stack", "basics"],
+      "marks": 1
+    },
+    {
+      "id": "q107",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which operation adds an element to a stack?",
+      "options": [
+        { "text": "Pop", "isCorrect": false },
+        { "text": "Push", "isCorrect": true },
+        { "text": "Delete", "isCorrect": false },
+        { "text": "Remove", "isCorrect": false }
+      ],
+      "correctAnswer": "Push",
+      "acceptedAnswers": [],
+      "explanation": "Push operation inserts an element into a stack.",
+      "tags": ["stack", "operations"],
+      "marks": 1
+    },
+    {
+      "id": "q108",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which operation removes an element from a queue?",
+      "options": [
+        { "text": "Enqueue", "isCorrect": false },
+        { "text": "Push", "isCorrect": false },
+        { "text": "Insert", "isCorrect": false },
+        { "text": "Dequeue", "isCorrect": true }
+      ],
+      "correctAnswer": "Dequeue",
+      "acceptedAnswers": [],
+      "explanation": "Dequeue removes an element from the front of a queue.",
+      "tags": ["queue", "operations"],
+      "marks": 1
+    },
+    {
+      "id": "q109",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which data structure is best for implementing recursion?",
+      "options": [
+        { "text": "Queue", "isCorrect": false },
+        { "text": "Stack", "isCorrect": true },
+        { "text": "Tree", "isCorrect": false },
+        { "text": "Graph", "isCorrect": false }
+      ],
+      "correctAnswer": "Stack",
+      "acceptedAnswers": [],
+      "explanation": "Recursion uses the call stack to store function calls.",
+      "tags": ["stack", "recursion"],
+      "marks": 1
+    },
+    {
+      "id": "q110",
+      "type": "mcq",
+      "subject": "data structures",
+      "difficulty": "easy",
+      "questionText": "Which data structure is used to represent graphs?",
+      "options": [
+        { "text": "Stack", "isCorrect": false },
+        { "text": "Queue", "isCorrect": false },
+        { "text": "Adjacency Matrix/List", "isCorrect": true },
+        { "text": "Array", "isCorrect": false }
+      ],
+      "correctAnswer": "Adjacency Matrix/List",
+      "acceptedAnswers": [],
+      "explanation": "Graphs are commonly represented using adjacency matrix or adjacency list.",
+      "tags": ["graph", "representation"],
+      "marks": 1
+    }
+  ]
+}

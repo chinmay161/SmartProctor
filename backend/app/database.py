@@ -1,7 +1,32 @@
+import os
+from pathlib import Path
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = "sqlite:///./smartproctor.db"
+
+def _resolve_database_url() -> str:
+    configured = os.getenv("DATABASE_URL", "sqlite:///./smartproctor.db")
+    sqlite_prefix = "sqlite:///"
+
+    if not configured.startswith(sqlite_prefix):
+        return configured
+
+    db_path = configured[len(sqlite_prefix):]
+    if not db_path or db_path == ":memory:":
+        return configured
+
+    candidate = Path(db_path)
+    if candidate.is_absolute():
+        return configured
+
+    # Keep SQLite file location stable regardless of the process launch directory.
+    backend_dir = Path(__file__).resolve().parent.parent
+    resolved = (backend_dir / candidate).resolve()
+    return f"{sqlite_prefix}{resolved.as_posix()}"
+
+
+DATABASE_URL = _resolve_database_url()
 
 engine = create_engine(
     DATABASE_URL,
@@ -42,6 +67,8 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE exams ADD COLUMN end_time DATETIME")
         if "status" not in exam_columns:
             statements.append("ALTER TABLE exams ADD COLUMN status VARCHAR NOT NULL DEFAULT 'SCHEDULED'")
+        if "is_template" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN is_template BOOLEAN NOT NULL DEFAULT 0")
         if "results_visible" not in exam_columns:
             statements.append("ALTER TABLE exams ADD COLUMN results_visible BOOLEAN NOT NULL DEFAULT 0")
 
@@ -91,6 +118,8 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE exam_answers ADD COLUMN is_overridden BOOLEAN NOT NULL DEFAULT 0")
         if "graded_at" not in exam_answer_columns:
             statements.append("ALTER TABLE exam_answers ADD COLUMN graded_at DATETIME")
+        if "last_saved_at" not in exam_answer_columns:
+            statements.append("ALTER TABLE exam_answers ADD COLUMN last_saved_at DATETIME DEFAULT CURRENT_TIMESTAMP")
 
     if "exam_attempts" in tables:
         attempt_columns = {column["name"] for column in inspector.get_columns("exam_attempts")}
@@ -102,6 +131,16 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE exam_attempts ADD COLUMN evaluated_at DATETIME")
         if "grading_version" not in attempt_columns:
             statements.append("ALTER TABLE exam_attempts ADD COLUMN grading_version INTEGER NOT NULL DEFAULT 0")
+        if "violation_count" not in attempt_columns:
+            statements.append("ALTER TABLE exam_attempts ADD COLUMN violation_count INTEGER NOT NULL DEFAULT 0")
+        if "is_flagged" not in attempt_columns:
+            statements.append("ALTER TABLE exam_attempts ADD COLUMN is_flagged BOOLEAN NOT NULL DEFAULT 0")
+        if "flagged_at" not in attempt_columns:
+            statements.append("ALTER TABLE exam_attempts ADD COLUMN flagged_at DATETIME")
+        if "flag_reason" not in attempt_columns:
+            statements.append("ALTER TABLE exam_attempts ADD COLUMN flag_reason VARCHAR")
+        if "integrity_score" not in attempt_columns:
+            statements.append("ALTER TABLE exam_attempts ADD COLUMN integrity_score INTEGER NOT NULL DEFAULT 100")
 
     if "violations" in tables:
         violation_columns = {column["name"] for column in inspector.get_columns("violations")}
@@ -109,6 +148,26 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE violations ADD COLUMN attempt_id VARCHAR")
         if "timestamp" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN timestamp DATETIME")
+        if "source" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN source VARCHAR")
+        if "count" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN count INTEGER NOT NULL DEFAULT 1")
+        if "details" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN details VARCHAR")
+        if "reason" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN reason VARCHAR")
+        if "duration_ms" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN duration_ms INTEGER")
+        if "metadata" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN metadata VARCHAR")
+        if "evidence_files" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN evidence_files VARCHAR")
+        if "dispute_status" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN dispute_status VARCHAR DEFAULT 'NONE'")
+        if "dispute_reason" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN dispute_reason VARCHAR")
+        if "created_at" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
 
     with engine.begin() as connection:
         for statement in statements:
@@ -123,6 +182,63 @@ def ensure_schema_compatibility() -> None:
                 )
             )
 
+        if "exams" in tables:
+            create_sql = connection.execute(
+                text("SELECT sql FROM sqlite_master WHERE type='table' AND name='exams'")
+            ).scalar()
+            create_sql_text = str(create_sql or "")
+            has_draft_status = "'DRAFT'" in create_sql_text
+            if not has_draft_status:
+                connection.execute(text("PRAGMA foreign_keys=OFF"))
+                connection.execute(text("ALTER TABLE exams RENAME TO exams_old"))
+                connection.execute(
+                    text(
+                        """
+                        CREATE TABLE exams (
+                            id VARCHAR NOT NULL PRIMARY KEY,
+                            title VARCHAR NOT NULL,
+                            description VARCHAR,
+                            duration_minutes INTEGER,
+                            question_ids TEXT,
+                            wizard_config TEXT,
+                            start_time DATETIME,
+                            end_time DATETIME,
+                            status VARCHAR NOT NULL DEFAULT 'DRAFT',
+                            is_template BOOLEAN NOT NULL DEFAULT 0,
+                            results_visible BOOLEAN NOT NULL DEFAULT 0,
+                            created_by VARCHAR NOT NULL,
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                            CONSTRAINT ck_exams_time_window CHECK (
+                                (start_time IS NULL AND end_time IS NULL)
+                                OR (start_time IS NOT NULL AND end_time IS NOT NULL AND end_time > start_time)
+                            ),
+                            CONSTRAINT ck_exams_status CHECK (status IN ('DRAFT', 'SCHEDULED', 'ACTIVE', 'ENDED'))
+                        )
+                        """
+                    )
+                )
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO exams (
+                            id, title, description, duration_minutes, question_ids, wizard_config,
+                            start_time, end_time, status, is_template, results_visible, created_by, created_at
+                        )
+                        SELECT
+                            id, title, description, duration_minutes, question_ids, wizard_config,
+                            start_time, end_time,
+                            CASE
+                                WHEN status IS NULL OR TRIM(status) = '' THEN 'SCHEDULED'
+                                ELSE status
+                            END,
+                            COALESCE(is_template, 0), COALESCE(results_visible, 0), created_by, created_at
+                        FROM exams_old
+                        """
+                    )
+                )
+                connection.execute(text("DROP TABLE exams_old"))
+                connection.execute(text("PRAGMA foreign_keys=ON"))
+
         # SQLite cannot alter CHECK constraints directly; rebuild table when status constraint is outdated.
         if "exam_attempts" in tables:
             create_sql = connection.execute(
@@ -130,7 +246,8 @@ def ensure_schema_compatibility() -> None:
             ).scalar()
             create_sql_text = str(create_sql or "")
             has_partial_status = "PARTIALLY_EVALUATED" in create_sql_text
-            if not has_partial_status:
+            has_single_attempt_unique = "uq_exam_attempt_student_exam" in create_sql_text or "UNIQUE (student_id, exam_id)" in create_sql_text
+            if not has_partial_status or has_single_attempt_unique:
                 connection.execute(text("PRAGMA foreign_keys=OFF"))
                 connection.execute(text("ALTER TABLE exam_attempts RENAME TO exam_attempts_old"))
                 connection.execute(
@@ -153,7 +270,7 @@ def ensure_schema_compatibility() -> None:
                             is_flagged BOOLEAN NOT NULL DEFAULT 0,
                             flagged_at DATETIME,
                             flag_reason VARCHAR,
-                            CONSTRAINT uq_exam_attempt_student_exam UNIQUE (student_id, exam_id),
+                            integrity_score INTEGER NOT NULL DEFAULT 100,
                             CONSTRAINT ck_exam_attempt_status CHECK (status IN ('IN_PROGRESS', 'SUBMITTED', 'PARTIALLY_EVALUATED', 'EVALUATED')),
                             CONSTRAINT ck_exam_attempt_submitted_after_start CHECK (submitted_at IS NULL OR submitted_at >= start_time),
                             FOREIGN KEY(exam_id) REFERENCES exams (id)
@@ -167,12 +284,13 @@ def ensure_schema_compatibility() -> None:
                         INSERT INTO exam_attempts (
                             id, exam_id, student_id, status, start_time, auto_submit_time, submitted_at,
                             score, auto_score_total, max_score_total, evaluated_at, grading_version,
-                            violation_count, is_flagged, flagged_at, flag_reason
+                            violation_count, is_flagged, flagged_at, flag_reason, integrity_score
                         )
                         SELECT
                             id, exam_id, student_id, status, start_time, auto_submit_time, submitted_at,
                             score, auto_score_total, max_score_total, evaluated_at, COALESCE(grading_version, 0),
-                            COALESCE(violation_count, 0), COALESCE(is_flagged, 0), flagged_at, flag_reason
+                            COALESCE(violation_count, 0), COALESCE(is_flagged, 0), flagged_at, flag_reason,
+                            COALESCE(integrity_score, 100)
                         FROM exam_attempts_old
                         """
                     )

@@ -106,21 +106,100 @@ def end_exam_session(db: Session, session_id: str, terminated_by: str = "system"
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Failed to end session: {e}")
 
 
-def auto_terminate_on_violation(db: Session, session_id: str, severity: str, increment: int = 1) -> ExamSession:
+def auto_terminate_on_violation(
+    db: Session,
+    session_id: str,
+    severity: str,
+    increment: int = 1,
+    violation_type: str | None = None,
+    evidence_files: str | None = None,
+    reason: str | None = None,
+    duration_ms: int | None = None,
+    confidence: float | None = None
+) -> ExamSession:
     """
-    Increment violation counts and auto-terminate if thresholds reached.
-
-    severity: one of 'severe'|'major'|'minor'
-    increment: how many violations to add (defaults to 1)
+    Increment violation counts, calculate integrity score, log to audit trail, and auto-terminate if thresholds reached.
     """
     session = db.query(ExamSession).filter_by(id=session_id).first()
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
 
+    # Calculate integrity score deduction
+    # Weights: Violations(50%), Conf(20%), Duration(20%), Repeated(10%)
+    base = 5
+    if violation_type:
+        vt = violation_type.upper()
+        if "NO_FACE" in vt: base = 30
+        elif "PHONE" in vt or "MULTIPLE_FACES" in vt: base = 50
+        elif "TAB" in vt or "WINDOW" in vt or "BLUR" in vt or "VISIBILITY" in vt: base = 15
+        elif "FULLSCREEN" in vt: base = 20
+        elif "SPOOF" in vt: base = 40
+        elif "LOOKING_AWAY" in vt: base = 20
+
+    # Violations: 50%
+    deduction = base * 0.5
+
+    # Confidence: 20%
+    conf = confidence if confidence is not None else 1.0
+    deduction += base * 0.2 * conf
+
+    # Duration: 20% (Max out at 10 seconds = 1.0)
+    dur_factor = min(1.0, (duration_ms or 0) / 10000.0)
+    deduction += base * 0.2 * dur_factor
+
+    # Repeated: 10%
+    rep_factor = min(1.0, (increment - 1) * 0.5) if increment > 1 else 0
+    deduction += base * 0.1 * rep_factor
+
+    deduction = int(round(deduction))
+
+    if session.attempt_id:
+        from ..models.exam_attempt import ExamAttempt
+        attempt = db.query(ExamAttempt).filter_by(id=session.attempt_id).first()
+        if attempt:
+            old_score = attempt.integrity_score
+            attempt.integrity_score = max(0, attempt.integrity_score - deduction)
+            attempt.violation_count = (attempt.violation_count or 0) + increment
+
+            # Log Integrity Score Change
+            if deduction > 0:
+                from ..models.audit import AuditLog
+                import json
+                db.add(AuditLog(
+                    session_id=session_id,
+                    event_type="INTEGRITY_SCORE_CHANGE",
+                    data=json.dumps({"old_score": old_score, "new_score": attempt.integrity_score, "deduction": deduction})
+                ))
+
     # Persist the violation event
+    v = Violation(
+        session_id=session_id,
+        student_id=session.student_id,
+        severity=severity,
+        count=increment,
+        type=violation_type,
+        evidence_files=evidence_files,
+        reason=reason,
+        duration_ms=duration_ms
+    )
+    db.add(v)
+
+    # Audit log the violation
+    from ..models.audit import AuditLog
+    import json
+    db.add(AuditLog(
+        session_id=session_id,
+        event_type="VIOLATION_TRIGGERED",
+        data=json.dumps({
+            "type": violation_type,
+            "confidence": confidence,
+            "severity": severity,
+            "reason": reason,
+            "deduction": deduction
+        })
+    ))
+
     try:
-        v = Violation(session_id=session_id, student_id=session.student_id, severity=severity, count=increment)
-        db.add(v)
         db.commit()
     except Exception:
         db.rollback()

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.sql import func
 from ..database import Base
 import uuid
@@ -14,7 +14,6 @@ class AttemptStatus:
 class ExamAttempt(Base):
     __tablename__ = "exam_attempts"
     __table_args__ = (
-        UniqueConstraint("student_id", "exam_id", name="uq_exam_attempt_student_exam"),
         CheckConstraint(
             "status IN ('IN_PROGRESS', 'SUBMITTED', 'PARTIALLY_EVALUATED', 'EVALUATED')",
             name="ck_exam_attempt_status",
@@ -41,3 +40,4 @@ class ExamAttempt(Base):
     is_flagged = Column(Boolean, nullable=False, default=False)
     flagged_at = Column(DateTime(timezone=True), nullable=True)
     flag_reason = Column(String, nullable=True)
+    integrity_score = Column(Integer, nullable=False, default=100)

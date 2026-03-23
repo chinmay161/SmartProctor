@@ -7,6 +7,7 @@ class ExamResultResponse(BaseModel):
     attempt_id: str
     status: str
     score: int | None
+    out_of: int
     submitted_at: datetime | None
     evaluated: bool
 

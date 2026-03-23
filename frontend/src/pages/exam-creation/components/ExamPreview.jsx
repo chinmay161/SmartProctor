@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 
 import Icon from '../../../components/AppIcon';
+import { apiRequest } from '../../../services/api';
 
 const ExamPreview = ({ formData, selectedQuestions }) => {
   const [activeTab, setActiveTab] = useState('overview');
 
   const [remoteQuestions, setRemoteQuestions] = useState(null);
+  const { getAccessTokenSilently } = useAuth0();
 
   // removed inline mockQuestions; backend will supply question details
 
@@ -15,6 +18,7 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
     if (formData?.enableScreenRecording) features?.push('Screen Recording');
     if (formData?.browserLockdown) features?.push('Browser Lockdown');
     if (formData?.detectTabSwitch) features?.push('Tab Switch Detection');
+    if (formData?.enableProctoredWatermark) features?.push('Proctored Watermark');
     return features;
   };
 
@@ -27,22 +31,32 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
   useEffect(() => {
     let mounted = true;
     const fetchSelected = async () => {
-      if (!selectedQuestions || selectedQuestions.length === 0) return;
+      if (!selectedQuestions || selectedQuestions.length === 0) {
+        setRemoteQuestions([]);
+        return;
+      }
       try {
-        // Attempt to fetch question details for selected IDs
-        const resp = await import('../../../services/httpClient').then(m => Promise.all(
-          selectedQuestions.map(id => m.apiGet(`/api/questions/${id}`))
-        ));
+        const audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+        const token = await getAccessTokenSilently({
+          authorizationParams: {
+            audience,
+          },
+        });
+
+        const resp = await Promise.all(
+          selectedQuestions.map((id) => apiRequest(`/api/questions/${id}`, 'GET', null, token))
+        );
         if (!mounted) return;
         setRemoteQuestions(resp);
       } catch (err) {
-        setRemoteQuestions(null);
+        if (!mounted) return;
+        setRemoteQuestions([]);
       }
     };
 
     fetchSelected();
     return () => { mounted = false; };
-  }, [selectedQuestions]);
+  }, [getAccessTokenSilently, selectedQuestions]);
 
   return (
     <div className="bg-card border border-border rounded-lg shadow-md overflow-hidden">
@@ -160,7 +174,7 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
                         {question?.options?.map((option, idx) => (
                           <div key={idx} className="flex items-center space-x-3 p-3 bg-card border border-border rounded-lg hover:border-primary/50 transition-smooth cursor-pointer">
                             <div className="w-5 h-5 border-2 border-muted-foreground rounded-full"></div>
-                            <span className="text-sm text-foreground">{option}</span>
+                            <span className="text-sm text-foreground">{option?.text || option}</span>
                           </div>
                         ))}
                       </div>

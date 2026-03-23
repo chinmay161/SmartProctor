@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-ExamStatusLiteral = Literal["SCHEDULED", "ACTIVE", "ENDED"]
+ExamStatusLiteral = Literal["DRAFT", "SCHEDULED", "ACTIVE", "ENDED"]
 
 
 class ExamCreateRequest(BaseModel):
@@ -14,6 +14,8 @@ class ExamCreateRequest(BaseModel):
     wizard_config: dict[str, Any] | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
+    is_draft: bool = False
+    is_template: bool = False
 
     @model_validator(mode="after")
     def validate_window(self):
@@ -32,6 +34,8 @@ class ExamUpdateRequest(BaseModel):
     wizard_config: dict[str, Any] | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
+    is_draft: bool | None = None
+    is_template: bool | None = None
 
     @model_validator(mode="after")
     def validate_window(self):
@@ -56,7 +60,8 @@ class ExamResponse(BaseModel):
     wizard_config: dict[str, Any] | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
-    status: ExamStatusLiteral = "SCHEDULED"
+    status: ExamStatusLiteral = "DRAFT"
+    is_template: bool = False
     results_visible: bool = False
     submitted_count: int | None = None
     attempt_count: int | None = None

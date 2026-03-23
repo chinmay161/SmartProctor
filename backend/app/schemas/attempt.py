@@ -45,6 +45,7 @@ class AttemptReviewQuestion(BaseModel):
     question_text: str
     question_type: str
     options: list[Any] = Field(default_factory=list)
+    explanation: str | None = None
     student_answer: Any = None
     correct_answer: Any = None
     is_objective: bool
