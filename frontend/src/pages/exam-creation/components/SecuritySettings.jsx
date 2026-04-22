@@ -115,6 +115,30 @@ const SecuritySettings = ({ formData, onChange, errors }) => {
             error={errors?.violationAction}
             description="Action to take when threshold is reached"
           />
+
+          <Input
+            label="Freeze Min (seconds)"
+            type="number"
+            placeholder="1"
+            value={formData?.violationFreezeMinSeconds}
+            onChange={(e) => handleInputChange('violationFreezeMinSeconds', e?.target?.value)}
+            error={errors?.violationFreezeMinSeconds}
+            min="1"
+            max="30"
+            description="Minimum screen lock duration per violation"
+          />
+
+          <Input
+            label="Freeze Max (seconds)"
+            type="number"
+            placeholder="5"
+            value={formData?.violationFreezeMaxSeconds}
+            onChange={(e) => handleInputChange('violationFreezeMaxSeconds', e?.target?.value)}
+            error={errors?.violationFreezeMaxSeconds}
+            min="1"
+            max="30"
+            description="Maximum screen lock duration per violation"
+          />
         </div>
 
         <CheckboxGroup label="Question Security">

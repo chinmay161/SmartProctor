@@ -160,9 +160,11 @@ const ExamPortal = () => {
   const [violations, setViolations] = useState([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [proctorWarning, setProctorWarning] = useState('');
+  const [violationLock, setViolationLock] = useState(null);
   const pendingSavesRef = useRef({});
   const pendingViolationsRef = useRef([]);
   const violationRetryTimeoutRef = useRef(null);
+  const violationLockTimeoutRef = useRef(null);
   const wsRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
   const securityMonitorRef = useRef(null);
@@ -186,6 +188,16 @@ const ExamPortal = () => {
   const disableCopyPasteEnabled = Boolean(securityConfig?.disableCopyPaste);
   const violationThreshold = Math.max(1, Number(securityConfig?.violationThreshold) || 6);
   const violationAction = String(securityConfig?.violationAction || 'warn').toLowerCase();
+  const configuredFreezeMin = Number(securityConfig?.violationFreezeMinSeconds);
+  const configuredFreezeMax = Number(securityConfig?.violationFreezeMaxSeconds);
+  const violationFreezeMinSeconds = Math.max(
+    1,
+    Number.isFinite(configuredFreezeMin) ? Math.floor(configuredFreezeMin) : 1
+  );
+  const violationFreezeMaxSeconds = Math.max(
+    violationFreezeMinSeconds,
+    Number.isFinite(configuredFreezeMax) ? Math.floor(configuredFreezeMax) : 5
+  );
   const watermarkUserLabel =
     auth0User?.email ||
     auth0User?.name ||
@@ -241,6 +253,27 @@ const ExamPortal = () => {
       setProctorWarning('Proctoring event sync is retrying. Keep the exam tab open.');
       return false;
     }
+  };
+
+  const triggerViolationLock = (message) => {
+    const durationSeconds = Math.floor(
+      Math.random() * (violationFreezeMaxSeconds - violationFreezeMinSeconds + 1)
+    ) + violationFreezeMinSeconds;
+    const durationMs = durationSeconds * 1000;
+    if (violationLockTimeoutRef.current) {
+      clearTimeout(violationLockTimeoutRef.current);
+      violationLockTimeoutRef.current = null;
+    }
+
+    setViolationLock({
+      message: message || 'Violation detected. Stay focused on the exam.',
+      durationMs,
+    });
+
+    violationLockTimeoutRef.current = setTimeout(() => {
+      setViolationLock(null);
+      violationLockTimeoutRef.current = null;
+    }, durationMs);
   };
 
   const flushPendingAnswers = async () => {
@@ -389,6 +422,10 @@ const ExamPortal = () => {
       if (violationRetryTimeoutRef.current) {
         clearTimeout(violationRetryTimeoutRef.current);
         violationRetryTimeoutRef.current = null;
+      }
+      if (violationLockTimeoutRef.current) {
+        clearTimeout(violationLockTimeoutRef.current);
+        violationLockTimeoutRef.current = null;
       }
     };
   }, []);
@@ -627,6 +664,7 @@ const ExamPortal = () => {
 
   const addViolation = (message, type = null, confidence = null) => {
     if (examEndedRef.current) return;
+    triggerViolationLock(message);
     const event_id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
     const newViolation = {
       id: event_id,
@@ -773,7 +811,7 @@ const ExamPortal = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="relative isolate min-h-screen bg-background flex flex-col">
       {watermarkEnabled && (
         <ProctoredWatermarkOverlay
           examTitle={sourceExam?.title}
@@ -861,8 +899,23 @@ const ExamPortal = () => {
         </div>
       )}
 
+      {violationLock && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="max-w-xl w-full bg-card border border-destructive/50 rounded-2xl shadow-2xl p-7 text-center">
+            <div className="w-16 h-16 mx-auto rounded-full bg-destructive/15 flex items-center justify-center mb-4">
+              <Icon name="AlertTriangle" size={30} className="text-destructive" />
+            </div>
+            <h2 className="text-xl font-semibold text-foreground mb-2">Security Violation Detected</h2>
+            <p className="text-base text-destructive font-medium mb-4">{violationLock.message}</p>
+            <p className="text-sm text-muted-foreground">
+              Exam controls are temporarily locked for {Math.max(1, Math.round(violationLock.durationMs / 1000))} seconds.
+            </p>
+          </div>
+        </div>
+      )}
 
-      <div className="flex-1 flex overflow-hidden">
+
+      <div className="relative z-10 flex-1 flex overflow-hidden">
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto p-4 md:p-6 lg:p-8">
             <div className="mb-6">

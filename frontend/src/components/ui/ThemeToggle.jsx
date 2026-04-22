@@ -6,7 +6,7 @@ import { useTheme } from '../../context/ThemeContext';
  * Uses global --sp-* design tokens so it works on any page in the app.
  * Persists preference via ThemeContext -> localStorage.
  */
-const ThemeToggle = () => {
+const ThemeToggle = ({ floating = true }) => {
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
 
@@ -16,10 +16,10 @@ const ThemeToggle = () => {
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
       style={{
-        position: 'fixed',
-        top: '14px',
-        right: '14px',
-        zIndex: 9999,
+        position: floating ? 'fixed' : 'relative',
+        top: floating ? '14px' : 'auto',
+        right: floating ? '14px' : 'auto',
+        zIndex: floating ? 9999 : 'auto',
         display: 'flex',
         alignItems: 'center',
         gap: '7px',

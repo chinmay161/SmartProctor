@@ -21,3 +21,10 @@ Thumbs.db
 
 # VSCode
 .vscode/
+
+# Generated AI context
+ai-context/
+.ctx
+
+#data
+backend/data/*

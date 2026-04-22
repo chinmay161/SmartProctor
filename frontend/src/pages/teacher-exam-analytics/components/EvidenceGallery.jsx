@@ -2,9 +2,41 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
+const getBackendOrigin = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return String(import.meta.env.VITE_API_URL).replace(/\/$/, '');
+  }
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://localhost:8000';
+  }
+  return window.location.origin.replace(/\/$/, '');
+};
+
+const normalizeEvidencePaths = (rawValue) => {
+  if (!rawValue) return [];
+  if (Array.isArray(rawValue)) {
+    return rawValue.filter(Boolean).map(String);
+  }
+
+  if (typeof rawValue === 'string') {
+    try {
+      const parsed = JSON.parse(rawValue);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(Boolean).map(String);
+      }
+    } catch {
+      // fall through to treat the value as a single path
+    }
+    return [rawValue];
+  }
+
+  return [String(rawValue)];
+};
+
 const EvidenceGallery = ({ evidenceData, onClose }) => {
   const [filterStudent, setFilterStudent] = useState('ALL');
   const [filterType, setFilterType] = useState('ALL');
+  const backendOrigin = getBackendOrigin();
   
   const allViolations = [];
   (evidenceData || []).forEach(student => {
@@ -76,19 +108,37 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
              </div>
            ) : (
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-               {filteredViolations.map(v => (
+               {filteredViolations.map(v => {
+                 const evidencePaths = normalizeEvidencePaths(v.evidence_file);
+                 const primaryEvidence = evidencePaths[0] || null;
+                 const imageSrc = primaryEvidence
+                   ? (primaryEvidence.startsWith('http://') || primaryEvidence.startsWith('https://')
+                      ? primaryEvidence
+                      : `${backendOrigin}${primaryEvidence}`)
+                   : null;
+
+                 return (
                  <div key={v.id} className="bg-card border border-border rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                    <div className="h-48 bg-black flex items-center justify-center relative group">
-                      <img 
-                        src={import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}${v.evidence_file}` : v.evidence_file} 
-                        alt={v.type}
-                        className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
-                        onError={(e) => e.target.style.display = 'none'}
-                      />
+                      {imageSrc ? (
+                        <img 
+                          src={imageSrc}
+                          alt={v.type}
+                          className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+                          onError={(e) => e.target.style.display = 'none'}
+                        />
+                      ) : (
+                        <div className="text-xs text-muted-foreground">No snapshot</div>
+                      )}
                       <div className="absolute top-2 right-2 flex gap-1">
                          <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded shadow-sm ${v.severity === 'severe' ? 'bg-destructive/90 text-white' : v.severity === 'major' ? 'bg-warning/90 text-white' : 'bg-primary/90 text-white'}`}>
                            {v.severity}
                          </span>
+                         {evidencePaths.length > 1 && (
+                           <span className="px-2 py-0.5 text-[10px] font-bold uppercase rounded shadow-sm bg-black/70 text-white">
+                             +{evidencePaths.length - 1}
+                           </span>
+                         )}
                       </div>
                    </div>
                    <div className="p-3">
@@ -99,7 +149,7 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
                      </div>
                    </div>
                  </div>
-               ))}
+               )})}
              </div>
            )}
         </div>

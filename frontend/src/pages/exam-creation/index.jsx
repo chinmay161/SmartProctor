@@ -68,6 +68,8 @@ const defaultExamData = {
   audioMonitoring: false,
   violationThreshold: '3',
   violationAction: 'warn',
+  violationFreezeMinSeconds: '1',
+  violationFreezeMaxSeconds: '5',
   randomizeQuestions: true,
   randomizeAnswers: true,
   disableCopyPaste: true,
@@ -359,6 +361,18 @@ const ExamCreation = () => {
     if (step === 3) {
       if (!examData?.violationThreshold) nextErrors.violationThreshold = 'Violation threshold is required';
       if (!examData?.violationAction) nextErrors.violationAction = 'Violation action is required';
+
+      const freezeMin = Number(examData?.violationFreezeMinSeconds);
+      const freezeMax = Number(examData?.violationFreezeMaxSeconds);
+      if (!examData?.violationFreezeMinSeconds || !Number.isFinite(freezeMin) || freezeMin < 1) {
+        nextErrors.violationFreezeMinSeconds = 'Minimum freeze must be at least 1 second';
+      }
+      if (!examData?.violationFreezeMaxSeconds || !Number.isFinite(freezeMax) || freezeMax < 1) {
+        nextErrors.violationFreezeMaxSeconds = 'Maximum freeze must be at least 1 second';
+      }
+      if (Number.isFinite(freezeMin) && Number.isFinite(freezeMax) && freezeMax < freezeMin) {
+        nextErrors.violationFreezeMaxSeconds = 'Maximum freeze must be greater than or equal to minimum freeze';
+      }
     }
 
     if (step === 4) {

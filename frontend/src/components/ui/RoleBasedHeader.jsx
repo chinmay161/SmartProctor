@@ -132,7 +132,7 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
   const isActivePath = (path) => location?.pathname === path;
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-1000 bg-card shadow-md transition-smooth">
+    <header className="fixed top-0 left-0 right-0 z-[1000] bg-card shadow-md transition-smooth">
       <div className="mx-auto px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center space-x-8">
@@ -172,7 +172,7 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
               </button>
 
               {isNotificationOpen && (
-                <div className="absolute right-0 mt-2 w-80 bg-popover border border-border rounded-lg shadow-lg overflow-hidden">
+                <div className="absolute right-0 mt-2 w-80 z-[1010] bg-popover border border-border rounded-lg shadow-lg overflow-hidden">
                   <div className="p-4 border-b border-border">
                     <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
                   </div>
@@ -211,7 +211,7 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
               )}
             </div>
 
-            <ThemeToggle />
+            <ThemeToggle floating={false} />
 
             <div className="relative" ref={profileMenuRef}>
               <button
@@ -229,7 +229,7 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
               </button>
 
               {isProfileMenuOpen && (
-                <div className="absolute right-0 mt-2 w-56 bg-popover border border-border rounded-lg shadow-lg overflow-hidden">
+                <div className="absolute right-0 mt-2 w-56 z-[1010] bg-popover border border-border rounded-lg shadow-lg overflow-hidden">
                   <div className="p-3 border-b border-border">
                     <p className="text-sm font-medium text-foreground">{displayName}</p>
                     <p className="text-xs text-muted-foreground capitalize">{displayRole} Account</p>

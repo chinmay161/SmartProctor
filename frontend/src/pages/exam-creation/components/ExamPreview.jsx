@@ -251,6 +251,14 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
                   <span className="text-sm font-semibold text-foreground capitalize">{formData?.violationAction || 'Not set'}</span>
                 </div>
                 <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Freeze Min Duration</span>
+                  <span className="text-sm font-semibold text-foreground">{formData?.violationFreezeMinSeconds || 1}s</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Freeze Max Duration</span>
+                  <span className="text-sm font-semibold text-foreground">{formData?.violationFreezeMaxSeconds || 5}s</span>
+                </div>
+                <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Question Randomization</span>
                   <span className="text-sm font-semibold text-foreground">{formData?.randomizeQuestions ? 'Enabled' : 'Disabled'}</span>
                 </div>

@@ -32,6 +32,7 @@ class TemporalEngine:
             vt = v["type"]
             if vt == "PHONE_DETECTED": score += 50
             elif vt == "NO_FACE": score += 30
+            elif vt == "MULTIPLE_FACES": score += 50
             elif vt == "LOOKING_AWAY": score += 20
             elif vt == "SPOOF_DETECTED": score += 40
         return score
@@ -102,7 +103,11 @@ class TemporalEngine:
         recent_poses = [h["raw"].get("head_pose", {}) for h in recent_poses_hist]
         pose_thresh = state["adaptive_thresholds"]["LOOKING_AWAY"]
         
-        away_frames = [p for p in recent_poses if p.get("looking_away", False) or p.get("confidence", 0) > pose_thresh]
+        # Count only explicit looking-away signals, then use confidence as a quality gate.
+        away_frames = [
+            p for p in recent_poses
+            if p.get("looking_away", False) and float(p.get("confidence", 0.0) or 0.0) >= pose_thresh
+        ]
         away_count = len(away_frames)
         if away_count >= 3:
             dominant_dir = away_frames[-1].get("direction", "away") if away_frames else "away"

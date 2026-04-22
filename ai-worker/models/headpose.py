@@ -82,13 +82,32 @@ def detect_headpose(image):
     cam_matrix = np.array([
         [focal_length, 0, img_w / 2],
         [0, focal_length, img_h / 2],
-        [0, 0, 1]
+    if len(face_2d) < 6 or len(face_3d) < 6:
+        return {
+            "looking_away": False,
+            "direction": "center",
+            "confidence": 0.0,
+            "blink": is_blinking,
+            "ear": float(avg_ear),
+            "nose_tip": nose_tip_norm
+        }
+
+    success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
+    if not success:
+        return {
+            "looking_away": False,
+            "direction": "center",
+            "confidence": 0.0,
+            "blink": is_blinking,
+            "ear": float(avg_ear),
+            "nose_tip": nose_tip_norm
+        }
     ])
     dist_matrix = np.zeros((4, 1), dtype=np.float64)
     
     success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
-    rmat, _ = cv2.Rodrigues(rot_vec)
-    angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
+    pitch = float(angles[0])
+    yaw = float(angles[1])
     
     pitch = angles[0] * 360
     yaw = angles[1] * 360
@@ -106,6 +125,9 @@ def detect_headpose(image):
     elif pitch < -10:
         direction = "down"
         looking_away = True
+
+    if looking_away:
+        confidence = min(0.99, 0.5 + (abs(pitch) + abs(yaw)) / 180.0)
     elif pitch > 20: 
         direction = "up"
         looking_away = True
