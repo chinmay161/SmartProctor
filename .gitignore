@@ -1,14 +1,23 @@
 # Python
 __pycache__/
 *.pyc
-.env
 venv/
+.env
+.env.*
+*.db
+*.sqlite3
 
 # Node
 node_modules/
+dist/
 build/
-.env.local
 
-# Others
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VSCode
 .vscode/
-__test__/
