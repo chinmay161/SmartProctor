@@ -1,83 +1,211 @@
 import React from 'react';
-import Icon from '../../../components/AppIcon';
 
-const FeatureHighlights = () => {
-  const features = [
-    {
-      icon: 'Video',
-      title: 'Live Proctoring',
-      description: 'Real-time webcam monitoring with AI-powered violation detection'
-    },
-    {
-      icon: 'Monitor',
-      title: 'Screen Recording',
-      description: 'Comprehensive screen capture throughout exam duration'
-    },
-    {
-      icon: 'Shield',
-      title: 'Browser Lockdown',
-      description: 'Prevent tab switching and unauthorized application access'
-    },
-    {
-      icon: 'BarChart3',
-      title: 'Analytics Dashboard',
-      description: 'Detailed reports and insights on exam performance'
-    }
-  ];
+const features = [
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+        <path d="M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
+        <path d="M2 10C2 10 5.5 3 12 3s10 7 10 7-3.5 7-10 7S2 10 2 10z" />
+      </svg>
+    ),
+    title: 'AI-Powered Proctoring',
+    description: 'Real-time gaze, face & behaviour analysis using computer vision',
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <path d="M8 21h8M12 17v4" />
+      </svg>
+    ),
+    title: 'Browser Lockdown',
+    description: 'Zero tab-switching, screenshot, or external app access during exams',
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <path d="M9 12l2 2 4-4" />
+      </svg>
+    ),
+    title: 'Tamper-Proof Reports',
+    description: 'Cryptographically signed violation logs with chain-of-custody',
+  },
+  {
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="w-5 h-5">
+        <path d="M3 3h18v18H3z" rx="2" />
+        <path d="M3 9h18M9 21V9" />
+      </svg>
+    ),
+    title: 'Institutional Dashboard',
+    description: 'Cohort-level analytics, live exam oversight & audit trails',
+  },
+];
 
-  return (
-    <div className="hidden lg:flex lg:flex-col lg:justify-center lg:w-1/2 bg-linear-to-br from-primary/10 via-accent/5 to-background p-8 lg:p-12">
-      <div className="max-w-xl">
-        <div className="flex items-center space-x-3 mb-6">
-          <div className="w-12 h-12 bg-primary/20 rounded-lg flex items-center justify-center">
-            <Icon name="GraduationCap" size={28} color="var(--color-primary)" />
-          </div>
-          <h2 className="text-2xl lg:text-3xl font-heading font-semibold text-foreground">
-            SmartProctor
-          </h2>
+const FeatureHighlights = () => (
+  <div
+    className="hidden lg:flex lg:flex-col lg:justify-between auth-brand-bg"
+    style={{
+      width: '40%',
+      minHeight: '100vh',
+      padding: '3rem 2.5rem',
+      position: 'relative',
+      overflow: 'hidden',
+    }}
+  >
+    {/* Radial glow accent */}
+    <div
+      style={{
+        position: 'absolute',
+        top: '-80px',
+        left: '-80px',
+        width: '360px',
+        height: '360px',
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%)',
+        pointerEvents: 'none',
+      }}
+    />
+    <div
+      style={{
+        position: 'absolute',
+        bottom: '-60px',
+        right: '-60px',
+        width: '280px',
+        height: '280px',
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)',
+        pointerEvents: 'none',
+      }}
+    />
+
+    {/* Top — Logo & tagline */}
+    <div className="auth-fade-up-1" style={{ position: 'relative', zIndex: 1 }}>
+      {/* Logo mark */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '2.5rem' }}>
+        <div
+          style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '10px',
+            background: 'rgba(59,130,246,0.15)',
+            border: '1px solid rgba(59,130,246,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--auth-accent)" strokeWidth="2" style={{ width: '22px', height: '22px' }}>
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+            <path d="M6 12v5c3 3 9 3 12 0v-5" />
+          </svg>
         </div>
+        <span style={{ fontFamily: 'var(--auth-font-display)', fontSize: '1.5rem', color: 'var(--auth-text-primary)', fontWeight: 600 }}>
+          SmartProctor
+        </span>
+      </div>
 
-        <h3 className="text-3xl lg:text-4xl font-heading font-semibold text-foreground mb-4">
-          Secure Online Exam Proctoring
-        </h3>
-        <p className="text-base lg:text-lg text-muted-foreground mb-8 lg:mb-12">
-          Ensure academic integrity with comprehensive anti-cheating measures and real-time monitoring for remote assessments.
+      {/* Hero text */}
+      <div style={{ marginBottom: '2.5rem' }}>
+        <h2
+          style={{
+            fontFamily: 'var(--auth-font-display)',
+            fontSize: 'clamp(1.75rem, 2.5vw, 2.25rem)',
+            color: 'var(--auth-text-primary)',
+            lineHeight: 1.2,
+            marginBottom: '0.75rem',
+            fontWeight: 400,
+          }}
+        >
+          Academic Integrity,<br />
+          <em style={{ color: 'var(--auth-accent)' }}>Redefined.</em>
+        </h2>
+        <p
+          style={{
+            fontFamily: 'var(--auth-font-body)',
+            fontSize: '0.9rem',
+            color: 'var(--auth-text-secondary)',
+            lineHeight: 1.7,
+            maxWidth: '340px',
+          }}
+        >
+          Enterprise-grade remote exam proctoring trusted by universities and certification bodies worldwide.
         </p>
+      </div>
 
-        <div className="space-y-6">
-          {features?.map((feature, index) => (
-            <div key={index} className="flex items-start space-x-4 p-4 bg-card/50 rounded-lg border border-border/50 transition-smooth hover:bg-card hover:shadow-md">
-              <div className={`w-12 h-12 bg-primary/20 rounded-lg flex items-center justify-center shrink-0`}>
-                <Icon name={feature?.icon} size={24} color="var(--color-primary)" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="text-base lg:text-lg font-medium text-foreground mb-1">
-                  {feature?.title}
-                </h4>
-                <p className="text-sm text-muted-foreground">
-                  {feature?.description}
-                </p>
-              </div>
+      {/* Feature list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {features.map((f, i) => (
+          <div
+            key={i}
+            className={`auth-fade-up-${i + 2}`}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '14px',
+              padding: '14px 16px',
+              borderRadius: '10px',
+              background: 'rgba(255,255,255,0.03)',
+              border: '1px solid rgba(59,130,246,0.1)',
+              transition: 'border-color 0.25s, background 0.25s',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.3)';
+              e.currentTarget.style.background = 'rgba(59,130,246,0.06)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = 'rgba(59,130,246,0.1)';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.03)';
+            }}
+          >
+            <div
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                background: 'rgba(59,130,246,0.14)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--auth-accent)',
+                flexShrink: 0,
+                marginTop: '1px',
+              }}
+            >
+              {f.icon}
             </div>
-          ))}
-        </div>
-
-        <div className="mt-8 lg:mt-12 p-6 bg-success/10 border border-success/20 rounded-lg">
-          <div className="flex items-start space-x-3">
-            <Icon name="Award" size={24} className="text-success shrink-0" />
             <div>
-              <h4 className="text-base font-medium text-foreground mb-2">
-                Trusted by Leading Institutions
-              </h4>
-              <p className="text-sm text-muted-foreground">
-                Join Harvard, MIT, Stanford, and 500+ other educational institutions using SmartProctor for secure remote assessments.
+              <p style={{ fontFamily: 'var(--auth-font-body)', fontWeight: 600, fontSize: '0.88rem', color: 'var(--auth-text-primary)', marginBottom: '3px' }}>
+                {f.title}
+              </p>
+              <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.8rem', color: 'var(--auth-text-secondary)', lineHeight: 1.5 }}>
+                {f.description}
               </p>
             </div>
           </div>
-        </div>
+        ))}
       </div>
     </div>
-  );
-};
+
+    {/* Bottom — Trust statement */}
+    <div
+      className="auth-fade-up-6"
+      style={{
+        position: 'relative',
+        zIndex: 1,
+        marginTop: '2rem',
+        paddingTop: '1.5rem',
+        borderTop: '1px solid rgba(59,130,246,0.1)',
+      }}
+    >
+      <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.78rem', color: 'var(--auth-text-secondary)', lineHeight: 1.6 }}>
+        🏛 Trusted by <strong style={{ color: 'var(--auth-text-primary)' }}>500+</strong> universities · 
+        &nbsp;<strong style={{ color: 'var(--auth-text-primary)' }}>2M+</strong> exams proctored
+      </p>
+    </div>
+  </div>
+);
 
 export default FeatureHighlights;
