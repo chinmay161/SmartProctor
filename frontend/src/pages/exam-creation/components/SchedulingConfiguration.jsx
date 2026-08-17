@@ -4,7 +4,7 @@ import Select from '../../../components/ui/Select';
 import { Checkbox } from '../../../components/ui/Checkbox';
 import Icon from '../../../components/AppIcon';
 
-const SchedulingConfiguration = ({ formData, onChange, errors }) => {
+const SchedulingConfiguration = ({ formData, onChange, errors, minEndDate, minEndTime }) => {
   const timezoneOptions = [
     { value: 'America/New_York', label: 'Eastern Time (ET)' },
     { value: 'America/Chicago', label: 'Central Time (CT)' },
@@ -14,10 +14,34 @@ const SchedulingConfiguration = ({ formData, onChange, errors }) => {
     { value: 'Asia/Kolkata', label: 'India Standard Time (IST)' },
     { value: 'Asia/Tokyo', label: 'Japan Standard Time (JST)' }
   ];
+  const timezoneAliases = {
+    'Asia/Calcutta': 'Asia/Kolkata',
+  };
+
+  const normalizeTimezone = (value) => timezoneAliases[value] || value;
 
   const handleInputChange = (field, value) => {
     onChange({ ...formData, [field]: value });
   };
+
+  const endTimeMin = formData?.endDate && minEndDate && formData.endDate === minEndDate
+    ? minEndTime || undefined
+    : undefined;
+  const browserTimezone = (() => {
+    try {
+      return normalizeTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+    } catch {
+      return '';
+    }
+  })();
+  const selectedTimezone = normalizeTimezone(formData?.timezone || '');
+  const selectedTimezoneLabel = timezoneOptions.find((option) => option.value === selectedTimezone)?.label || selectedTimezone;
+  const browserTimezoneLabel = timezoneOptions.find((option) => option.value === browserTimezone)?.label || browserTimezone;
+  const showTimezoneWarning = Boolean(
+    selectedTimezone &&
+    browserTimezone &&
+    selectedTimezone !== browserTimezone
+  );
 
   return (
     <div className="bg-card border border-border rounded-lg p-6 md:p-8 shadow-md">
@@ -62,7 +86,7 @@ const SchedulingConfiguration = ({ formData, onChange, errors }) => {
             onChange={(e) => handleInputChange('endDate', e?.target?.value)}
             error={errors?.endDate}
             required
-            min={formData?.startDate || new Date()?.toISOString()?.split('T')?.[0]}
+            min={minEndDate || formData?.startDate || new Date()?.toISOString()?.split('T')?.[0]}
             description="Date when exam window closes"
           />
 
@@ -73,7 +97,8 @@ const SchedulingConfiguration = ({ formData, onChange, errors }) => {
             onChange={(e) => handleInputChange('endTime', e?.target?.value)}
             error={errors?.endTime}
             required
-            description="Time when exam window closes"
+            min={endTimeMin}
+            description={minEndDate && minEndTime ? `Earliest end time is ${minEndDate} ${minEndTime}` : 'Time when exam window closes'}
           />
         </div>
 
@@ -88,6 +113,18 @@ const SchedulingConfiguration = ({ formData, onChange, errors }) => {
           searchable
           description="Timezone for exam scheduling"
         />
+
+        {showTimezoneWarning && (
+          <div className="bg-warning/10 border border-warning/30 rounded-lg p-4 flex items-start space-x-3">
+            <Icon name="AlertTriangle" size={18} className="text-warning shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm text-foreground font-medium mb-1">Timezone mismatch detected</p>
+              <p className="text-xs text-muted-foreground">
+                This exam is scheduled in {selectedTimezoneLabel}, but your browser is currently using {browserTimezoneLabel}. Double-check the start and end times before creating the exam.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="bg-muted/30 border border-border rounded-lg p-4 md:p-6">
           <h3 className="text-sm font-medium text-foreground mb-4">Availability Options</h3>
