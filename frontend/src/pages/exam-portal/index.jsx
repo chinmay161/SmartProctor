@@ -8,6 +8,7 @@ import ExamTimer from './components/ExamTimer';
 import SecurityMonitor from './components/SecurityMonitor';
 import QuestionDisplay from './components/QuestionDisplay';
 import SubmitConfirmationModal from './components/SubmitConfirmationModal';
+import ProctoredWatermarkOverlay from './components/ProctoredWatermarkOverlay';
 import { authAwareCall } from '../../services/authAwareCall';
 
 const fallbackExamData = {
@@ -70,12 +71,57 @@ const normalizeQuestionType = (rawType) => {
   return type || 'essay';
 };
 
+const hashString = (value) => {
+  let hash = 0;
+  const input = String(value || '');
+  for (let i = 0; i < input.length; i += 1) {
+    hash = ((hash << 5) - hash) + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+};
+
+const seededShuffle = (items, seedValue) => {
+  const result = [...items];
+  let seed = hashString(seedValue) || 1;
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    seed = (seed * 1664525 + 1013904223) % 4294967296;
+    const j = seed % (i + 1);
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+};
+
+const applyQuestionSecurity = (questions, config, seedBase) => {
+  if (!Array.isArray(questions)) return [];
+
+  const withOptionRules = questions.map((question, questionIndex) => {
+    if (question?.type !== 'multiple-choice' || !Array.isArray(question?.options)) return question;
+    const options = config?.randomizeAnswers
+      ? seededShuffle(question.options, `${seedBase}-${question.id || questionIndex}-answers`)
+      : [...question.options];
+    return {
+      ...question,
+      options: options.map((option, optionIndex) => ({
+        ...option,
+        label: String.fromCharCode(97 + optionIndex),
+      })),
+    };
+  });
+
+  return config?.randomizeQuestions
+    ? seededShuffle(withOptionRules, `${seedBase}-questions`)
+    : withOptionRules;
+};
+
 const mapApiQuestionToPortal = (question, fallbackIndex) => {
   const normalizedType = normalizeQuestionType(question?.type);
   const rawOptions = Array.isArray(question?.options) ? question.options : [];
   const options = normalizedType === 'multiple-choice'
     ? rawOptions.map((option, idx) => ({
-      id: String.fromCharCode(97 + idx),
+      id: `option-${idx + 1}`,
+      label: String.fromCharCode(97 + idx),
+      value: typeof option === 'string' ? option : option?.text || '',
       text: typeof option === 'string' ? option : option?.text || '',
     }))
     : undefined;
@@ -91,7 +137,11 @@ const mapApiQuestionToPortal = (question, fallbackIndex) => {
 
 const ExamPortal = () => {
   const navigate = useNavigate();
-  const { isAuthenticated: auth0Authenticated, getAccessTokenSilently } = useAuth0();
+  const {
+    isAuthenticated: auth0Authenticated,
+    getAccessTokenSilently,
+    user: auth0User,
+  } = useAuth0();
   const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [examDataState, setExamDataState] = useState(null);
@@ -109,11 +159,38 @@ const ExamPortal = () => {
   const [submitError, setSubmitError] = useState('');
   const [violations, setViolations] = useState([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [proctorWarning, setProctorWarning] = useState('');
   const pendingSavesRef = useRef({});
+  const pendingViolationsRef = useRef([]);
+  const violationRetryTimeoutRef = useRef(null);
+  const wsRef = useRef(null);
+  const heartbeatIntervalRef = useRef(null);
+  const securityMonitorRef = useRef(null);
+  const examEndedRef = useRef(false);
+  const examStatusRef = useRef('active');
+  const warningTimeoutRef = useRef(null);
+  const hasEnteredFullscreenRef = useRef(false);
+  const [examRules, setExamRules] = useState(null);
+
 
   const sourceExam = examDataState || fallbackExamData;
+  const securityConfig = examRules || sourceExam?.wizard_config || {};
   const currentQuestion = sourceExam?.questions?.[currentQuestionIndex];
   const totalQuestions = sourceExam?.questions?.length || 0;
+  const watermarkEnabled = Boolean(
+    securityConfig?.enableProctoredWatermark
+  );
+  const browserLockdownEnabled = Boolean(securityConfig?.browserLockdown);
+  const detectTabSwitchEnabled = Boolean(securityConfig?.detectTabSwitch);
+  const disableRightClickEnabled = Boolean(securityConfig?.disableRightClick);
+  const disableCopyPasteEnabled = Boolean(securityConfig?.disableCopyPaste);
+  const violationThreshold = Math.max(1, Number(securityConfig?.violationThreshold) || 6);
+  const violationAction = String(securityConfig?.violationAction || 'warn').toLowerCase();
+  const watermarkUserLabel =
+    auth0User?.email ||
+    auth0User?.name ||
+    auth0User?.nickname ||
+    'Student';
 
   const callApi = (path, method = 'GET', body = null, fallbackPaths = []) =>
     authAwareCall({
@@ -125,6 +202,46 @@ const ExamPortal = () => {
       auth0Audience,
       fallbackPaths,
     });
+
+  const requestSnapshot = async (activeSessionId, payload) => {
+    if (!activeSessionId) return null;
+    return callApi(
+      `/ai/sessions/${encodeURIComponent(activeSessionId)}/snapshot`,
+      'POST',
+      payload
+    );
+  };
+
+  const persistViolation = async (violationPayload) => {
+    if (!sessionId || !violationPayload) {
+      pendingViolationsRef.current.push(violationPayload);
+      return false;
+    }
+
+    try {
+      await callApi(
+        `/sessions/session/${encodeURIComponent(sessionId)}/violation`,
+        'POST',
+        violationPayload
+      );
+      return true;
+    } catch (error) {
+      pendingViolationsRef.current.push(violationPayload);
+      if (!violationRetryTimeoutRef.current) {
+        violationRetryTimeoutRef.current = setTimeout(async () => {
+          violationRetryTimeoutRef.current = null;
+          const queued = [...pendingViolationsRef.current];
+          pendingViolationsRef.current = [];
+          for (const item of queued) {
+            await persistViolation(item);
+          }
+        }, 3000);
+      }
+      console.error('Failed to persist violation event', error);
+      setProctorWarning('Proctoring event sync is retrying. Keep the exam tab open.');
+      return false;
+    }
+  };
 
   const flushPendingAnswers = async () => {
     if (!attemptId) return;
@@ -192,12 +309,24 @@ const ExamPortal = () => {
           }
 
           const hasLiveQuestions = liveQuestions.length > 0;
-          setExamDataState({
+          const rawExamData = {
             ...fallbackExamData,
             ...exam,
             duration: exam?.duration_minutes || fallbackExamData.duration,
             questions: hasLiveQuestions ? liveQuestions : fallbackExamData.questions,
-          });
+          };
+          if (exam?.wizard_config) {
+            try {
+              const cfg = typeof exam.wizard_config === 'string' ? JSON.parse(exam.wizard_config) : exam.wizard_config;
+              setExamRules(cfg);
+              rawExamData.questions = applyQuestionSecurity(
+                rawExamData.questions,
+                cfg,
+                attemptId || sessionIdFromUrl || examIdFromUrl
+              );
+            } catch(e) {}
+          }
+          setExamDataState(rawExamData);
 
           try {
             const resume = await callApi(`/attempts/${encodeURIComponent(examIdFromUrl)}/resume`, 'GET');
@@ -257,8 +386,123 @@ const ExamPortal = () => {
     fetchExam();
     return () => {
       mounted = false;
+      if (violationRetryTimeoutRef.current) {
+        clearTimeout(violationRetryTimeoutRef.current);
+        violationRetryTimeoutRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionId || pendingViolationsRef.current.length === 0) return;
+
+    const queued = [...pendingViolationsRef.current];
+    pendingViolationsRef.current = [];
+    void (async () => {
+      for (const item of queued) {
+        await persistViolation(item);
+      }
+    })();
+  }, [sessionId]);
+
+  const handleConfirmSubmitRef = useRef();
+
+  useEffect(() => {
+    if (!sessionId || !auth0Authenticated) return;
+
+    let mounted = true;
+    let reconnectTimeout = null;
+    const lastTimestamps = new Map();
+
+    const connectWs = async () => {
+      try {
+        const token = await getAccessTokenSilently({ authorizationParams: { audience: auth0Audience } });
+        if (!mounted) return;
+
+        let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        let wsHost = window.location.host;
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          wsHost = 'localhost:8000';
+        } else if (import.meta.env.VITE_API_URL) {
+          try {
+            const url = new URL(import.meta.env.VITE_API_URL);
+            wsHost = url.host;
+          } catch (e) {}
+        }
+
+        const wsUrl = `${wsProtocol}//${wsHost}/ws/student/${sessionId}?token=${encodeURIComponent(token)}`;
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          if (ws.readyState === WebSocket.OPEN) {
+             ws.send(JSON.stringify({ type: 'SYNC_REQUEST' }));
+          }
+          if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+
+          heartbeatIntervalRef.current = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now() }));
+            }
+          }, 5000);
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            
+            if (data.timestamp) {
+                const lastTs = lastTimestamps.get('cmd') || 0;
+                if (data.timestamp < lastTs) return;
+                lastTimestamps.set('cmd', data.timestamp);
+            }
+
+            if (data.type === 'WARN_STUDENT') {
+              if (examEndedRef.current) return;
+              if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+              setProctorWarning(data.message || 'Warning from Proctor: Stay focused');
+              warningTimeoutRef.current = setTimeout(() => setProctorWarning(''), 10000);
+            } else if (data.type === 'END_EXAM' || data.type === 'FORCE_SUBMIT') {
+              if (examEndedRef.current) return;
+              examEndedRef.current = true;
+              examStatusRef.current = 'ending';
+              setProctorWarning('Exam terminated by proctor.');
+              if (handleConfirmSubmitRef.current) handleConfirmSubmitRef.current();
+            }
+          } catch(e) {}
+        };
+
+        ws.onclose = (event) => {
+          if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+          if (mounted) {
+            if (event?.code === 4401 || event?.code === 4403 || event?.code === 4404) {
+              console.warn('Student WS closed with authorization/session error.', event.code, event.reason);
+              setProctorWarning('Live proctoring connection could not be established for this exam session.');
+              return;
+            }
+            console.warn('Student WS disconnected. Reconnecting in 3s...');
+            reconnectTimeout = setTimeout(connectWs, 3000);
+          }
+        };
+      } catch (e) {
+        console.error('WS Connection failed', e);
+        if (mounted) {
+          reconnectTimeout = setTimeout(connectWs, 5000);
+        }
+      }
+    };
+
+    connectWs();
+
+    return () => {
+      mounted = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      if (wsRef.current) wsRef.current.close();
+    };
+  }, [sessionId, auth0Authenticated, getAccessTokenSilently, auth0Audience]);
+
+
 
   useEffect(() => {
     const autoSaveInterval = setInterval(() => {
@@ -272,67 +516,163 @@ const ExamPortal = () => {
   }, [attemptId]);
 
   useEffect(() => {
+    setIsFullscreen(!!document.fullscreenElement);
+
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-      if (!document.fullscreenElement) {
-        addViolation('Exited fullscreen mode');
+      const fullscreenActive = !!document.fullscreenElement;
+      setIsFullscreen(fullscreenActive);
+      if (fullscreenActive) {
+        hasEnteredFullscreenRef.current = true;
+      }
+      if (
+        browserLockdownEnabled &&
+        hasEnteredFullscreenRef.current &&
+        !fullscreenActive &&
+        examStatusRef.current !== 'ending'
+      ) {
+        addViolation('Exited fullscreen mode', 'FULLSCREEN_EXIT');
       }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
+  }, [browserLockdownEnabled]);
 
   useEffect(() => {
     const preventContextMenu = (e) => {
+      if (!disableRightClickEnabled) return;
       e?.preventDefault();
-      addViolation('Attempted right-click');
+      addViolation('Attempted right-click', 'RIGHT_CLICK');
     };
 
     const preventCopy = (e) => {
+      if (!disableCopyPasteEnabled) return;
       e?.preventDefault();
-      addViolation('Attempted copy');
+      addViolation('Attempted copy', 'COPY_PASTE');
+    };
+
+    const handleKeyDown = (e) => {
+      if (!browserLockdownEnabled) return;
+      if (
+        e.key === 'F12' ||
+        (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j')) ||
+        (e.ctrlKey && (e.key === 'U' || e.key === 'u'))
+      ) {
+        e.preventDefault();
+        addViolation('Attempted to access Developer Tools', 'DEVTOOLS_ACCESS');
+      }
+    };
+
+    const handleBlur = () => {
+      if (detectTabSwitchEnabled && examStatusRef.current !== 'ending') {
+        addViolation('Window lost focus (possible tab switch)', 'WINDOW_BLUR');
+      }
+    };
+
+    let resizeTimer;
+    const handleResize = () => {
+      if (!browserLockdownEnabled) return;
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (
+          hasEnteredFullscreenRef.current &&
+          !document.fullscreenElement &&
+          examStatusRef.current !== 'ending'
+        ) {
+          addViolation('Window resized abnormally', 'WINDOW_RESIZE');
+        }
+      }, 500);
     };
 
     document.addEventListener('contextmenu', preventContextMenu);
     document.addEventListener('copy', preventCopy);
     document.addEventListener('cut', preventCopy);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('resize', handleResize);
 
     return () => {
       document.removeEventListener('contextmenu', preventContextMenu);
       document.removeEventListener('copy', preventCopy);
       document.removeEventListener('cut', preventCopy);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('resize', handleResize);
+      if (resizeTimer) clearTimeout(resizeTimer);
     };
-  }, []);
+  }, [browserLockdownEnabled, detectTabSwitchEnabled, disableCopyPasteEnabled, disableRightClickEnabled]);
+
+  useEffect(() => {
+    if (!browserLockdownEnabled || isFullscreen) return;
+
+    const handlePointerDown = () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      void enterFullscreen();
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [browserLockdownEnabled, isFullscreen]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        addViolation('Tab switched or window minimized');
+      if (detectTabSwitchEnabled && document.hidden && examStatusRef.current !== 'ending') {
+        addViolation('Tab switched or window minimized', 'TAB_SWITCH');
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+  }, [detectTabSwitchEnabled]);
 
-  const addViolation = (message) => {
+  const addViolation = (message, type = null, confidence = null) => {
+    if (examEndedRef.current) return;
+    const event_id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
     const newViolation = {
-      id: Date.now(),
+      id: event_id,
       message,
       timestamp: new Date()
     };
-    setViolations((prev) => [...prev, newViolation]);
-
-    if (sessionId) {
-      const lower = String(message || '').toLowerCase();
-      const severity = lower.includes('fullscreen') ? 'major' : (lower.includes('tab') ? 'major' : 'minor');
-      void callApi(
-        `/sessions/session/${encodeURIComponent(sessionId)}/violation?severity=${encodeURIComponent(severity)}&count=1`,
-        'POST'
-      ).catch(() => {});
+    
+    // Attempt to capture evidence snapshot
+    let snapshotImage = null;
+    if (securityMonitorRef.current?.captureImage) {
+       snapshotImage = securityMonitorRef.current.captureImage();
     }
+
+    setViolations((prev) => {
+      const updated = [...prev, newViolation];
+      if (updated.length >= violationThreshold && examStatusRef.current !== 'ending') {
+        if (violationAction === 'terminate') {
+          examStatusRef.current = 'ending';
+          examEndedRef.current = true;
+          setProctorWarning(`Exam auto-submitted after reaching ${violationThreshold} violations.`);
+          if (handleConfirmSubmitRef.current) handleConfirmSubmitRef.current();
+        } else if (updated.length === violationThreshold) {
+          const warningText = violationAction === 'flag'
+            ? `Exam flagged for review after reaching ${violationThreshold} violations.`
+            : `Warning: you have reached the violation threshold of ${violationThreshold}.`;
+          setProctorWarning(warningText);
+        }
+      }
+      return updated;
+    });
+
+    const lower = String(message || '').toLowerCase();
+    const severity = lower.includes('fullscreen') ? 'severe' : (lower.includes('tab') ? 'major' : 'minor');
+    const body = {
+      type,
+      confidence,
+      timestamp: new Date().toISOString(),
+      severity,
+      image: snapshotImage,
+      count: 1,
+      event_id,
+      reason: message,
+    };
+    void persistViolation(body);
   };
+
 
   const handleAnswerChange = (questionId, answer) => {
     setAnswers((prev) => ({
@@ -401,7 +741,13 @@ const ExamPortal = () => {
     }
   };
 
+  useEffect(() => {
+    handleConfirmSubmitRef.current = handleConfirmSubmit;
+  }, [handleConfirmSubmit]);
+
+
   const enterFullscreen = () => {
+    if (!browserLockdownEnabled) return;
     document.documentElement?.requestFullscreen?.();
   };
 
@@ -428,6 +774,13 @@ const ExamPortal = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {watermarkEnabled && (
+        <ProctoredWatermarkOverlay
+          examTitle={sourceExam?.title}
+          userLabel={watermarkUserLabel}
+          sessionId={sessionId || attemptId}
+        />
+      )}
       <div className="bg-card border-b border-border px-4 py-3 sticky top-0 z-40 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -443,7 +796,7 @@ const ExamPortal = () => {
               durationMinutes={durationMinutesForTimer}
               onTimeUp={handleSubmit}
             />
-            {!isFullscreen && (
+            {browserLockdownEnabled && !isFullscreen && (
               <Button
                 variant="outline"
                 size="sm"
@@ -472,6 +825,42 @@ const ExamPortal = () => {
           {loadWarning}
         </div>
       )}
+
+      {proctorWarning && (
+        <div className="bg-destructive/15 border-l-4 border-destructive/80 px-4 py-3 text-sm text-destructive font-semibold flex items-center justify-between shadow-sm z-50 animate-in slide-in-from-top-2">
+          <div className="flex items-center">
+            <Icon name="AlertTriangle" className="mr-3" size={20} />
+            {proctorWarning}
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setProctorWarning('')}>
+             Dismiss
+          </Button>
+        </div>
+      )}
+
+      {browserLockdownEnabled && !isFullscreen && (
+        <div className="fixed inset-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-card border border-border rounded-2xl shadow-2xl p-6 text-center">
+            <div className="w-14 h-14 mx-auto rounded-full bg-primary/15 flex items-center justify-center mb-4">
+              <Icon name="Maximize" size={26} className="text-primary" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground mb-2">Fullscreen Required</h2>
+            <p className="text-sm text-muted-foreground mb-5">
+              This exam uses browser lockdown. Enter fullscreen to continue and keep the exam active.
+            </p>
+            <Button
+              variant="default"
+              size="lg"
+              iconName="Maximize"
+              onClick={enterFullscreen}
+              className="w-full"
+            >
+              Enter Fullscreen
+            </Button>
+          </div>
+        </div>
+      )}
+
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1 overflow-y-auto">
@@ -563,7 +952,14 @@ const ExamPortal = () => {
             reviewCount={reviewCount}
             unansweredCount={unansweredCount}
           />
-          <SecurityMonitor violations={violations} />
+          <SecurityMonitor 
+            ref={securityMonitorRef}
+            violations={violations} 
+            sessionId={sessionId}
+            securityConfig={securityConfig}
+            onAddViolation={addViolation}
+            onRequestSnapshot={requestSnapshot}
+          />
         </div>
       </div>
 
@@ -586,7 +982,14 @@ const ExamPortal = () => {
               reviewCount={reviewCount}
               unansweredCount={unansweredCount}
             />
-            <SecurityMonitor violations={violations} />
+            <SecurityMonitor 
+              ref={securityMonitorRef}
+              violations={violations} 
+              sessionId={sessionId}
+              securityConfig={securityConfig}
+              onAddViolation={addViolation}
+              onRequestSnapshot={requestSnapshot}
+            />
           </div>
         </div>
       )}

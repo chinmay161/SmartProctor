@@ -16,6 +16,11 @@ const ExamTimer = ({ initialSeconds, durationMinutes, onTimeUp }) => {
     getInitialSeconds({ initialSeconds, durationMinutes })
   );
   const hasFiredTimeUpRef = useRef(false);
+  const onTimeUpRef = useRef(onTimeUp);
+
+  useEffect(() => {
+    onTimeUpRef.current = onTimeUp;
+  }, [onTimeUp]);
 
   useEffect(() => {
     setTimeRemaining(getInitialSeconds({ initialSeconds, durationMinutes }));
@@ -28,19 +33,24 @@ const ExamTimer = ({ initialSeconds, durationMinutes, onTimeUp }) => {
     }
 
     const timer = setInterval(() => {
+      let reachedZero = false;
       setTimeRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
           hasFiredTimeUpRef.current = true;
-          onTimeUp?.();
+          reachedZero = true;
           return 0;
         }
         return prev - 1;
       });
+
+      if (reachedZero) {
+        onTimeUpRef.current?.();
+      }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onTimeUp, initialSeconds, durationMinutes]);
+  }, [initialSeconds, durationMinutes]);
 
   const hours = Math.floor(timeRemaining / 3600);
   const minutes = Math.floor((timeRemaining % 3600) / 60);
