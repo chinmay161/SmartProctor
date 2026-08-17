@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLogout } from '../../context/SessionContext';
 import RoleBasedHeader from '../../components/ui/RoleBasedHeader';
 import SecurityBadgeDisplay from '../../components/ui/SecurityBadgeDisplay';
@@ -16,12 +16,15 @@ import { apiDelete, apiGet, apiPost, apiPut } from '../../services/httpClient';
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('scheduled');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'scheduled');
   const { logout } = useLogout();
   const { isAuthenticated: auth0Authenticated, getAccessTokenSilently } = useAuth0();
   const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
 
   const [activeExams, setActiveExams] = useState([]);
+  const [draftExams, setDraftExams] = useState([]);
+  const [templateExams, setTemplateExams] = useState([]);
   const [scheduledExams, setScheduledExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
   const [statistics, setStatistics] = useState({});
@@ -53,6 +56,8 @@ const TeacherDashboard = () => {
   };
 
   const tabs = [
+    { id: 'templates', label: 'Exam Templates', icon: 'Copy', count: templateExams.length },
+    { id: 'drafts', label: 'Draft Exams', icon: 'FileText', count: draftExams.length },
     { id: 'active', label: 'Active Exams', icon: 'PlayCircle', count: activeExams.length },
     { id: 'scheduled', label: 'Scheduled Exams', icon: 'Calendar', count: scheduledExams.length },
     { id: 'completed', label: 'Completed Exams', icon: 'CheckCircle', count: completedExams.length },
@@ -63,11 +68,15 @@ const TeacherDashboard = () => {
       setLoadingScheduled(true);
       const exams = await callApi('/exams/', 'GET');
       const arr = Array.isArray(exams) ? exams : [];
-      setActiveExams(arr.filter((e) => e?.status === 'ACTIVE'));
-      setScheduledExams(arr.filter((e) => e?.status === 'SCHEDULED'));
-      setCompletedExams(arr.filter((e) => e?.status === 'ENDED'));
+      setTemplateExams(arr.filter((e) => e?.is_template));
+      setDraftExams(arr.filter((e) => e?.status === 'DRAFT' && !e?.is_template));
+      setActiveExams(arr.filter((e) => e?.status === 'ACTIVE' && !e?.is_template));
+      setScheduledExams(arr.filter((e) => e?.status === 'SCHEDULED' && !e?.is_template));
+      setCompletedExams(arr.filter((e) => e?.status === 'ENDED' && !e?.is_template));
       setErrorMessage('');
     } catch (error) {
+      setTemplateExams([]);
+      setDraftExams([]);
       setActiveExams([]);
       setScheduledExams([]);
       setCompletedExams([]);
@@ -97,8 +106,22 @@ const TeacherDashboard = () => {
     };
   }, [auth0Authenticated]);
 
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab) setActiveTab(tab);
+  }, [searchParams]);
+
   const openCreateWizard = () => navigate('/exam-creation');
   const openEditWizard = (exam) => navigate(`/exam-creation?edit=${encodeURIComponent(exam.id)}`);
+  const openUseTemplateWizard = (exam) => navigate(`/exam-creation?template=${encodeURIComponent(exam.id)}`);
+  const openTemplatesTab = () => {
+    setActiveTab('templates');
+    setSearchParams({ tab: 'templates' });
+  };
+  const selectTab = (tabId) => {
+    setActiveTab(tabId);
+    setSearchParams({ tab: tabId });
+  };
 
   const confirmDelete = (exam) => {
     setDeleteTarget(exam);
@@ -186,7 +209,7 @@ const TeacherDashboard = () => {
                     {tabs?.map((tab) => (
                       <button
                         key={tab?.id}
-                        onClick={() => setActiveTab(tab?.id)}
+                        onClick={() => selectTab(tab?.id)}
                         className={`flex items-center space-x-2 px-4 md:px-6 py-3 md:py-4 text-sm md:text-base font-medium transition-smooth border-b-2 shrink-0 ${
                           activeTab === tab?.id
                             ? 'border-primary text-primary bg-primary/5'
@@ -210,6 +233,79 @@ const TeacherDashboard = () => {
                 </div>
 
                 <div className="p-4 md:p-6">
+                  {activeTab === 'templates' && (
+                    <div className="space-y-4 md:space-y-6">
+                      <div className="flex items-center justify-end">
+                        <Button onClick={openCreateWizard} iconName="Plus" size="sm">
+                          Create Template
+                        </Button>
+                      </div>
+
+                      {loadingScheduled ? (
+                        <div className="text-center py-8 text-sm text-muted-foreground">Loading templates...</div>
+                      ) : templateExams.length === 0 ? (
+                        <div className="text-center py-12 md:py-16">
+                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Icon name="Copy" size={32} className="text-muted-foreground" />
+                          </div>
+                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
+                            No Exam Templates
+                          </h3>
+                          <p className="text-sm md:text-base text-muted-foreground">
+                            Save a reusable template to speed up future exam creation
+                          </p>
+                        </div>
+                      ) : (
+                        templateExams.map((exam) => (
+                          <ScheduledExamCard
+                            key={exam?.id}
+                            exam={exam}
+                            onEdit={openEditWizard}
+                            onUseTemplate={openUseTemplateWizard}
+                            onDelete={confirmDelete}
+                            variant="template"
+                          />
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'drafts' && (
+                    <div className="space-y-4 md:space-y-6">
+                      <div className="flex items-center justify-end">
+                        <Button onClick={openCreateWizard} iconName="Plus" size="sm">
+                          Create Exam
+                        </Button>
+                      </div>
+
+                      {loadingScheduled ? (
+                        <div className="text-center py-8 text-sm text-muted-foreground">Loading drafts...</div>
+                      ) : draftExams.length === 0 ? (
+                        <div className="text-center py-12 md:py-16">
+                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Icon name="FileText" size={32} className="text-muted-foreground" />
+                          </div>
+                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
+                            No Draft Exams
+                          </h3>
+                          <p className="text-sm md:text-base text-muted-foreground">
+                            Saved drafts will appear here for quick editing
+                          </p>
+                        </div>
+                      ) : (
+                        draftExams.map((exam) => (
+                          <ScheduledExamCard
+                            key={exam?.id}
+                            exam={exam}
+                            onEdit={openEditWizard}
+                            onDelete={confirmDelete}
+                            variant="draft"
+                          />
+                        ))
+                      )}
+                    </div>
+                  )}
+
                   {activeTab === 'active' && (
                     <div className="space-y-4 md:space-y-6">
                       {activeExams.length === 0 ? (
@@ -296,7 +392,7 @@ const TeacherDashboard = () => {
             </div>
 
             <div className="lg:col-span-4 xl:col-span-3 space-y-4 md:space-y-6">
-              <QuickActionsPanel onCreateExam={openCreateWizard} />
+              <QuickActionsPanel onCreateExam={openCreateWizard} onOpenTemplates={openTemplatesTab} />
               <StatisticsPanel statistics={statistics || {}} />
             </div>
           </div>
