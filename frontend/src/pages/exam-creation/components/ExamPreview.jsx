@@ -22,6 +22,20 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
     return features;
   };
 
+  const timezoneLabel = (() => {
+    const tz = formData?.timezone || 'Asia/Kolkata';
+    const labels = {
+      'America/New_York': 'Eastern Time (ET)',
+      'America/Chicago': 'Central Time (CT)',
+      'America/Denver': 'Mountain Time (MT)',
+      'America/Los_Angeles': 'Pacific Time (PT)',
+      'Europe/London': 'Greenwich Mean Time (GMT)',
+      'Asia/Kolkata': 'India Standard Time (IST)',
+      'Asia/Tokyo': 'Japan Standard Time (JST)',
+    };
+    return labels[tz] || tz;
+  })();
+
   const tabs = [
     { id: 'overview', label: 'Overview', icon: 'FileText' },
     { id: 'questions', label: 'Questions', icon: 'List' },
@@ -130,6 +144,22 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
                 </div>
                 <p className="text-lg font-semibold text-foreground">{formData?.passingMarks || 0}</p>
               </div>
+            </div>
+
+            <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 md:p-5">
+              <h4 className="text-sm font-medium text-foreground mb-2 flex items-center space-x-2">
+                <Icon name="CalendarClock" size={16} className="text-primary" />
+                <span>Schedule Interpretation</span>
+              </h4>
+              <p className="text-sm text-muted-foreground mb-1">
+                Timezone: <span className="text-foreground font-medium">{timezoneLabel}</span>
+              </p>
+              <p className="text-sm text-muted-foreground mb-1">
+                Start: <span className="text-foreground font-medium">{formData?.startDate || '--'} {formData?.startTime || '--'}</span>
+              </p>
+              <p className="text-sm text-muted-foreground">
+                End: <span className="text-foreground font-medium">{formData?.endDate || '--'} {formData?.endTime || '--'}</span>
+              </p>
             </div>
 
             <div className="bg-warning/10 border border-warning/30 rounded-lg p-4">

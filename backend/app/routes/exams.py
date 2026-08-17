@@ -3,6 +3,7 @@ import csv
 from datetime import datetime, timezone
 from io import StringIO
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -40,6 +41,16 @@ from ..services.attempt_service import (
 from ..services.exam_service import configure_exam_rules
 
 router = APIRouter(prefix="/exams", tags=["Exams"])
+DEFAULT_EXAM_TIMEZONE = ZoneInfo("Asia/Kolkata")
+
+
+def _normalize_request_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        # Treat naive request timestamps as IST to avoid server timezone ambiguity.
+        return value.replace(tzinfo=DEFAULT_EXAM_TIMEZONE).astimezone(timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _load_question_ids(question_ids_json: str | None) -> list[str]:
@@ -102,8 +113,8 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
         duration_minutes=exam.duration_minutes,
         question_ids=question_ids,
         wizard_config=wizard_config,
-        start_time=exam.start_time,
-        end_time=exam.end_time,
+        start_time=_as_utc_timestamp(exam.start_time),
+        end_time=_as_utc_timestamp(exam.end_time),
         status=exam.status,
         is_template=bool(exam.is_template),
         results_visible=bool(exam.results_visible),
@@ -113,7 +124,7 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
         violation_count=completed_metrics.get("total_violations") if completed_metrics else None,
         average_score_percent=completed_metrics.get("average_score_percent") if completed_metrics else None,
         created_by=exam.created_by,
-        created_at=exam.created_at,
+        created_at=_as_utc_timestamp(exam.created_at),
     )
 
 
@@ -295,8 +306,8 @@ def create_exam(payload: ExamCreateRequest, user=Depends(require_role("teacher")
             duration_minutes=payload.duration_minutes,
             question_ids=json.dumps(payload.question_ids or []),
             wizard_config=json.dumps(payload.wizard_config) if payload.wizard_config is not None else None,
-            start_time=payload.start_time.astimezone(timezone.utc) if payload.start_time else None,
-            end_time=payload.end_time.astimezone(timezone.utc) if payload.end_time else None,
+            start_time=_normalize_request_datetime(payload.start_time),
+            end_time=_normalize_request_datetime(payload.end_time),
             is_template=bool(payload.is_template),
             status=ExamStatus.DRAFT if payload.is_draft else ExamStatus.SCHEDULED,
             created_by=user["sub"],
@@ -343,9 +354,9 @@ def update_exam(exam_id: str, payload: ExamUpdateRequest, user=Depends(require_r
         if payload.wizard_config is not None:
             exam.wizard_config = json.dumps(payload.wizard_config)
         if payload.start_time is not None:
-            exam.start_time = payload.start_time.astimezone(timezone.utc)
+            exam.start_time = _normalize_request_datetime(payload.start_time)
         if payload.end_time is not None:
-            exam.end_time = payload.end_time.astimezone(timezone.utc)
+            exam.end_time = _normalize_request_datetime(payload.end_time)
         if payload.is_template is not None:
             exam.is_template = bool(payload.is_template)
         if payload.is_draft is not None and exam.status not in (ExamStatus.ACTIVE, ExamStatus.ENDED):

@@ -77,11 +77,7 @@ def detect_headpose(image):
             
     face_2d = np.array(face_2d, dtype=np.float64)
     face_3d = np.array(face_3d, dtype=np.float64)
-    
-    focal_length = 1 * img_w
-    cam_matrix = np.array([
-        [focal_length, 0, img_w / 2],
-        [0, focal_length, img_h / 2],
+
     if len(face_2d) < 6 or len(face_3d) < 6:
         return {
             "looking_away": False,
@@ -91,7 +87,15 @@ def detect_headpose(image):
             "ear": float(avg_ear),
             "nose_tip": nose_tip_norm
         }
-
+    
+    focal_length = 1 * img_w
+    cam_matrix = np.array([
+        [focal_length, 0, img_w / 2],
+        [0, focal_length, img_h / 2],
+        [0, 0, 1]
+    ], dtype=np.float64)
+    dist_matrix = np.zeros((4, 1), dtype=np.float64)
+    
     success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
     if not success:
         return {
@@ -102,15 +106,11 @@ def detect_headpose(image):
             "ear": float(avg_ear),
             "nose_tip": nose_tip_norm
         }
-    ])
-    dist_matrix = np.zeros((4, 1), dtype=np.float64)
-    
-    success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
+
+    rmat, _ = cv2.Rodrigues(rot_vec)
+    angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
     pitch = float(angles[0])
     yaw = float(angles[1])
-    
-    pitch = angles[0] * 360
-    yaw = angles[1] * 360
     
     looking_away = False
     direction = "center"

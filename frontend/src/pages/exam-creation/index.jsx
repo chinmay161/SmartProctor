@@ -35,7 +35,7 @@ const getDefaultExamTimezone = () => {
   } catch {
     // Fall back to the existing default if browser timezone detection is unavailable.
   }
-  return 'America/New_York';
+  return 'Asia/Kolkata';
 };
 
 const defaultExamData = {
@@ -196,6 +196,28 @@ const getScheduleRangeError = ({ startDate, startTime, endDate, endTime, timezon
   return null;
 };
 
+const getScheduleTimeReferenceError = ({ startDate, startTime, endDate, endTime, timezone }) => {
+  if (!startDate || !startTime || !endDate || !endTime) return null;
+
+  const zone = timezone || defaultExamData.timezone;
+  const startIso = zonedLocalDateTimeToUtcIso(startDate, startTime, zone);
+  const endIso = zonedLocalDateTimeToUtcIso(endDate, endTime, zone);
+
+  if (!startIso || !endIso) {
+    return 'Unable to parse schedule. Please re-check date, time, and timezone.';
+  }
+
+  if (endIso <= startIso) {
+    return 'End time must be after start time';
+  }
+
+  if (endIso <= new Date().toISOString()) {
+    return 'End time must be in the future in the selected timezone';
+  }
+
+  return null;
+};
+
 const normalizeScheduleFromDuration = (nextData, previousData) => {
   const minimumEnd = getMinimumEndByDuration(nextData);
   if (!minimumEnd) return nextData;
@@ -349,6 +371,11 @@ const ExamCreation = () => {
       const scheduleError = getScheduleRangeError(examData);
       if (scheduleError) {
         nextErrors.endTime = scheduleError;
+      }
+
+      const scheduleReferenceError = getScheduleTimeReferenceError(examData);
+      if (scheduleReferenceError) {
+        nextErrors.endTime = scheduleReferenceError;
       }
     }
 

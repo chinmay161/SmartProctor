@@ -1,7 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
-
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -24,6 +23,8 @@ def _as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
+        # SQLite commonly returns naive datetimes for UTC values we already normalized
+        # before persistence. Treat them as UTC to avoid shifting exam windows backward.
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
 

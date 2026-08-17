@@ -20,6 +20,20 @@ const SchedulingConfiguration = ({ formData, onChange, errors, minEndDate, minEn
 
   const normalizeTimezone = (value) => timezoneAliases[value] || value;
 
+  const getDateForInputInTimezone = (timeZone) => {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: normalizeTimezone(timeZone || 'Asia/Kolkata'),
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      });
+      return formatter.format(new Date());
+    } catch {
+      return new Date().toISOString().split('T')[0];
+    }
+  };
+
   const handleInputChange = (field, value) => {
     onChange({ ...formData, [field]: value });
   };
@@ -35,6 +49,7 @@ const SchedulingConfiguration = ({ formData, onChange, errors, minEndDate, minEn
     }
   })();
   const selectedTimezone = normalizeTimezone(formData?.timezone || '');
+  const todayInSelectedTimezone = getDateForInputInTimezone(selectedTimezone || 'Asia/Kolkata');
   const selectedTimezoneLabel = timezoneOptions.find((option) => option.value === selectedTimezone)?.label || selectedTimezone;
   const browserTimezoneLabel = timezoneOptions.find((option) => option.value === browserTimezone)?.label || browserTimezone;
   const showTimezoneWarning = Boolean(
@@ -55,6 +70,16 @@ const SchedulingConfiguration = ({ formData, onChange, errors, minEndDate, minEn
         </div>
       </div>
       <div className="space-y-6">
+        <div className="bg-primary/10 border border-primary/30 rounded-lg p-4 flex items-start space-x-3">
+          <Icon name="Clock3" size={18} className="text-primary shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-foreground font-medium">Scheduling timezone</p>
+            <p className="text-xs text-muted-foreground">
+              All start/end times are interpreted in <span className="font-medium text-foreground">{selectedTimezoneLabel || 'Asia/Kolkata (IST)'}</span>.
+            </p>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Input
             label="Start Date"
@@ -63,7 +88,7 @@ const SchedulingConfiguration = ({ formData, onChange, errors, minEndDate, minEn
             onChange={(e) => handleInputChange('startDate', e?.target?.value)}
             error={errors?.startDate}
             required
-            min={new Date()?.toISOString()?.split('T')?.[0]}
+            min={todayInSelectedTimezone}
             description="Date when exam becomes available"
           />
 
@@ -86,7 +111,7 @@ const SchedulingConfiguration = ({ formData, onChange, errors, minEndDate, minEn
             onChange={(e) => handleInputChange('endDate', e?.target?.value)}
             error={errors?.endDate}
             required
-            min={minEndDate || formData?.startDate || new Date()?.toISOString()?.split('T')?.[0]}
+            min={minEndDate || formData?.startDate || todayInSelectedTimezone}
             description="Date when exam window closes"
           />
 

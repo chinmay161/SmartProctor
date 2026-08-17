@@ -14,6 +14,7 @@ security = HTTPBearer()
 
 ROLE_NAMESPACE = "https://smartproctor.io/roles"
 AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
+SUPPORTED_ROLES = {"student", "teacher", "admin"}
 ROLE_ALIASES = {
     "instructor": "teacher",
     "proctor": "teacher",
@@ -33,6 +34,17 @@ def _normalize_roles(raw_roles):
     return [canonicalize_role(r) for r in raw_roles if str(r).strip()]
 
 
+def _has_supported_role(roles: list[str]) -> bool:
+    return any(role in SUPPORTED_ROLES for role in roles)
+
+
+def _first_supported_role(roles: list[str]) -> Optional[str]:
+    for role in roles:
+        if role in SUPPORTED_ROLES:
+            return role
+    return None
+
+
 def _load_local_role(sub: str, email: Optional[str]):
     db = SessionLocal()
     try:
@@ -48,6 +60,42 @@ def _load_local_role(sub: str, email: Optional[str]):
         if profile and profile.role:
             return canonicalize_role(profile.role)
         return None
+    finally:
+        db.close()
+
+
+def _upsert_local_profile_role(sub: str, email: Optional[str], role: Optional[str] = None):
+    db = SessionLocal()
+    try:
+        profile = db.query(UserProfile).filter_by(auth0_sub=sub).first()
+        if not profile and email:
+            profile = db.query(UserProfile).filter_by(email=email).first()
+            if profile and not profile.auth0_sub:
+                profile.auth0_sub = sub
+
+        changed = False
+        if profile:
+            if email and profile.email != email:
+                profile.email = email
+                changed = True
+            if role:
+                canonical_role = canonicalize_role(role)
+                if profile.role != canonical_role:
+                    profile.role = canonical_role
+                    changed = True
+            if changed:
+                db.add(profile)
+                db.commit()
+            return
+
+        db.add(
+            UserProfile(
+                auth0_sub=sub,
+                email=email,
+                role=canonicalize_role(role) if role else None,
+            )
+        )
+        db.commit()
     finally:
         db.close()
 
@@ -172,23 +220,39 @@ def get_current_user(
     token = credentials.credentials
     payload = verify_token(token)
 
+    sub = payload["sub"]
+    email = payload.get("email")
+
+    # Keep a local profile row in sync for stable role fallback and metadata.
+    _upsert_local_profile_role(sub, email)
+
     # Prefer roles from token claims.
     roles = []
     roles.extend(_normalize_roles(payload.get(ROLE_NAMESPACE, [])))
     roles.extend(_normalize_roles(payload.get("roles", [])))
     roles.extend(_normalize_roles(payload.get("role", [])))
+    token_supported_role = _first_supported_role(roles)
+    if token_supported_role:
+        _upsert_local_profile_role(sub, email, token_supported_role)
 
     # Merge locally mirrored profile role as an additional source of truth.
-    sub = payload["sub"]
-    email = payload.get("email")
     local_role = _load_local_role(sub, email)
     if local_role:
         roles.append(local_role)
-    roles.extend(_load_auth0_roles(sub))
-    if not roles:
+
+    # Avoid network flakiness on every request; call Auth0 only when no supported role is available.
+    if not _has_supported_role(roles):
+        auth0_roles = _load_auth0_roles(sub)
+        roles.extend(auth0_roles)
+        auth0_supported_role = _first_supported_role(auth0_roles)
+        if auth0_supported_role:
+            _upsert_local_profile_role(sub, email, auth0_supported_role)
+
+    if not _has_supported_role(roles):
         default_role = _ensure_default_student_role(sub, email)
         if default_role:
             roles.append(default_role)
+            _upsert_local_profile_role(sub, email, default_role)
 
     roles = list(dict.fromkeys(roles))
 
