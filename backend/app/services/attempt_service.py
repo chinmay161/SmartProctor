@@ -80,6 +80,30 @@ def _parse_json(value: Any) -> Any:
         return value
 
 
+def _exam_wizard_config(exam: Exam) -> dict[str, Any]:
+    parsed = _parse_json(exam.wizard_config)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _max_attempts_for_exam(exam: Exam) -> int:
+    config = _exam_wizard_config(exam)
+    raw = config.get("maxAttempts", 1)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, value)
+
+
+def _latest_attempt_for_student(db: Session, exam_id: str, student_id: str) -> ExamAttempt | None:
+    return (
+        db.query(ExamAttempt)
+        .filter_by(exam_id=exam_id, student_id=student_id)
+        .order_by(ExamAttempt.start_time.desc(), ExamAttempt.id.desc())
+        .first()
+    )
+
+
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -229,8 +253,8 @@ def publish_exam(db: Session, exam_id: str, owner_id: str, start_time: datetime 
     exam = _ensure_exam_exists(db, exam_id)
     if exam.created_by != owner_id:
         raise HTTPException(status_code=403, detail="Not exam owner")
-    if exam.status != ExamStatus.SCHEDULED:
-        raise HTTPException(status_code=409, detail="Exam can only be published from SCHEDULED")
+    if exam.status == ExamStatus.ENDED:
+        raise HTTPException(status_code=409, detail="Exam can only be published before it ends")
 
     if start_time is not None:
         exam.start_time = _as_utc(start_time)
@@ -240,8 +264,12 @@ def publish_exam(db: Session, exam_id: str, owner_id: str, start_time: datetime 
         raise HTTPException(status_code=400, detail="start_time and end_time are required for publish")
     if _as_utc(exam.end_time) <= _as_utc(exam.start_time):
         raise HTTPException(status_code=400, detail="end_time must be after start_time")
+    now_utc = utcnow()
+    if now_utc >= _as_utc(exam.end_time):
+        raise HTTPException(status_code=400, detail="end_time must be in the future for a scheduled exam")
 
-    exam.status = ExamStatus.ACTIVE
+    exam.status = ExamStatus.SCHEDULED
+    sync_exam_status_for_now(exam, now_utc)
     db.commit()
     db.refresh(exam)
     return exam
@@ -381,13 +409,18 @@ def list_available_exams_for_student(db: Session, student_id: str) -> list[Exam]
         if exam.status not in (ExamStatus.SCHEDULED, ExamStatus.ACTIVE):
             continue
 
-        submitted = (
+        submitted_count = (
             db.query(ExamAttempt)
             .filter_by(exam_id=exam.id, student_id=student_id)
             .filter(ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED]))
+            .count()
+        )
+        in_progress = (
+            db.query(ExamAttempt)
+            .filter_by(exam_id=exam.id, student_id=student_id, status=AttemptStatus.IN_PROGRESS)
             .first()
         )
-        if not submitted:
+        if in_progress or submitted_count < _max_attempts_for_exam(exam):
             result.append(exam)
     return result
 
@@ -408,11 +441,23 @@ def start_exam_attempt(db: Session, exam_id: str, student_id: str) -> ExamAttemp
     if exam.status != ExamStatus.ACTIVE:
         raise HTTPException(status_code=403, detail="Exam is not active")
 
-    existing = db.query(ExamAttempt).filter_by(exam_id=exam_id, student_id=student_id).first()
-    if existing:
-        if existing.status in (AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED):
-            raise HTTPException(status_code=403, detail="Attempt already submitted")
-        return existing
+    existing_in_progress = (
+        db.query(ExamAttempt)
+        .filter_by(exam_id=exam_id, student_id=student_id, status=AttemptStatus.IN_PROGRESS)
+        .order_by(ExamAttempt.start_time.desc(), ExamAttempt.id.desc())
+        .first()
+    )
+    if existing_in_progress:
+        return existing_in_progress
+
+    submitted_count = (
+        db.query(ExamAttempt)
+        .filter_by(exam_id=exam_id, student_id=student_id)
+        .filter(ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED]))
+        .count()
+    )
+    if submitted_count >= _max_attempts_for_exam(exam):
+        raise HTTPException(status_code=403, detail="Maximum attempts reached")
 
     ensure_exam_question_snapshots(db, exam)
 
@@ -498,15 +543,27 @@ def _require_attempt_for_teacher(db: Session, exam_id: str, attempt_id: str, tea
     return exam, attempt
 
 
-def build_attempt_review_payload(db: Session, exam_id: str, attempt_id: str, teacher_id: str) -> dict[str, Any]:
-    exam, attempt = _require_attempt_for_teacher(db, exam_id, attempt_id, teacher_id)
-    pairs = _hydrate_attempt_answers_for_all_questions(db, attempt)
+def _build_attempt_review_payload(
+    db: Session,
+    exam: Exam,
+    attempt: ExamAttempt,
+    pairs: list[tuple[ExamQuestion, ExamAnswer]],
+    *,
+    read_only: bool,
+) -> dict[str, Any]:
+    source_ids = list({str(question.source_question_id) for question, _ in pairs if question.source_question_id})
+    source_question_map: dict[str, Question] = {}
+    if source_ids:
+        source_questions = db.query(Question).filter(Question.id.in_(source_ids)).all()
+        source_question_map = {str(question.id): question for question in source_questions}
+
     questions_payload: list[dict[str, Any]] = []
 
     for question, answer in pairs:
         options = _parse_json(question.options)
         options_list = options if isinstance(options, list) else []
         student_answer = _parse_json(answer.answer)
+        source_question = source_question_map.get(str(question.source_question_id))
         questions_payload.append(
             {
                 "question_id": str(question.source_question_id),
@@ -514,6 +571,7 @@ def build_attempt_review_payload(db: Session, exam_id: str, attempt_id: str, tea
                 "question_text": question.question_text,
                 "question_type": question.type,
                 "options": options_list,
+                "explanation": source_question.explanation if source_question else None,
                 "student_answer": student_answer,
                 "correct_answer": question.correct_answer if _is_objective_type(question.type) else None,
                 "is_objective": _is_objective_type(question.type),
@@ -525,8 +583,6 @@ def build_attempt_review_payload(db: Session, exam_id: str, attempt_id: str, tea
             }
         )
 
-    db.commit()
-    db.refresh(attempt)
     return {
         "exam_id": exam.id,
         "exam_title": exam.title,
@@ -537,11 +593,48 @@ def build_attempt_review_payload(db: Session, exam_id: str, attempt_id: str, tea
         "auto_score_total": attempt.auto_score_total,
         "max_score_total": attempt.max_score_total,
         "grading_version": int(attempt.grading_version or 0),
-        "read_only": attempt.status == AttemptStatus.EVALUATED,
+        "read_only": read_only,
         "submitted_at": attempt.submitted_at,
         "evaluated_at": attempt.evaluated_at,
         "questions": questions_payload,
     }
+
+
+def build_attempt_review_payload(db: Session, exam_id: str, attempt_id: str, teacher_id: str) -> dict[str, Any]:
+    exam, attempt = _require_attempt_for_teacher(db, exam_id, attempt_id, teacher_id)
+    pairs = _hydrate_attempt_answers_for_all_questions(db, attempt)
+
+    db.commit()
+    db.refresh(attempt)
+    return _build_attempt_review_payload(
+        db,
+        exam,
+        attempt,
+        pairs,
+        read_only=attempt.status == AttemptStatus.EVALUATED,
+    )
+
+
+def build_attempt_review_payload_for_student(db: Session, exam_id: str, student_id: str) -> dict[str, Any]:
+    exam = _ensure_exam_exists(db, exam_id)
+    attempt = (
+        db.query(ExamAttempt)
+        .filter_by(exam_id=exam_id, student_id=student_id)
+        .filter(ExamAttempt.status == AttemptStatus.EVALUATED)
+        .order_by(ExamAttempt.submitted_at.desc(), ExamAttempt.start_time.desc(), ExamAttempt.id.desc())
+        .first()
+    )
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    if attempt.status != AttemptStatus.EVALUATED:
+        raise HTTPException(status_code=403, detail="Result not available")
+    if not bool(exam.results_visible):
+        raise HTTPException(status_code=403, detail="Results are not published")
+
+    pairs = _hydrate_attempt_answers_for_all_questions(db, attempt)
+    db.commit()
+    db.refresh(attempt)
+    return _build_attempt_review_payload(db, exam, attempt, pairs, read_only=True)
 
 
 def apply_manual_grades(
@@ -623,7 +716,12 @@ def evaluate_attempt(db: Session, attempt_id: str, teacher_id: str, score: int) 
 
 def resume_attempt(db: Session, exam_id: str, student_id: str) -> tuple[ExamAttempt, list[ExamAnswer], int]:
     now_utc = utcnow()
-    attempt = db.query(ExamAttempt).filter_by(exam_id=exam_id, student_id=student_id).first()
+    attempt = (
+        db.query(ExamAttempt)
+        .filter_by(exam_id=exam_id, student_id=student_id, status=AttemptStatus.IN_PROGRESS)
+        .order_by(ExamAttempt.start_time.desc(), ExamAttempt.id.desc())
+        .first()
+    )
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
     if attempt.status != AttemptStatus.IN_PROGRESS:

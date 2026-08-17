@@ -13,6 +13,7 @@ class ViolationIngestRequest(BaseModel):
     timestamp: datetime
     snapshot_path: str | None = None
     severity: ViolationSeverity
+    event_id: str | None = None
 
 
 class ViolationIngestResponse(BaseModel):
@@ -20,3 +21,16 @@ class ViolationIngestResponse(BaseModel):
     attempt_id: str | None = None
     violation_count: int | None = None
     is_flagged: bool | None = None
+
+
+class ViolationReportRequest(BaseModel):
+    type: str | None = None
+    confidence: float | None = None
+    timestamp: str | None = None
+    image: str | None = None
+    severity: str = "minor"
+    count: int = 1
+    event_id: str | None = None
+    reason: str | None = None
+    duration_ms: int | None = None
+    evidence_ids: list[str] | None = None

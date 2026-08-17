@@ -17,7 +17,14 @@ from ..schemas.attempt import (
     SubmitAttemptResponse,
 )
 from ..schemas.result import ExamResultResponse
-from ..services.attempt_service import evaluate_attempt, resume_attempt, start_exam_attempt, submit_attempt, save_answer
+from ..services.attempt_service import (
+    build_attempt_review_payload_for_student,
+    evaluate_attempt,
+    resume_attempt,
+    save_answer,
+    start_exam_attempt,
+    submit_attempt,
+)
 from ..schemas.result import StudentExamHistoryItemResponse
 
 router = APIRouter(tags=["Attempts"])
@@ -33,6 +40,12 @@ def _count_questions(question_ids_json: str | None) -> int:
     if not isinstance(parsed, list):
         return 0
     return len(parsed)
+
+
+def _resolve_out_of(attempt: ExamAttempt, exam: Exam) -> int:
+    if attempt.max_score_total is not None and int(attempt.max_score_total) > 0:
+        return int(attempt.max_score_total)
+    return _count_questions(exam.question_ids)
 
 
 @router.post("/exams/{exam_id}/start", response_model=AttemptStartResponse)
@@ -147,7 +160,7 @@ def list_student_attempt_history(user=Depends(require_role("student"))):
                     submitted_at=attempt.submitted_at,
                     end_time=exam.end_time,
                     score=attempt.score if is_result_visible else None,
-                    out_of=_count_questions(exam.question_ids),
+                    out_of=_resolve_out_of(attempt, exam),
                     can_view_result=is_result_visible,
                 )
             )
@@ -175,7 +188,13 @@ def evaluate_attempt_endpoint(
 def get_result(exam_id: str, user=Depends(require_role("student"))):
     db = SessionLocal()
     try:
-        attempt = db.query(ExamAttempt).filter_by(exam_id=exam_id, student_id=user["sub"]).first()
+        attempt = (
+            db.query(ExamAttempt)
+            .filter_by(exam_id=exam_id, student_id=user["sub"])
+            .filter(ExamAttempt.status == AttemptStatus.EVALUATED)
+            .order_by(ExamAttempt.submitted_at.desc(), ExamAttempt.start_time.desc(), ExamAttempt.id.desc())
+            .first()
+        )
         if not attempt:
             raise HTTPException(status_code=404, detail="Result not found")
         exam = db.query(Exam).filter_by(id=exam_id).first()
@@ -190,8 +209,18 @@ def get_result(exam_id: str, user=Depends(require_role("student"))):
             attempt_id=attempt.id,
             status=attempt.status,
             score=attempt.score,
+            out_of=_resolve_out_of(attempt, exam),
             submitted_at=attempt.submitted_at,
             evaluated=True,
         )
+    finally:
+        db.close()
+
+
+@router.get("/results/{exam_id}/review")
+def get_result_review(exam_id: str, user=Depends(require_role("student"))):
+    db = SessionLocal()
+    try:
+        return build_attempt_review_payload_for_student(db, exam_id, user["sub"])
     finally:
         db.close()

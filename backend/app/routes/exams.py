@@ -10,6 +10,7 @@ from ..auth.dependencies import get_current_user
 from ..auth.roles import require_role
 from ..database import SessionLocal
 from ..models.exam import Exam
+from ..models.exam import ExamStatus
 from ..models.enrollment import ExamEnrollment
 from ..models.exam_attempt import AttemptStatus, ExamAttempt
 from ..models.exam_session import ExamSession
@@ -59,6 +60,26 @@ def _to_percent(score: int | None, out_of: int | None) -> float | None:
     return round((float(score) / float(out_of)) * 100.0, 2)
 
 
+def _as_utc_timestamp(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _ensure_exam_is_not_already_over(exam: Exam) -> None:
+    if exam.status == ExamStatus.DRAFT:
+        return
+
+    end_time = _as_utc_timestamp(exam.end_time)
+    if end_time is not None and utcnow() >= end_time:
+        raise HTTPException(status_code=400, detail="end_time must be in the future for a scheduled exam")
+
+    exam.status = ExamStatus.SCHEDULED
+    sync_exam_status_for_now(exam, utcnow())
+
+
 def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None) -> ExamResponse:
     question_ids = []
     wizard_config = None
@@ -84,6 +105,7 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
         start_time=exam.start_time,
         end_time=exam.end_time,
         status=exam.status,
+        is_template=bool(exam.is_template),
         results_visible=bool(exam.results_visible),
         submitted_count=completed_metrics.get("submitted_count") if completed_metrics else None,
         attempt_count=completed_metrics.get("attempt_count") if completed_metrics else None,
@@ -275,8 +297,11 @@ def create_exam(payload: ExamCreateRequest, user=Depends(require_role("teacher")
             wizard_config=json.dumps(payload.wizard_config) if payload.wizard_config is not None else None,
             start_time=payload.start_time.astimezone(timezone.utc) if payload.start_time else None,
             end_time=payload.end_time.astimezone(timezone.utc) if payload.end_time else None,
+            is_template=bool(payload.is_template),
+            status=ExamStatus.DRAFT if payload.is_draft else ExamStatus.SCHEDULED,
             created_by=user["sub"],
         )
+        _ensure_exam_is_not_already_over(exam)
         db.add(exam)
         db.commit()
         db.refresh(exam)
@@ -321,6 +346,12 @@ def update_exam(exam_id: str, payload: ExamUpdateRequest, user=Depends(require_r
             exam.start_time = payload.start_time.astimezone(timezone.utc)
         if payload.end_time is not None:
             exam.end_time = payload.end_time.astimezone(timezone.utc)
+        if payload.is_template is not None:
+            exam.is_template = bool(payload.is_template)
+        if payload.is_draft is not None and exam.status not in (ExamStatus.ACTIVE, ExamStatus.ENDED):
+            exam.status = ExamStatus.DRAFT if payload.is_draft else ExamStatus.SCHEDULED
+
+        _ensure_exam_is_not_already_over(exam)
 
         db.commit()
         db.refresh(exam)
