@@ -1,0 +1,89 @@
+{
+  "env": {
+    "python_version": "3.12.2 (tags/v3.12.2:6abddd9, Feb  6 2024, 21:26:36) [MSC v.1937 64 bit (AMD64)]",
+    "opencv_version": "5.0.0",
+    "numpy_version": "2.4.5",
+    "mediapipe": {
+      "version": "0.10.14",
+      "imported_successfully": true,
+      "import_error": null,
+      "has_solutions_attribute": true,
+      "face_mesh_loaded": true,
+      "face_mesh_error": null,
+      "face_mesh_instance_type": "<class 'mediapipe.python.solutions.face_mesh.FaceMesh'>"
+    },
+    "haarcascade_available": true
+  },
+  "synthetic_test": {
+    "timestamp": 1788193819.27497,
+    "image_info": {
+      "height": 480,
+      "width": 640,
+      "channels": 3,
+      "dtype": "uint8",
+      "mean_intensity": 135.363359375,
+      "min_val": 128.0,
+      "max_val": 200.0
+    },
+    "stages": {
+      "model_availability": {
+        "mediapipe_version": "0.10.14",
+        "mp_solutions_present": true,
+        "face_mesh_loaded": true,
+        "face_mesh_error": null
+      },
+      "face_detection": {
+        "success": false,
+        "face_count": 0,
+        "face_boxes": [],
+        "duration_ms": 13.57
+      },
+      "face_mesh": {
+        "executed": true,
+        "faces_found": 0,
+        "landmarks_count": 0,
+        "reason": "results.multi_face_landmarks was empty or None",
+        "duration_ms": 8.01
+      },
+      "pose_calculation": {
+        "executed": false,
+        "reason": "Insufficient keypoints (2D: 0, 3D: 0, required: 6)",
+        "duration_ms": 0
+      },
+      "production_headpose": {
+        "output": {
+          "looking_away": false,
+          "direction": "center",
+          "confidence": 0.0,
+          "blink": false,
+          "ear": 0.0,
+          "nose_tip": null
+        },
+        "duration_ms": 5.0
+      },
+      "temporal_engine": {
+        "result": {
+          "violations": [],
+          "risk_score": 0
+        },
+        "duration_ms": 0.0
+      }
+    },
+    "production_output": {
+      "looking_away": false,
+      "direction": "center",
+      "confidence": 0.0,
+      "blink": false,
+      "ear": 0.0,
+      "nose_tip": null
+    },
+    "temporal_output": {
+      "violations": [],
+      "risk_score": 0
+    },
+    "failure_stage": "FACE_NOT_FOUND",
+    "is_healthy": false,
+    "summary": "No face or facial landmarks detected in the camera frame.",
+    "total_duration_ms": 27.76
+  }
+}

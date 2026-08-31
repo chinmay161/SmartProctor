@@ -7,6 +7,7 @@ class SnapshotInferenceRequest(BaseModel):
     image_base64: Optional[str] = None
     session_id: str
     student_id: str
+    modules: Optional[list] = None
 
 class ViolationResult(BaseModel):
     type: str

@@ -2,7 +2,8 @@ fastapi
 uvicorn
 opencv-python
 numpy
-mediapipe
+mediapipe==0.10.14
 torch
 ultralytics
 pydantic
+
