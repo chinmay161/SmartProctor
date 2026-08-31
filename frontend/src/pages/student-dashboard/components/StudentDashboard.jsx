@@ -6,6 +6,7 @@ import { authAwareCall } from '../../../services/authAwareCall';
 import { sessionEvents } from '../../../services/tokenStorage';
 import { useTheme } from '../../../context/ThemeContext';
 import { formatIstDateTime } from '../../../utils/dateTime';
+import { ExamListSkeleton, HistoryTableSkeleton } from '../../../components/ui/Skeleton';
 
 /* ─── Inline SVG icons (no extra dep) ─── */
 const Icon = ({ d, d2, size = 20, cls = '' }) => (
@@ -552,13 +553,17 @@ const StudentDashboardExample = () => {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
               <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.3rem', color: 'var(--color-foreground)', fontWeight: 400 }}>
                 Available Exams
-                <span style={{ marginLeft: '10px', fontFamily: 'var(--font-body)', fontSize: '0.8rem', color: 'var(--color-muted-foreground)', fontWeight: 400 }}>
-                  {exams.length} exam{exams.length !== 1 ? 's' : ''}
-                </span>
+                {!loading && (
+                  <span style={{ marginLeft: '10px', fontFamily: 'var(--font-body)', fontSize: '0.8rem', color: 'var(--color-muted-foreground)', fontWeight: 400 }}>
+                    {exams.length} exam{exams.length !== 1 ? 's' : ''}
+                  </span>
+                )}
               </h2>
             </div>
 
-            {exams.length === 0 ? (
+            {loading ? (
+              <ExamListSkeleton count={3} />
+            ) : exams.length === 0 ? (
               <div className="sp-card sp-fade-up" style={{ padding: '56px 24px', textAlign: 'center' }}>
                 <div style={{ width: '52px', height: '52px', borderRadius: '14px', background: 'rgba(59,130,246,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', color: 'var(--sp-accent)' }}>
                   <Icon d={ICONS.exams} size={24} />
@@ -590,9 +595,7 @@ const StudentDashboardExample = () => {
             </h2>
 
             {loadingHistory ? (
-              <div className="sp-card sp-fade-up" style={{ padding: '48px', textAlign: 'center' }}>
-                <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.88rem', color: 'var(--color-muted-foreground)' }}>Loading history…</p>
-              </div>
+              <HistoryTableSkeleton rows={4} />
             ) : examHistory.length === 0 ? (
               <div className="sp-card sp-fade-up" style={{ padding: '56px 24px', textAlign: 'center' }}>
                 <div style={{ width: '52px', height: '52px', borderRadius: '14px', background: 'rgba(59,130,246,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', color: 'var(--sp-accent)' }}>

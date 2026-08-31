@@ -1,11 +1,9 @@
-/**
- * Session Context
- * Global authentication state management using React Context
- */
-
-import React, { createContext, useContext, useEffect, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useReducer, useCallback, useState, useRef } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import * as authService from '../services/authService';
 import { TokenStorage, sessionEvents, TabSynchronizer } from '../services/tokenStorage';
+import { extractRolesFromAuth0User } from '../utils/roleUtils';
+import { apiRequest } from '../services/api';
 
 // Create context
 const SessionContext = createContext(null);
@@ -81,7 +79,6 @@ const sessionReducer = (state, action) => {
         ...state,
         isLoading: false,
         error: action.payload,
-        // Still logout even if error occurs
         isAuthenticated: false,
         user: null,
         sessionId: null,
@@ -151,6 +148,96 @@ const sessionReducer = (state, action) => {
 export const SessionProvider = ({ children }) => {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
 
+  // Auth0 integration
+  const {
+    isAuthenticated: isAuth0Authenticated,
+    isLoading: isAuth0Loading,
+    user: auth0User,
+    getAccessTokenSilently,
+  } = useAuth0();
+  const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+
+  const [auth0Profile, setAuth0Profile] = useState(null);
+  const [auth0Roles, setAuth0Roles] = useState([]);
+  const [isResolvingAuth0Roles, setIsResolvingAuth0Roles] = useState(false);
+  const [hasResolvedAuth0Roles, setHasResolvedAuth0Roles] = useState(false);
+  const resolvedSubRef = useRef(null);
+
+  /**
+   * Single authoritative profile & role resolution for Auth0 sessions
+   */
+  useEffect(() => {
+    let active = true;
+
+    if (!isAuth0Authenticated || !auth0User) {
+      resolvedSubRef.current = null;
+      setAuth0Profile(null);
+      setAuth0Roles([]);
+      setIsResolvingAuth0Roles(false);
+      setHasResolvedAuth0Roles(false);
+      return;
+    }
+
+    const userSub = auth0User?.sub;
+    if (!userSub) return;
+
+    // 1. Check if Auth0 user object already has roles in custom claims
+    const claimRoles = extractRolesFromAuth0User(auth0User);
+    if (claimRoles.length > 0) {
+      resolvedSubRef.current = userSub;
+      setAuth0Roles(claimRoles);
+      setIsResolvingAuth0Roles(false);
+      setHasResolvedAuth0Roles(true);
+      return;
+    }
+
+    // 2. If already resolved for this Auth0 user sub, skip
+    if (resolvedSubRef.current === userSub) {
+      return;
+    }
+
+    resolvedSubRef.current = userSub;
+    setIsResolvingAuth0Roles(true);
+
+    const resolveAuth0Profile = async () => {
+      try {
+        const token = await getAccessTokenSilently({
+          authorizationParams: { audience: auth0Audience },
+        });
+        const profile = await apiRequest('/profile/me', 'GET', null, token);
+        if (!active) return;
+
+        const resolved = Array.isArray(profile?.roles) && profile.roles.length > 0
+          ? profile.roles
+          : (profile?.role ? [profile.role] : []);
+
+        setAuth0Profile(profile);
+        setAuth0Roles(resolved);
+      } catch (err) {
+        if (active) {
+          setAuth0Profile(null);
+          setAuth0Roles([]);
+        }
+      } finally {
+        if (active) {
+          setIsResolvingAuth0Roles(false);
+          setHasResolvedAuth0Roles(true);
+        }
+      }
+    };
+
+    resolveAuth0Profile();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    isAuth0Authenticated,
+    auth0User?.sub,
+    getAccessTokenSilently,
+    auth0Audience,
+  ]);
+
   /**
    * Restore session from storage on mount
    */
@@ -214,7 +301,6 @@ export const SessionProvider = ({ children }) => {
     };
 
     const handleTokenRefreshed = (payload) => {
-      // Calculate expires_in from expires_at
       const expiresAt = new Date(payload.expiresAt).getTime();
       const now = Date.now();
       const expiresIn = Math.round((expiresAt - now) / 1000);
@@ -297,7 +383,6 @@ export const SessionProvider = ({ children }) => {
         type: 'LOGOUT_ERROR',
         payload: error?.detail || error.message || 'Logout failed',
       });
-      // Still consider it logged out
       dispatch({ type: 'LOGOUT_SUCCESS' });
     }
   }, []);
@@ -318,18 +403,39 @@ export const SessionProvider = ({ children }) => {
     dispatch({ type: 'CLEAR_ERROR' });
   }, []);
 
+  // Compute unified authentication and RBAC states
+  const sessionRoles = Array.isArray(state.user?.roles) ? state.user.roles : [];
+  const effectiveRoles = Array.from(new Set([...sessionRoles, ...auth0Roles]));
+  const effectiveIsAuthenticated = state.isAuthenticated || isAuth0Authenticated;
+  const isResolvingRoles = isAuth0Authenticated && !hasResolvedAuth0Roles;
+  const hasResolvedRoles = state.isAuthenticated
+    ? true
+    : isAuth0Authenticated
+    ? hasResolvedAuth0Roles
+    : false;
+  const effectiveIsLoading = state.isLoading || isAuth0Loading || isResolvingRoles;
+  const effectiveUser = state.user || auth0User;
+
   /**
    * Value object
    */
   const value = {
     // State
-    user: state.user,
+    user: effectiveUser,
+    profile: auth0Profile,
     sessionId: state.sessionId,
-    isAuthenticated: state.isAuthenticated,
-    isLoading: state.isLoading,
+    isAuthenticated: effectiveIsAuthenticated,
+    isLoading: effectiveIsLoading,
+    isResolvingRoles,
+    hasResolvedRoles,
+    roles: effectiveRoles,
+    effectiveRoles,
     error: state.error,
     tokenExpiresIn: state.tokenExpiresIn,
     lastActivity: state.lastActivity,
+    isAuth0Authenticated,
+    isAuth0Loading,
+    auth0User,
 
     // Methods
     login,
@@ -394,8 +500,8 @@ export const useIsAuthenticated = () => {
  * Hook for current user
  */
 export const useCurrentUser = () => {
-  const { user, isAuthenticated } = useSession();
-  return { user, isAuthenticated };
+  const { user, roles, profile, isAuthenticated } = useSession();
+  return { user, roles, profile, isAuthenticated };
 };
 
 export default SessionContext;

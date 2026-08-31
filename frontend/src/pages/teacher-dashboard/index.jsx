@@ -13,6 +13,7 @@ import StatisticsPanel from './components/StatisticsPanel';
 import QuickActionsPanel from './components/QuickActionsPanel';
 import { apiRequest } from '../../services/api';
 import { apiDelete, apiGet, apiPost, apiPut } from '../../services/httpClient';
+import { SkeletonExamCard } from '../../components/ui/Skeleton';
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();
@@ -242,7 +243,10 @@ const TeacherDashboard = () => {
                       </div>
 
                       {loadingScheduled ? (
-                        <div className="text-center py-8 text-sm text-muted-foreground">Loading templates...</div>
+                        <div className="space-y-4">
+                          <SkeletonExamCard />
+                          <SkeletonExamCard delay="0.08s" />
+                        </div>
                       ) : templateExams.length === 0 ? (
                         <div className="text-center py-12 md:py-16">
                           <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
@@ -279,7 +283,10 @@ const TeacherDashboard = () => {
                       </div>
 
                       {loadingScheduled ? (
-                        <div className="text-center py-8 text-sm text-muted-foreground">Loading drafts...</div>
+                        <div className="space-y-4">
+                          <SkeletonExamCard />
+                          <SkeletonExamCard delay="0.08s" />
+                        </div>
                       ) : draftExams.length === 0 ? (
                         <div className="text-center py-12 md:py-16">
                           <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
@@ -335,7 +342,10 @@ const TeacherDashboard = () => {
                       </div>
 
                       {loadingScheduled ? (
-                        <div className="text-center py-8 text-sm text-muted-foreground">Loading exams...</div>
+                        <div className="space-y-4">
+                          <SkeletonExamCard />
+                          <SkeletonExamCard delay="0.08s" />
+                        </div>
                       ) : scheduledExams.length === 0 ? (
                         <div className="text-center py-12 md:py-16">
                           <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">

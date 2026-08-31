@@ -15,15 +15,12 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const profileMenuRef = useRef(null);
   const notificationRef = useRef(null);
-  const [remoteProfile, setRemoteProfile] = useState(null);
-  const { logout } = useLogout();
+  const { logout, profile: remoteProfile } = useSession();
   const {
     user: auth0User,
     isAuthenticated: auth0Authenticated,
-    getAccessTokenSilently,
     logout: auth0Logout,
   } = useAuth0();
-  const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
 
   const navigationItems = {
     student: [
@@ -72,7 +69,6 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
           try {
             await onLogout();
           } catch (e) {
-            // ignore parent handler errors
             console.warn('onLogout handler error', e);
           }
         } else {
@@ -94,33 +90,6 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
 
     perform();
   };
-  useEffect(() => {
-    let mounted = true;
-
-    const fetchProfile = async () => {
-      try {
-        const token = await getAccessTokenSilently({
-          authorizationParams: {
-            audience: auth0Audience,
-          },
-        });
-        const profile = await apiRequest('/profile/me', 'GET', null, token);
-        if (!mounted) return;
-        if (profile) {
-          setRemoteProfile(profile);
-          return;
-        }
-      } catch {
-        if (mounted) setRemoteProfile(null);
-      }
-    };
-
-    if (auth0Authenticated) {
-      fetchProfile();
-    }
-
-    return () => { mounted = false; };
-  }, [auth0Authenticated, getAccessTokenSilently, auth0Audience]);
 
   const displayName = (userName && userName !== 'User')
     ? userName

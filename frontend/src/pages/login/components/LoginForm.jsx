@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import authService from '../../../services/authService';
-import { apiRequest } from '../../../services/api';
 import { apiGet } from '../../../services/httpClient';
 import { useNavigate, Link } from 'react-router-dom';
-import { dashboardForRoles, extractRolesFromAuth0User } from '../../../utils/roleUtils';
+import { dashboardForRoles } from '../../../utils/roleUtils';
+import { AuthTransitionSkeleton } from '../../../components/ui/Skeleton';
 
 /* ─────────────── helpers ─────────────── */
 
@@ -76,9 +76,10 @@ const LoginForm = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [transitionMessage, setTransitionMessage] = useState('Authenticating and loading workspace...');
   const [shake, setShake] = useState(false);
-  const { loginWithPopup, isLoading: auth0Loading, user: auth0User, getAccessTokenSilently } = useAuth0();
-  const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+  const { loginWithPopup, isLoading: auth0Loading } = useAuth0();
 
   const triggerShake = () => {
     setShake(true);
@@ -100,29 +101,16 @@ const LoginForm = () => {
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
   };
 
-  const resolveDestinationWithFallback = async ({ includeAuth0ProfileFallback = false } = {}) => {
-    const destinationFromProfile = (profile) => {
+  const resolveLocalDestination = async () => {
+    try {
+      const profile = await apiGet('/profile/me');
       const roles = Array.isArray(profile?.roles) && profile.roles.length > 0
         ? profile.roles
         : (profile?.role ? [profile.role] : []);
       return dashboardForRoles(roles);
-    };
-    const rolesFromClaim = extractRolesFromAuth0User(auth0User);
-    if (rolesFromClaim.length > 0) return dashboardForRoles(rolesFromClaim);
-    if (includeAuth0ProfileFallback) {
-      try {
-        const token = await getAccessTokenSilently({ authorizationParams: { audience: auth0Audience } });
-        const profile = await apiRequest('/profile/me', 'GET', null, token);
-        const dest = destinationFromProfile(profile);
-        if (dest !== '/login') return dest;
-      } catch (_) { /* continue */ }
+    } catch (_) {
+      return '/login';
     }
-    try {
-      const profile = await apiGet('/profile/me');
-      const dest = destinationFromProfile(profile);
-      if (dest !== '/login') return dest;
-    } catch (_) { /* no role */ }
-    return '/login';
   };
 
   const handleSubmit = async () => {
@@ -130,10 +118,17 @@ const LoginForm = () => {
     setIsLoading(true);
     try {
       await authService.loginUser(formData.email, formData.password, false, null);
-      const destination = await resolveDestinationWithFallback();
-      if (destination === '/login') { setErrors({ submit: 'Role not available. Contact admin.' }); return; }
+      setTransitionMessage('Setting up your dashboard session...');
+      setIsRedirecting(true);
+      const destination = await resolveLocalDestination();
+      if (destination === '/login') {
+        setIsRedirecting(false);
+        setErrors({ submit: 'Role not available. Contact admin.' });
+        return;
+      }
       navigate(destination);
     } catch {
+      setIsRedirecting(false);
       setErrors({ email: 'Invalid credentials or login failed', password: '' });
       triggerShake();
     } finally {
@@ -144,16 +139,21 @@ const LoginForm = () => {
   const handleGoogleSignIn = async () => {
     try {
       setIsLoading(true);
+      setTransitionMessage('Authenticating Google account...');
+      setIsRedirecting(true);
       await loginWithPopup({ connection: 'google-oauth2', screen_hint: 'login' });
-      const destination = await resolveDestinationWithFallback({ includeAuth0ProfileFallback: true });
-      if (destination === '/login') { setErrors({ submit: 'Role not available. Contact admin.' }); return; }
-      navigate(destination);
+      // Auth0 authentication succeeds -> SessionProvider resolves /profile/me once -> PublicRoute navigates to dashboard.
     } catch {
+      setIsRedirecting(false);
       setErrors({ submit: 'Google sign-in failed. Please try again.' });
     } finally {
       setIsLoading(false);
     }
   };
+
+  if (isRedirecting) {
+    return <AuthTransitionSkeleton message={transitionMessage} />;
+  }
 
   const busy = isLoading || auth0Loading;
 

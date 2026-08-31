@@ -1,15 +1,10 @@
-/**
- * Protected Route Component
- * Enforces authentication and role-based access control
- */
-
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useSession } from '../context/SessionContext';
-import { useAuth0 } from '@auth0/auth0-react';
+import { DashboardSkeleton, AuthTransitionSkeleton } from './ui/Skeleton';
+import { useAuthRoles } from '../utils/useAuthRoles';
 import {
   dashboardForRoles,
-  extractRolesFromAuth0User,
   hasAnyRequiredRole,
 } from '../utils/roleUtils';
 
@@ -37,29 +32,17 @@ export const ProtectedRoute = ({
   accessDeniedPath = '/login',
   ...rest
 }) => {
-  const { isAuthenticated, isLoading, user } = useSession();
   const {
-    isAuthenticated: isAuth0Authenticated,
-    isLoading: isAuth0Loading,
-    user: auth0User,
-  } = useAuth0();
+    effectiveIsAuthenticated,
+    effectiveIsLoading,
+    effectiveRoles,
+    hasResolvedRoles,
+  } = useAuthRoles();
   const location = useLocation();
-  const sessionRoles = Array.isArray(user?.roles) ? user.roles : [];
-  const auth0Roles = extractRolesFromAuth0User(auth0User);
-  const effectiveRoles = Array.from(new Set([...sessionRoles, ...auth0Roles]));
-  const effectiveIsLoading = isLoading || isAuth0Loading;
-  const effectiveIsAuthenticated = isAuthenticated || isAuth0Authenticated;
 
-  // Still loading session
+  // Still loading session or resolving roles
   if (effectiveIsLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
-        </div>
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   // Not authenticated
@@ -67,17 +50,15 @@ export const ProtectedRoute = ({
     return <Navigate to={loginPath} state={{ from: location }} replace />;
   }
 
-  // Enforce role-based access (fail closed when roles are required)
+  // Enforce role-based access
   if (requiredRoles.length > 0) {
-    // If claims are not present yet, let page-level API checks determine access.
-    if (effectiveRoles.length === 0) {
-      return <Component {...rest} />;
-    }
     const hasRequiredRole = hasAnyRequiredRole(effectiveRoles, requiredRoles);
     if (!hasRequiredRole) {
-      const fallbackPath = dashboardForRoles(effectiveRoles);
-      const deniedPath = fallbackPath === '/login' ? accessDeniedPath : fallbackPath;
-      return <Navigate to={deniedPath} replace />;
+      if (hasResolvedRoles) {
+        const fallbackPath = dashboardForRoles(effectiveRoles);
+        const deniedPath = fallbackPath === '/login' ? accessDeniedPath : fallbackPath;
+        return <Navigate to={deniedPath} replace />;
+      }
     }
   }
 
@@ -106,30 +87,18 @@ export const PublicRoute = ({
   redirectPath = '/student-dashboard',
   ...rest
 }) => {
-  const { isAuthenticated, isLoading, user } = useSession();
   const {
-    isAuthenticated: isAuth0Authenticated,
-    isLoading: isAuth0Loading,
-    user: auth0User,
-  } = useAuth0();
-  const sessionRoles = Array.isArray(user?.roles) ? user.roles : [];
-  const auth0Roles = extractRolesFromAuth0User(auth0User);
-  const effectiveRoles = Array.from(new Set([...sessionRoles, ...auth0Roles]));
-  const effectiveIsLoading = isLoading || isAuth0Loading;
-  const effectiveIsAuthenticated = isAuthenticated || isAuth0Authenticated;
+    effectiveIsAuthenticated,
+    effectiveIsLoading,
+    effectiveRoles,
+    hasResolvedRoles,
+  } = useAuthRoles();
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const forceLogin = searchParams.get('forceLogin') === '1' || location.state?.forceLogin === true;
 
   if (effectiveIsLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">Loading...</p>
-        </div>
-      </div>
-    );
+    return <AuthTransitionSkeleton message="Loading your workspace..." />;
   }
 
   // Already authenticated
@@ -139,6 +108,9 @@ export const PublicRoute = ({
     }
     const rolePath = dashboardForRoles(effectiveRoles);
     if (rolePath === '/login') {
+      if (!hasResolvedRoles) {
+        return <AuthTransitionSkeleton message="Resolving permissions..." />;
+      }
       // No resolvable role yet; allow login page to render and resolve gracefully.
       return <Component {...rest} />;
     }

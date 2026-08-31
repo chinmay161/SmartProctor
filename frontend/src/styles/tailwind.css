@@ -415,4 +415,46 @@
     linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
   background-size: 36px 36px;
   animation: auth-grid-drift 10s linear infinite;
-}
+}
+
+/* Skeleton shimmer & pulse */
+@keyframes sp-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.sp-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-muted) 0%,
+    rgba(59, 130, 246, 0.08) 50%,
+    var(--color-muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: sp-shimmer 1.8s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+
+.dark .sp-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(59, 130, 246, 0.12) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: sp-shimmer 1.8s ease-in-out infinite;
+}
+
+.sp-skeleton-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+}
+
