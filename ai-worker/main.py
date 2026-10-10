@@ -1,6 +1,8 @@
 import base64
 import cv2
 import numpy as np
+import time
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
@@ -11,6 +13,10 @@ from models.headpose import detect_headpose
 from models.phone import detect_phone
 from services.temporal_engine import temporal_engine
 from inference.diagnostics import run_detailed_headpose_diagnostic, run_unified_ai_diagnostic, get_environment_diagnostics
+
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="SmartProctor AI Worker")
 
@@ -95,6 +101,7 @@ def diagnostic_headpose(data: SnapshotInferenceRequest):
 
 @app.post("/infer/snapshot")
 def infer_snapshot(data: SnapshotInferenceRequest):
+    t_start = time.perf_counter()
     if not data.snapshot_path and not data.image_base64:
         raise HTTPException(status_code=400, detail="Must provide snapshot_path or image_base64")
 
@@ -140,26 +147,38 @@ def infer_snapshot(data: SnapshotInferenceRequest):
         }
 
     state = session_states[session_id]
-    frame_idx = state["frame_count"] % 3
     state["frame_count"] += 1
     
-    # 2. Face detection runs on every frame so no-face / multi-face rules stay responsive.
+    # 2. Run all models on every frame with timing profiling
+    t_face = time.perf_counter()
     faces = detect_faces(image)
-    state["last_result"]["face_detected"] = len(faces)
-    state["last_result"]["multiple_faces"] = len(faces) > 1
+    face_ms = (time.perf_counter() - t_face) * 1000.0
 
-    # 3. Heavier models still use frame skipping for performance.
-    if frame_idx == 1:
-        pose = detect_headpose(image)
-        state["last_result"]["head_pose"] = pose
-    elif frame_idx == 2:
-        phone = detect_phone(image)
-        state["last_result"]["phone_detected"] = phone
+    t_headpose = time.perf_counter()
+    pose = detect_headpose(image)
+    headpose_ms = (time.perf_counter() - t_headpose) * 1000.0
 
-    # 4. Process Temporal Violations & Anti-Evasion
-    temporal_result = temporal_engine.process_frame(session_id, state["last_result"])
+    t_phone = time.perf_counter()
+    phone = detect_phone(image)
+    phone_ms = (time.perf_counter() - t_phone) * 1000.0
 
-    # 5. Standardize Response (Raw Detections + Aggregated Temporal Violations + Risk Score)
+    raw = {
+        "face_detected": len(faces),
+        "multiple_faces": len(faces) > 1,
+        "head_pose": pose,
+        "phone_detected": phone
+    }
+    state["last_result"].update(raw)
+
+    # 3. Process Temporal Violations & Anti-Evasion
+    temporal_result = temporal_engine.process_frame(session_id, raw)
+
+    total_ms = (time.perf_counter() - t_start) * 1000.0
+    logger.info(
+        f"session_id={session_id} face_ms={face_ms:.2f} headpose_ms={headpose_ms:.2f} phone_ms={phone_ms:.2f} total_ms={total_ms:.2f}"
+    )
+
+    # 4. Standardize Response (Raw Detections + Aggregated Temporal Violations + Risk Score)
     response = {
         "session_id": data.session_id,
         "student_id": data.student_id,
