@@ -1,10 +1,8 @@
 /**
- * HTTP Client with Token Management and Interceptors
- * Automatically handles token attachment, refresh, and error handling
+ * HTTP Client with Auth0 token attachment and 401 handling
  */
 
 import axios from 'axios';
-import { TokenStorage, sessionEvents } from './tokenStorage';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 
@@ -20,145 +18,105 @@ const apiClient = axios.create({
 });
 
 /**
- * Request queue for handling concurrent token refreshes
- * Prevents multiple simultaneous refresh requests
+ * Auth hooks registered once from inside Auth0Provider (see SessionContext).
+ * accessTokenProvider(options) -> Promise<string>, e.g. a wrapped getAccessTokenSilently.
+ * loginRedirectHandler(options) -> starts Auth0 loginWithRedirect.
  */
-let isRefreshing = false;
-let refreshSubscribers = [];
+let accessTokenProvider = null;
+let loginRedirectHandler = null;
+let hasRedirectedToLogin = false;
+let tokenErrorActive = false;
 
-const onRefreshed = (token) => {
-  refreshSubscribers.forEach(callback => callback(token));
-  refreshSubscribers = [];
+export const setAccessTokenProvider = (provider) => {
+  accessTokenProvider = typeof provider === 'function' ? provider : null;
 };
 
-const addRefreshSubscriber = (callback) => {
-  refreshSubscribers.push(callback);
+export const setLoginRedirectHandler = (handler) => {
+  loginRedirectHandler = typeof handler === 'function' ? handler : null;
+};
+
+const getAccessToken = async (options) => {
+  if (!accessTokenProvider) return null;
+  try {
+    return await accessTokenProvider(options);
+  } catch {
+    // login_required / not authenticated: send the request without a token.
+    return null;
+  }
+};
+
+const isExamPortalRoute = (pathname) => pathname === '/exam-portal' || pathname.startsWith('/exam-portal/');
+
+/**
+ * Called when a request is still unauthorized after one retry with a fresh token.
+ * Exam portal never redirects (it would lose the exam); it gets an event instead.
+ */
+const handleAuthFailure = () => {
+  const { pathname, search } = window.location;
+
+  if (isExamPortalRoute(pathname)) {
+    tokenErrorActive = true;
+    window.dispatchEvent(new CustomEvent('auth:token-error'));
+    return;
+  }
+
+  if (hasRedirectedToLogin || pathname === '/' || pathname === '/login' || !loginRedirectHandler) {
+    return;
+  }
+
+  hasRedirectedToLogin = true;
+  loginRedirectHandler({ appState: { returnTo: `${pathname}${search}` } });
 };
 
 /**
  * Request Interceptor
- * Attaches access token to all requests
+ * Attaches the Auth0 access token unless the caller already set Authorization.
+ * Never rejects because of a token fetch failure.
  */
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = TokenStorage.getAccessToken();
+apiClient.interceptors.request.use(async (config) => {
+  if (!config.headers?.Authorization) {
+    const token = await getAccessToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
   }
-);
+  return config;
+});
 
 /**
  * Response Interceptor
- * Handles token expiration and refresh
+ * On 401: retry once with a freshly fetched token, then hand off to handleAuthFailure.
  */
 apiClient.interceptors.response.use(
-  // Success response
   (response) => {
+    if (tokenErrorActive) {
+      tokenErrorActive = false;
+      window.dispatchEvent(new CustomEvent('auth:token-recovered'));
+    }
     return response;
   },
 
-  // Error response
   async (error) => {
     const originalRequest = error.config;
 
-    // Check if error is 401 (Unauthorized)
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      // Don't retry login or logout endpoints
-      if (
-        originalRequest.url?.includes('/login') ||
-        originalRequest.url?.includes('/logout') ||
-        originalRequest.url?.includes('/refresh')
-      ) {
-        // Clear tokens and emit logout event
-        TokenStorage.clearTokens();
-        sessionEvents.emit('unauthorized', { error: error.response.data });
-        return Promise.reject(error);
-      }
-
-      if (isRefreshing) {
-        // Token refresh already in progress, queue this request
-        return new Promise((resolve) => {
-          addRefreshSubscriber((newToken) => {
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            resolve(apiClient(originalRequest));
-          });
-        });
-      }
-
-      // Mark that we're refreshing
-      isRefreshing = true;
-      originalRequest._retry = true;
-
-      try {
-        // Attempt to refresh token
-        const refreshToken = TokenStorage.getRefreshToken();
-        const sessionId = TokenStorage.getSessionId();
-
-        if (!refreshToken || !sessionId) {
-          throw new Error('No refresh token available');
-        }
-
-        const refreshResponse = await axios.post(`${API_BASE}/api/sessions/refresh`, {
-          session_id: sessionId,
-          refresh_token: refreshToken,
-        });
-
-        const { access_token, access_token_expires_at } = refreshResponse.data;
-
-        // Save new token
-        TokenStorage.saveTokens(access_token, refreshToken, {
-          session_id: sessionId,
-          access_token_expires_at,
-        });
-
-        // Update Authorization header
-        apiClient.defaults.headers.common.Authorization = `Bearer ${access_token}`;
-        originalRequest.headers.Authorization = `Bearer ${access_token}`;
-
-        // Emit refresh event
-        sessionEvents.emit('tokenRefreshed', {
-          expiresAt: access_token_expires_at,
-        });
-
-        // Notify queued requests
-        isRefreshing = false;
-        onRefreshed(access_token);
-
-        // Retry original request with new token
-        return apiClient(originalRequest);
-      } catch (refreshError) {
-        // Refresh failed, clear tokens and redirect to login
-        isRefreshing = false;
-        TokenStorage.clearTokens();
-        sessionEvents.emit('sessionExpired', {
-          error: refreshError.response?.data || refreshError.message,
-        });
-
-        // You can add logic here to redirect to login page
-        return Promise.reject(refreshError);
-      }
+    if (error.response?.status !== 401 || !originalRequest) {
+      return Promise.reject(error);
     }
 
-    // Check if error is 403 (Forbidden)
-    if (error.response?.status === 403) {
-      sessionEvents.emit('forbidden', {
-        message: error.response.data?.detail || 'Access forbidden',
-      });
+    if (originalRequest._authRetry) {
+      handleAuthFailure();
+      return Promise.reject(error);
     }
 
-    // Check if error is 404 (Not Found)
-    if (error.response?.status === 404) {
-      sessionEvents.emit('notFound', {
-        message: error.response.data?.detail || 'Resource not found',
-      });
+    originalRequest._authRetry = true;
+    const freshToken = await getAccessToken({ cacheMode: 'off' });
+    if (!freshToken) {
+      handleAuthFailure();
+      return Promise.reject(error);
     }
 
-    return Promise.reject(error);
+    originalRequest.headers.Authorization = `Bearer ${freshToken}`;
+    return apiClient(originalRequest);
   }
 );
 
@@ -250,8 +208,6 @@ export const removeCustomHeader = (key) => {
  */
 export const resetApiClient = () => {
   apiClient.defaults.headers.common = {};
-  isRefreshing = false;
-  refreshSubscribers = [];
 };
 
 export default apiClient;
