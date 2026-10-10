@@ -9,6 +9,10 @@ except Exception:
     mp_face_mesh = None
     face_mesh = None
 
+YAW_LIMIT = 20
+PITCH_DOWN_LIMIT = -15
+PITCH_UP_LIMIT = 20
+
 def calculate_ear(eye_indices, landmarks, img_w, img_h):
     def dist(p1, p2):
         l1 = landmarks[p1]
@@ -116,19 +120,19 @@ def detect_headpose(image):
     direction = "center"
     confidence = 0.8
     
-    if yaw < -10:
+    if yaw < -YAW_LIMIT:
         direction = "left"
         looking_away = True
-    elif yaw > 10:
+    elif yaw > YAW_LIMIT:
         direction = "right"
         looking_away = True
-    elif pitch < -10:
+    elif pitch < PITCH_DOWN_LIMIT:
         direction = "down"
         looking_away = True
 
     if looking_away:
         confidence = min(0.99, 0.5 + (abs(pitch) + abs(yaw)) / 180.0)
-    elif pitch > 20: 
+    elif pitch > PITCH_UP_LIMIT: 
         direction = "up"
         looking_away = True
         
