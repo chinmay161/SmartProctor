@@ -4,7 +4,10 @@ __pycache__/
 venv/
 .env
 .env.*
+!.env.example
 *.db
+*.db-wal
+*.db-shm
 *.sqlite3
 
 # Node
