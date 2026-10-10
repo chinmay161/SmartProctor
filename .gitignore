@@ -31,3 +31,5 @@ ai-context/
 
 #data
 backend/data/*
+# Test caches
+.pytest_cache/

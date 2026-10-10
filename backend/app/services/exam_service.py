@@ -11,6 +11,34 @@ from ..models.exam_session import ExamSession, SessionStatus
 
 RECONNECT_WINDOW_SECONDS = 120  # default allowed window for reconnects
 
+# Base integrity penalty per violation type. Exact (upper-cased) match only, so a new
+# type can never be mis-classified by a substring of another name.
+DEFAULT_BASE_PENALTY = 5
+VIOLATION_BASE_PENALTY = {
+    "NO_FACE": 30,
+    "PHONE_DETECTED": 50,
+    "MULTIPLE_FACES": 50,
+    "LOOKING_AWAY": 20,
+    "SPOOF_DETECTED": 40,
+    "TAB_SWITCH": 15,
+    "WINDOW_BLUR": 15,
+    "WINDOW_RESIZE": 15,
+    "VISIBILITY_CHANGE": 15,
+    "FULLSCREEN_EXIT": 20,
+    # Client-side vision types
+    "BOOK_DETECTED": 30,
+    "CAMERA_FROZEN": 10,
+    "CAMERA_DISCONNECTED": 20,
+    "NO_BLINK": 10,
+    "PROCTORING_STOPPED": 30,
+}
+
+
+def base_penalty_for(violation_type: str | None) -> int:
+    if not violation_type:
+        return DEFAULT_BASE_PENALTY
+    return VIOLATION_BASE_PENALTY.get(violation_type.strip().upper(), DEFAULT_BASE_PENALTY)
+
 
 def create_exam(db: Session, title: str, created_by: str) -> Exam:
     exam = Exam(title=title, created_by=created_by)
@@ -126,15 +154,7 @@ def auto_terminate_on_violation(
 
     # Calculate integrity score deduction
     # Weights: Violations(50%), Conf(20%), Duration(20%), Repeated(10%)
-    base = 5
-    if violation_type:
-        vt = violation_type.upper()
-        if "NO_FACE" in vt: base = 30
-        elif "PHONE" in vt or "MULTIPLE_FACES" in vt: base = 50
-        elif "TAB" in vt or "WINDOW" in vt or "BLUR" in vt or "VISIBILITY" in vt: base = 15
-        elif "FULLSCREEN" in vt: base = 20
-        elif "SPOOF" in vt: base = 40
-        elif "LOOKING_AWAY" in vt: base = 20
+    base = base_penalty_for(violation_type)
 
     # Violations: 50%
     deduction = base * 0.5
