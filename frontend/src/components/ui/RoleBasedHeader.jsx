@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import Icon from '../AppIcon';
 import ThemeToggle from './ThemeToggle';
-import { useLogout } from '../../context/SessionContext';
+import { useSession } from '../../context/SessionContext';
 import { apiRequest } from '../../services/api';
 
 
@@ -16,11 +16,7 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
   const profileMenuRef = useRef(null);
   const notificationRef = useRef(null);
   const { logout, profile: remoteProfile } = useSession();
-  const {
-    user: auth0User,
-    isAuthenticated: auth0Authenticated,
-    logout: auth0Logout,
-  } = useAuth0();
+  const { user: auth0User } = useAuth0();
 
   const navigationItems = {
     student: [
@@ -66,26 +62,14 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
     const perform = async () => {
       try {
         if (onLogout) {
-          try {
-            await onLogout();
-          } catch (e) {
-            console.warn('onLogout handler error', e);
-          }
+          await onLogout();
         } else {
-          await logout(false);
+          logout();
         }
       } catch (err) {
-        console.error('Logout failed', err);
+        console.warn('onLogout handler error', err);
+        logout();
       }
-      if (auth0Authenticated) {
-        auth0Logout({
-          logoutParams: {
-            returnTo: `${window.location.origin}/login`,
-          },
-        });
-        return;
-      }
-      navigate('/login');
     };
 
     perform();

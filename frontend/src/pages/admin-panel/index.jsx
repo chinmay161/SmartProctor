@@ -68,7 +68,6 @@ const AdminPanel = () => {
     getAccessTokenSilently,
     isAuthenticated: isAuth0Authenticated,
     user: auth0User,
-    logout: auth0Logout,
   } = useAuth0();
   const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
   const { logout } = useLogout();
@@ -122,17 +121,7 @@ const AdminPanel = () => {
   const handleLogout = async () => {
     setIsLoggingOut(true);
     setAccessChecking(false);
-    try {
-      await logout(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      auth0Logout({
-        logoutParams: {
-          returnTo: `${window.location.origin}/login`,
-        },
-      });
-    }
+    logout();
   };
 
   /* ── Full-screen loading ── */

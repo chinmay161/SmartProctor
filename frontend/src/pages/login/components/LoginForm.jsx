@@ -1,25 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import authService from '../../../services/authService';
-import { apiGet } from '../../../services/httpClient';
-import { useNavigate, Link } from 'react-router-dom';
-import { dashboardForRoles } from '../../../utils/roleUtils';
+import { Link } from 'react-router-dom';
 import { AuthTransitionSkeleton } from '../../../components/ui/Skeleton';
 
 /* ─────────────── helpers ─────────────── */
-
-const EyeIcon = ({ open }) =>
-  open ? (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
-      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-      <line x1="1" y1="1" x2="23" y2="23" strokeLinecap="round" />
-    </svg>
-  );
 
 const GoogleIcon = () => (
   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none">
@@ -71,15 +55,13 @@ const inputBase = {
 /* ─────────────── LoginForm ─────────────── */
 
 const LoginForm = () => {
-  const navigate = useNavigate();
-  const [formData, setFormData] = useState({ email: '', password: '', rememberMe: false });
-  const [showPassword, setShowPassword] = useState(false);
+  const [formData, setFormData] = useState({ email: '', rememberMe: false });
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [transitionMessage, setTransitionMessage] = useState('Authenticating and loading workspace...');
   const [shake, setShake] = useState(false);
-  const { loginWithPopup, isLoading: auth0Loading } = useAuth0();
+  const { loginWithRedirect, isLoading: auth0Loading } = useAuth0();
 
   const triggerShake = () => {
     setShake(true);
@@ -90,8 +72,6 @@ const LoginForm = () => {
     const newErrors = {};
     if (!formData.email?.trim()) newErrors.email = 'Email address is required';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = 'Please enter a valid email address';
-    if (!formData.password) newErrors.password = 'Password is required';
-    else if (formData.password.length < 8) newErrors.password = 'Password must be at least 8 characters';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -101,53 +81,33 @@ const LoginForm = () => {
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
   };
 
-  const resolveLocalDestination = async () => {
-    try {
-      const profile = await apiGet('/profile/me');
-      const roles = Array.isArray(profile?.roles) && profile.roles.length > 0
-        ? profile.roles
-        : (profile?.role ? [profile.role] : []);
-      return dashboardForRoles(roles);
-    } catch (_) {
-      return '/login';
-    }
-  };
-
+  // Password entry happens on Auth0 Universal Login; the email is passed as a hint.
   const handleSubmit = async () => {
     if (!validateForm()) { triggerShake(); return; }
-    setIsLoading(true);
     try {
-      await authService.loginUser(formData.email, formData.password, false, null);
-      setTransitionMessage('Setting up your dashboard session...');
+      setIsLoading(true);
+      setTransitionMessage('Redirecting to secure sign-in...');
       setIsRedirecting(true);
-      const destination = await resolveLocalDestination();
-      if (destination === '/login') {
-        setIsRedirecting(false);
-        setErrors({ submit: 'Role not available. Contact admin.' });
-        return;
-      }
-      navigate(destination);
+      await loginWithRedirect({
+        authorizationParams: { login_hint: formData.email.trim(), screen_hint: 'login' },
+      });
     } catch {
       setIsRedirecting(false);
-      setErrors({ email: 'Invalid credentials or login failed', password: '' });
-      triggerShake();
-    } finally {
       setIsLoading(false);
+      setErrors({ submit: 'Sign-in failed. Please try again.' });
     }
   };
 
   const handleGoogleSignIn = async () => {
     try {
       setIsLoading(true);
-      setTransitionMessage('Authenticating Google account...');
+      setTransitionMessage('Redirecting to Google sign-in...');
       setIsRedirecting(true);
-      await loginWithPopup({ connection: 'google-oauth2', screen_hint: 'login' });
-      // Auth0 authentication succeeds -> SessionProvider resolves /profile/me once -> PublicRoute navigates to dashboard.
+      await loginWithRedirect({ authorizationParams: { connection: 'google-oauth2' } });
     } catch {
       setIsRedirecting(false);
-      setErrors({ submit: 'Google sign-in failed. Please try again.' });
-    } finally {
       setIsLoading(false);
+      setErrors({ submit: 'Google sign-in failed. Please try again.' });
     }
   };
 
@@ -220,47 +180,6 @@ const LoginForm = () => {
             borderColor: errors.email ? 'var(--auth-error)' : undefined,
           }}
         />
-      </AuthField>
-
-      {/* Password */}
-      <AuthField label="Password" id="login-password" error={errors.password}>
-        <div style={{ position: 'relative' }}>
-          <input
-            id="login-password"
-            type={showPassword ? 'text' : 'password'}
-            placeholder="Enter your password"
-            value={formData.password}
-            onChange={e => handleInputChange('password', e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-            disabled={busy}
-            className="auth-input"
-            style={{
-              ...inputBase,
-              paddingRight: '42px',
-              borderColor: errors.password ? 'var(--auth-error)' : undefined,
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword(v => !v)}
-            style={{
-              position: 'absolute',
-              right: '12px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              background: 'none',
-              border: 'none',
-              color: 'var(--auth-text-secondary)',
-              cursor: 'pointer',
-              padding: '2px',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-            title={showPassword ? 'Hide password' : 'Show password'}
-          >
-            <EyeIcon open={showPassword} />
-          </button>
-        </div>
       </AuthField>
 
       {/* Remember me + Forgot */}

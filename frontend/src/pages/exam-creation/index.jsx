@@ -554,17 +554,7 @@ const ExamCreation = () => {
   };
 
   const handleLogout = () => {
-    const doLogout = async () => {
-      try {
-        await logout(false);
-      } catch (e) {
-        console.error('Logout failed', e);
-      } finally {
-        navigate('/login');
-      }
-    };
-
-    doLogout();
+    logout();
   };
 
   const renderStepContent = () => {

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useSession, useCurrentUser } from '../../../context/SessionContext';
 import { authAwareCall } from '../../../services/authAwareCall';
-import { sessionEvents } from '../../../services/tokenStorage';
 import { useTheme } from '../../../context/ThemeContext';
 import { formatIstDateTime } from '../../../utils/dateTime';
 import { ExamListSkeleton, HistoryTableSkeleton } from '../../../components/ui/Skeleton';
@@ -242,10 +241,10 @@ const HistoryRow = ({ item, onViewResult, index }) => {
 /* ─── Main Dashboard ─── */
 const StudentDashboardExample = () => {
   const navigate = useNavigate();
-  const { logout, getTokenTimeRemaining, sessionId } = useSession();
+  const { logout } = useSession();
   const { user } = useCurrentUser();
   const { resolvedTheme, setTheme } = useTheme();
-  const { user: auth0User, isAuthenticated: auth0Authenticated, logout: auth0Logout, getAccessTokenSilently } = useAuth0();
+  const { user: auth0User, isAuthenticated: auth0Authenticated, getAccessTokenSilently } = useAuth0();
   const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
   const isDark = resolvedTheme === 'dark';
 
@@ -256,7 +255,6 @@ const StudentDashboardExample = () => {
   const [error, setError] = useState(null);
   const [historyError, setHistoryError] = useState(null);
   const [historyStatus, setHistoryStatus] = useState('');
-  const [tokenWarning, setTokenWarning] = useState(false);
   const [nowTs, setNowTs] = useState(Date.now());
   const [activeTab, setActiveTab] = useState('exams'); // 'exams' | 'history' | 'account'
 
@@ -280,28 +278,12 @@ const StudentDashboardExample = () => {
   }, []);
 
   useEffect(() => {
-    const check = () => {
-      const t = getTokenTimeRemaining();
-      setTokenWarning(t && t < 300 && t > 0);
-    };
-    const iv = setInterval(check, 30000);
-    check();
-    const onExpired = () => setError('Session expired. Please log in again.');
-    sessionEvents.on('sessionExpired', onExpired);
-    return () => { clearInterval(iv); sessionEvents.off('sessionExpired', onExpired); };
-  }, [getTokenTimeRemaining]);
-
-  useEffect(() => {
     const iv = setInterval(() => setNowTs(Date.now()), 30000);
     return () => clearInterval(iv);
   }, []);
 
-  const handleLogout = async () => {
-    try {
-      await logout(false);
-      if (auth0Authenticated) { auth0Logout({ logoutParams: { returnTo: `${window.location.origin}/login` } }); return; }
-      navigate('/login');
-    } catch { setError('Logout failed. Please try again.'); }
+  const handleLogout = () => {
+    logout();
   };
 
   const handleStartExam = async (examId) => {
@@ -319,7 +301,6 @@ const StudentDashboardExample = () => {
   };
 
   const displayName = auth0User?.name || auth0User?.nickname || user?.name || 'Student';
-  const minRemaining = Math.floor((getTokenTimeRemaining() || 0) / 60);
 
   /* ── Loading state ── */
   if (loading) {
@@ -342,7 +323,6 @@ const StudentDashboardExample = () => {
   const stats = [
     { icon: ICONS.exams,   label: 'Available Exams',  value: exams.length,              color: '#3B82F6', delay: '0.05s' },
     { icon: ICONS.check,   label: 'Completed',         value: examHistory.length,         color: '#10B981', delay: '0.12s' },
-    { icon: ICONS.clock,   label: 'Session (min)',      value: minRemaining,               color: '#F59E0B', delay: '0.19s' },
     { icon: ICONS.shield,  label: 'Security',           value: 'Active',                   color: '#3B82F6', delay: '0.26s' },
   ];
 
@@ -471,10 +451,6 @@ const StudentDashboardExample = () => {
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(1.5rem, 3vw, 2rem)', color: 'var(--color-foreground)', fontWeight: 400, marginBottom: '6px', lineHeight: 1.2 }}>
               Student Dashboard
             </h1>
-            <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.88rem', color: 'var(--color-muted-foreground)' }}>
-              Session <code style={{ fontFamily: 'var(--font-data)', fontSize: '0.78rem', background: 'var(--color-muted)', padding: '1px 6px', borderRadius: '4px' }}>{sessionId?.slice(0, 10)}…</code>
-              &nbsp;· expires in <strong style={{ color: minRemaining < 10 ? 'var(--sp-warning)' : 'var(--color-foreground)' }}>{minRemaining} min</strong>
-            </p>
           </div>
 
           {/* Stats grid */}
@@ -484,21 +460,6 @@ const StudentDashboardExample = () => {
         </div>
 
         {/* ── Banners ── */}
-        {tokenWarning && (
-          <div className="sp-scale-in" style={{ marginBottom: '16px', padding: '14px 18px', borderRadius: '10px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Icon d={ICONS.warn} size={18} cls="text-warning" style={{ color: 'var(--sp-warning)', flexShrink: 0 }} />
-              <div>
-                <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.85rem', fontWeight: 600, color: 'var(--sp-warning)', marginBottom: '2px' }}>Session expiring soon</p>
-                <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.78rem', color: 'var(--color-muted-foreground)' }}>Your session expires in {minRemaining} min. Save your work.</p>
-              </div>
-            </div>
-            <button onClick={() => window.location.reload()} style={{ padding: '6px 14px', borderRadius: '7px', background: 'var(--sp-warning)', color: '#fff', fontFamily: 'var(--font-body)', fontSize: '0.78rem', fontWeight: 600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-              <Icon d={ICONS.refresh} size={13} /> Refresh
-            </button>
-          </div>
-        )}
-
         {error && (
           <div className="sp-scale-in" style={{ marginBottom: '16px', padding: '14px 18px', borderRadius: '10px', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
             <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.85rem', color: 'var(--sp-error)' }}>{error}</p>
@@ -668,7 +629,6 @@ const StudentDashboardExample = () => {
                   { label: 'Email',    value: auth0User?.email || user?.email || '—' },
                   { label: 'Role',     value: user?.roles?.join(', ') || 'student' },
                   { label: 'User ID',  value: (auth0User?.sub || user?.id || '—')?.toString()?.slice(0, 16) },
-                  { label: 'Session',  value: sessionId?.slice(0, 14) + '…' },
                 ].map(({ label, value }) => (
                   <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
                     <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.78rem', color: 'var(--color-muted-foreground)', fontWeight: 500 }}>{label}</span>
@@ -690,7 +650,6 @@ const StudentDashboardExample = () => {
                 </div>
                 {[
                   { label: 'Authentication', status: '✓ Auth0 via OAuth2', ok: true },
-                  { label: 'Session Token',  status: `Valid · ${minRemaining}m left`,  ok: minRemaining > 5 },
                   { label: 'Exam Integrity', status: '✓ Proctoring active', ok: true  },
                   { label: 'Data Encrypted', status: '✓ TLS 1.3',           ok: true  },
                 ].map(({ label, status, ok }) => (

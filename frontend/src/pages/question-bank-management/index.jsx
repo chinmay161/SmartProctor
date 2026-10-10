@@ -238,7 +238,7 @@ const QuestionBankManagement = () => {
     <div className="min-h-screen bg-background">
       <RoleBasedHeader
         userRole="teacher"
-        onLogout={async () => { await logout(false); }}
+        onLogout={logout}
       />
       <main className="pt-20 pb-12">
         <div className="max-w-[1920px] mx-auto px-4 md:px-6 lg:px-8">
