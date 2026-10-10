@@ -34,3 +34,18 @@ class ViolationReportRequest(BaseModel):
     reason: str | None = None
     duration_ms: int | None = None
     evidence_ids: list[str] | None = None
+
+
+class SystemCheckReport(BaseModel):
+    """Result of the client-side pre-exam device check."""
+    camera_ok: bool
+    models_ok: bool
+    face_fps: float | None = None
+    object_fps: float | None = None
+    face_inference_ms: float | None = None
+    object_inference_ms: float | None = None
+    delegate: str | None = None
+    inference_mode: str | None = None
+    fps_test_skipped: bool = False
+    resumed: bool = False
+    user_agent: str | None = Field(default=None, max_length=512)

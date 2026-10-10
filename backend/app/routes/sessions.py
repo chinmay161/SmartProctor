@@ -10,9 +10,10 @@ from ..models.exam import Exam
 from ..models.exam_attempt import ExamAttempt
 from ..models.exam_session import ExamSession, SessionStatus
 from ..permissions.attempt_permissions import require_attempt_owner
-from ..schemas.violation import ViolationReportRequest
+from ..schemas.violation import SystemCheckReport, ViolationReportRequest
 from ..services import exam_service as _exam_service
 from ..services.attempt_service import start_exam_attempt, submit_attempt
+from ..services.violation_reporting import notify_proctors_from_thread, record_violation
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
@@ -180,49 +181,47 @@ def report_violation(
             except Exception as e:
                 print(f"Failed to save evidence snapshot: {e}")
 
-        updated = _exam_service.auto_terminate_on_violation(
-            db, 
-            session_id, 
-            payload.severity, 
-            increment=payload.count,
+        updated, message = record_violation(
+            db,
+            session,
             violation_type=payload.type,
-            evidence_files=evidence_path,
+            severity=payload.severity,
+            count=payload.count,
             reason=payload.reason,
             duration_ms=payload.duration_ms,
-            confidence=payload.confidence
+            confidence=payload.confidence,
+            evidence_path=evidence_path,
+            event_id=payload.event_id,
         )
-        
-        integrity_score = 100
-        if session.attempt_id:
-            from ..models.exam_attempt import ExamAttempt
-            attempt = db.query(ExamAttempt).filter_by(id=session.attempt_id).first()
-            if attempt:
-                integrity_score = attempt.integrity_score
-                
-        from ..routes.ws_proctoring import manager
-        import asyncio
-        
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(manager.broadcast_to_proctors(
-                session.exam_id,
-                {
-                    "type": "VIOLATION",
-                    "student_id": session.student_id,
-                    "session_id": session_id,
-                    "violation_type": payload.type or f"UI Violation: {payload.severity}",
-                    "severity": payload.severity,
-                    "event_id": payload.event_id or str(uuid.uuid4()),
-                    "integrity_score": integrity_score,
-                    "reason": payload.reason
-                }
-            ))
-        except RuntimeError:
-            pass
-            
+        notify_proctors_from_thread(session.exam_id, message)
+
         return updated
     finally:
         db.close()
+
+@router.post("/session/{session_id}/system-check")
+def record_system_check(
+    session_id: str,
+    payload: SystemCheckReport,
+    user=Depends(require_role("student")),
+):
+    """Store the pre-exam device check on the session timeline (no score impact)."""
+    from ..models.audit import AuditLog
+    import json
+
+    db = SessionLocal()
+    try:
+        session = db.query(ExamSession).filter_by(id=session_id, student_id=user["sub"]).first()
+        if not session:
+            raise HTTPException(404, "Session not found")
+        data = payload.model_dump()
+        data["weak_device"] = payload.face_fps is not None and payload.face_fps < 2
+        db.add(AuditLog(session_id=session_id, event_type="SYSTEM_CHECK", data=json.dumps(data)))
+        db.commit()
+        return {"recorded": True, "weak_device": data["weak_device"]}
+    finally:
+        db.close()
+
 
 @router.get("/{session_id}/timeline")
 def get_session_timeline(session_id: str, user=Depends(require_teacher_or_admin)):

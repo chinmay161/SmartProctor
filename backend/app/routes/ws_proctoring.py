@@ -1,16 +1,47 @@
 import json
 import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
+from starlette.concurrency import run_in_threadpool
 
 from ..auth.ws_auth import authenticate_websocket
 from ..database import SessionLocal
 from ..permissions.ws_student import require_session_owner
 from ..permissions.ws_proctor import require_proctor_for_session
 from ..websocket.manager import ConnectionManager
-from ..models.exam_session import ExamSession
+from ..models.exam import Exam
+from ..models.exam_session import ExamSession, SessionStatus
+from ..services.exam_service import camera_required_for_exam
+from ..services.violation_reporting import notify_proctors, record_violation
+from ..services.vision_watchdog import VisionWatchdog
 
 router = APIRouter()
 manager = ConnectionManager()
+vision_watchdog = VisionWatchdog()
+
+
+def _record_proctoring_stopped(session_id: str, telemetry, stopped_for_sec: float):
+    """Runs in a worker thread (sync DB). Returns (exam_id, proctor message) or None."""
+    db = SessionLocal()
+    try:
+        session = db.query(ExamSession).filter_by(id=session_id).first()
+        if not session or session.status != SessionStatus.LIVE:
+            return None
+        if isinstance(telemetry, dict):
+            detail = f"running={telemetry.get('running')}, phase={telemetry.get('phase')}"
+        else:
+            detail = "no vision telemetry in heartbeat"
+        _, message = record_violation(
+            db,
+            session,
+            violation_type="PROCTORING_STOPPED",
+            severity="major",
+            reason=f"Camera proctoring stopped reporting for {int(stopped_for_sec)}s ({detail}).",
+            duration_ms=int(stopped_for_sec * 1000),
+            confidence=1.0,
+        )
+        return session.exam_id, message
+    finally:
+        db.close()
 
 
 async def _close_ws_with_reason(ws: WebSocket, code: int, reason: str):
@@ -45,8 +76,12 @@ async def student_ws(ws: WebSocket, session_id: str):
             await _close_ws_with_reason(ws, exc.code or 4403, getattr(exc, "reason", "Not your session"))
             return
         exam_id = session.exam_id
+        exam = db.query(Exam).filter_by(id=exam_id).first()
+        camera_required = bool(exam) and camera_required_for_exam(db, exam)
 
         await manager.connect_student(session_id, exam_id, ws)
+        if camera_required:
+            vision_watchdog.observe_connect(session_id, time.time())
 
         ALLOWED_STUDENT_TYPES = {"HEARTBEAT", "VIOLATION", "SYNC_REQUEST"}
         MAX_SIZE = 4096
@@ -78,6 +113,13 @@ async def student_ws(ws: WebSocket, session_id: str):
                         continue  # Rate limit
                     last_heartbeat = now
                     manager.last_seen[session_id] = now
+                    telemetry = data.get("vision")
+                    manager.vision_telemetry[session_id] = telemetry if isinstance(telemetry, dict) else None
+                    if camera_required and vision_watchdog.observe(session_id, telemetry, now):
+                        stopped_for = vision_watchdog.outage_seconds(session_id, now)
+                        result = await run_in_threadpool(_record_proctoring_stopped, session_id, telemetry, stopped_for)
+                        if result:
+                            await notify_proctors(*result)
                     # Don't broadcast raw heartbeats anymore, allow STATUS_SYNC to handle presence
                     
                 elif msg_type == "VIOLATION":

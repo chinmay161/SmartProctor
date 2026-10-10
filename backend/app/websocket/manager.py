@@ -15,6 +15,7 @@ class ConnectionManager:
         self.last_seen = {} # session_id -> timestamp
         self.ended_sessions = set() # session_id -> bool flags
         self.student_states = defaultdict(dict) # session_id -> latest sync state
+        self.vision_telemetry = {} # session_id -> latest client vision telemetry from HEARTBEAT
         
         # Backpressure queues
         self.exam_queues = {} # exam_id -> asyncio.Queue
