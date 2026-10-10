@@ -110,6 +110,7 @@ const ExamPortal = () => {
   const [violations, setViolations] = useState([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [proctorWarning, setProctorWarning] = useState('');
+  const [authReconnecting, setAuthReconnecting] = useState(false);
   const [violationLock, setViolationLock] = useState(null);
   const pendingSavesRef = useRef({});
   const pendingViolationsRef = useRef([]);
@@ -384,6 +385,19 @@ const ExamPortal = () => {
         clearTimeout(violationLockTimeoutRef.current);
         violationLockTimeoutRef.current = null;
       }
+    };
+  }, []);
+
+  // httpClient never redirects to login on this route; it signals token trouble instead.
+  // Requests keep their own retry behaviour; this banner only reflects the auth state.
+  useEffect(() => {
+    const onTokenError = () => setAuthReconnecting(true);
+    const onTokenRecovered = () => setAuthReconnecting(false);
+    window.addEventListener('auth:token-error', onTokenError);
+    window.addEventListener('auth:token-recovered', onTokenRecovered);
+    return () => {
+      window.removeEventListener('auth:token-error', onTokenError);
+      window.removeEventListener('auth:token-recovered', onTokenRecovered);
     };
   }, []);
 
@@ -841,6 +855,12 @@ const ExamPortal = () => {
       {loadWarning && (
         <div className="bg-warning/15 border-b border-warning/30 px-4 py-2 text-xs text-warning">
           {loadWarning}
+        </div>
+      )}
+
+      {authReconnecting && (
+        <div role="status" className="bg-warning/15 border-b border-warning/30 px-4 py-2 text-xs text-warning">
+          Reconnecting… your answers are kept and will sync once the connection is restored.
         </div>
       )}
 
