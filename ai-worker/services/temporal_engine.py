@@ -1,5 +1,8 @@
+import copy
 import time
 from typing import Dict, List
+
+ENABLE_NO_BLINK_SPOOF = False
 
 class TemporalEngine:
     def __init__(self):
@@ -50,7 +53,7 @@ class TemporalEngine:
         
         history.append({
             "ts": now,
-            "raw": raw_features,
+            "raw": copy.deepcopy(raw_features),
             "evidence_id": evidence_id
         })
         
@@ -136,7 +139,8 @@ class TemporalEngine:
             state["last_blink_ts"] = now
             
         if (
-            blink_supported
+            ENABLE_NO_BLINK_SPOOF
+            and blink_supported
             and state["valid_blink_frame_count"] >= 10
             and now - state["last_valid_blink_signal_ts"] <= 5
             and now - state["last_blink_ts"] > self.BLINK_TIMEOUT_SEC
