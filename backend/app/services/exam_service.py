@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -38,6 +39,39 @@ def base_penalty_for(violation_type: str | None) -> int:
     if not violation_type:
         return DEFAULT_BASE_PENALTY
     return VIOLATION_BASE_PENALTY.get(violation_type.strip().upper(), DEFAULT_BASE_PENALTY)
+
+
+CAMERA_WIZARD_FLAGS = ("enableWebcam", "detectMultipleFaces", "detectNoFace", "detectMobilePhone")
+
+
+def exam_requires_camera(wizard_config: dict | None, rules: ExamRules | None) -> bool:
+    """Single source of truth for whether an exam needs the webcam.
+
+    An explicit ExamRules row wins; otherwise fall back to the exam wizard flags,
+    which is the same expression the exam portal has always used.
+    """
+    if rules is not None:
+        return bool(rules.camera_required)
+    if not isinstance(wizard_config, dict):
+        return False
+    return any(bool(wizard_config.get(flag)) for flag in CAMERA_WIZARD_FLAGS)
+
+
+def _parse_wizard_config(raw) -> dict | None:
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def camera_required_for_exam(db: Session, exam: Exam) -> bool:
+    rules = db.query(ExamRules).filter_by(exam_id=exam.id).first()
+    return exam_requires_camera(_parse_wizard_config(exam.wizard_config), rules)
 
 
 def create_exam(db: Session, title: str, created_by: str) -> Exam:

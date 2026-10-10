@@ -6,12 +6,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.orm import object_session
 
 from ..auth.dependencies import get_current_user
 from ..auth.roles import require_role
 from ..database import SessionLocal
 from ..models.exam import Exam
 from ..models.exam import ExamStatus
+from ..models.exam_rules import ExamRules
 from ..models.enrollment import ExamEnrollment
 from ..models.exam_attempt import AttemptStatus, ExamAttempt
 from ..models.exam_session import ExamSession
@@ -38,7 +40,7 @@ from ..services.attempt_service import (
     sync_exam_status_for_now,
     utcnow,
 )
-from ..services.exam_service import configure_exam_rules
+from ..services.exam_service import configure_exam_rules, exam_requires_camera
 
 router = APIRouter(prefix="/exams", tags=["Exams"])
 DEFAULT_EXAM_TIMEZONE = ZoneInfo("Asia/Kolkata")
@@ -106,6 +108,9 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
         except json.JSONDecodeError:
             wizard_config = None
 
+    db = object_session(exam)
+    rules = db.query(ExamRules).filter_by(exam_id=exam.id).first() if db is not None else None
+
     return ExamResponse(
         id=exam.id,
         title=exam.title,
@@ -113,6 +118,7 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
         duration_minutes=exam.duration_minutes,
         question_ids=question_ids,
         wizard_config=wizard_config,
+        camera_required=exam_requires_camera(wizard_config, rules),
         start_time=_as_utc_timestamp(exam.start_time),
         end_time=_as_utc_timestamp(exam.end_time),
         status=exam.status,
