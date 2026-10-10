@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import Icon from '../../components/AppIcon';
@@ -10,6 +10,40 @@ import QuestionDisplay from './components/QuestionDisplay';
 import SubmitConfirmationModal from './components/SubmitConfirmationModal';
 import ProctoredWatermarkOverlay from './components/ProctoredWatermarkOverlay';
 import { authAwareCall } from '../../services/authAwareCall';
+import {
+  HIDDEN_VIDEO_STYLE,
+  INFERENCE_MODE,
+  fpsCheckStore,
+  useVisionProctoring,
+} from '../../components/proctoring/useVisionProctoring';
+import { severityForViolation } from '../../utils/violationSeverity';
+
+// Only camera exams need the gate UI, so it ships in its own chunk.
+const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
+
+const CAMERA_WIZARD_FLAGS =['enableWebcam', 'detectMultipleFaces', 'detectNoFace', 'detectMobilePhone'];
+const wizardRequiresCamera = (cfg) => CAMERA_WIZARD_FLAGS.some((flag) => Boolean(cfg?.[flag]));
+
+const VISION_MESSAGES = {
+  NO_FACE: 'No face detected',
+  MULTIPLE_FACES: 'Multiple faces detected',
+  PHONE_DETECTED: 'Phone detected',
+  BOOK_DETECTED: 'Book detected',
+  LOOKING_AWAY: 'Looking away from the screen',
+  NO_BLINK: 'No blinking detected',
+  CAMERA_FROZEN: 'Camera image frozen or covered',
+  CAMERA_DISCONNECTED: 'Camera disconnected',
+};
+
+// Same per-detector switches the server pipeline honours.
+const isVisionViolationEnabled = (type, cfg) => {
+  if (type === 'NO_FACE') return Boolean(cfg?.detectNoFace);
+  if (type === 'MULTIPLE_FACES') return Boolean(cfg?.detectMultipleFaces);
+  if (type === 'PHONE_DETECTED' || type === 'BOOK_DETECTED') return Boolean(cfg?.detectMobilePhone);
+  return true;
+};
+
+const START_CLICK_KEY = 'sp:startClickedAt';
 
 const normalizeQuestionType = (rawType) => {
   const type = String(rawType || '').trim().toLowerCase();
@@ -124,6 +158,14 @@ const ExamPortal = () => {
   const warningTimeoutRef = useRef(null);
   const hasEnteredFullscreenRef = useRef(false);
   const [examRules, setExamRules] = useState(null);
+  // loading -> gate (camera exams) -> starting -> ready. The attempt timer starts in 'starting'.
+  const [stage, setStage] = useState('loading');
+  const [cameraRequired, setCameraRequired] = useState(false);
+  const [isResume, setIsResume] = useState(false);
+  const pendingExamRef = useRef(null);
+  const gateResultRef = useRef(null);
+  const beginningRef = useRef(false);
+  const visionTelemetryRef = useRef(() => null);
 
 
   const sourceExam = examDataState;
@@ -154,6 +196,13 @@ const ExamPortal = () => {
     auth0User?.name ||
     auth0User?.nickname ||
     'Student';
+
+  const clientVision = cameraRequired && INFERENCE_MODE === 'client';
+  const visionViolationRef = useRef(null);
+  const vision = useVisionProctoring({
+    detectObjects: Boolean(securityConfig?.detectMobilePhone),
+    onViolation: (event) => visionViolationRef.current?.(event),
+  });
 
   const callApi = (path, method = 'GET', body = null, fallbackPaths = []) =>
     authAwareCall({
@@ -247,121 +296,72 @@ const ExamPortal = () => {
     );
   };
 
+  // Step 1: read-only loading. Nothing here starts the attempt or its timer.
   useEffect(() => {
     let mounted = true;
 
-    const fetchExam = async () => {
+    const loadExam = async () => {
       try {
         const params = new URLSearchParams(window.location.search);
         const examIdFromUrl = params.get('examId') || params.get('id');
-        const sessionIdFromUrl = params.get('sessionId');
         setExamId(examIdFromUrl);
-        setSessionId(sessionIdFromUrl);
-
-        if (sessionIdFromUrl) {
-          try {
-            const session = await callApi(`/sessions/${sessionIdFromUrl}`, 'GET');
-            if (mounted && session?.attempt_id) {
-              setAttemptId(session.attempt_id);
-            }
-          } catch {
-            if (mounted) {
-              setLoadWarning('Session details are unavailable. Trying to resume from attempt data.');
-            }
-          }
-        }
 
         if (!examIdFromUrl) {
-          if (mounted) {
-            setExamDataState(null);
-            setExamBlocked('Unable to load exam. Please return to your dashboard.');
-          }
+          if (mounted) setExamBlocked('Unable to load exam. Please return to your dashboard.');
           return;
         }
 
         const exam = await callApi(`/exams/${examIdFromUrl}`, 'GET');
         if (!mounted) return;
         if (!exam) {
-          setExamDataState(null);
           setExamBlocked('Unable to load exam. Please return to your dashboard.');
           return;
         }
 
-        const questionIds = Array.isArray(exam?.question_ids) ? exam.question_ids : [];
-        let liveQuestions = [];
-        if (questionIds.length > 0) {
-          const responses = await Promise.all(
-            questionIds.map(async (questionId) => {
-              try {
-                return await callApi(`/api/questions/${encodeURIComponent(questionId)}`, 'GET');
-              } catch {
-                return null;
-              }
-            })
-          );
-          liveQuestions = responses
-            .filter(Boolean)
-            .map((q, idx) => mapApiQuestionToPortal(q, idx));
-        }
-
-        const rawExamData = {
-          ...exam,
-          duration: exam?.duration_minutes || 0,
-          questions: liveQuestions,
-        };
+        let cfg = null;
         if (exam?.wizard_config) {
           try {
-            const cfg = typeof exam.wizard_config === 'string' ? JSON.parse(exam.wizard_config) : exam.wizard_config;
+            cfg = typeof exam.wizard_config === 'string' ? JSON.parse(exam.wizard_config) : exam.wizard_config;
             setExamRules(cfg);
-            rawExamData.questions = applyQuestionSecurity(
-              rawExamData.questions,
-              cfg,
-              attemptId || sessionIdFromUrl || examIdFromUrl
-            );
-          } catch(e) {}
+          } catch {
+            cfg = null;
+          }
         }
-        setExamDataState(rawExamData);
 
+        // Prefetch question content while the student goes through the device check.
+        const questionIds = Array.isArray(exam?.question_ids) ? exam.question_ids : [];
+        const questionsPromise = Promise.all(
+          questionIds.map(async (questionId) => {
+            try {
+              return await callApi(`/api/questions/${encodeURIComponent(questionId)}`, 'GET');
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        // Is there an attempt in progress already? (read-only; 404 = fresh start)
+        let resumable = false;
         try {
-          const resume = await callApi(`/attempts/${encodeURIComponent(examIdFromUrl)}/resume`, 'GET');
-          if (!mounted) return;
-          if (resume?.attempt_id) {
-            setAttemptId(resume.attempt_id);
-          }
-          if (Number.isFinite(resume?.duration_remaining_seconds)) {
-            setRemainingSeconds(Math.max(0, Math.floor(resume.duration_remaining_seconds)));
-          }
-
-          const restoredAnswers = {};
-          if (Array.isArray(resume?.saved_answers)) {
-            resume.saved_answers.forEach((saved) => {
-              if (saved?.question_id) {
-                restoredAnswers[String(saved.question_id)] = saved.answer;
-              }
-            });
-          }
-          setAnswers(restoredAnswers);
+          await callApi(`/attempts/${encodeURIComponent(examIdFromUrl)}/resume`, 'GET');
+          resumable = true;
         } catch (error) {
-          if (!mounted) return;
           const status = error?.status || error?.status_code || error?.response?.status;
-          const detail = error?.detail || error?.message || '';
-          const lower = String(detail).toLowerCase();
-          if (status === 403 || status === 404 || lower.includes('not found') || lower.includes('not resumable') || lower.includes('expired')) {
-            setExamBlocked('Unable to load exam. Please return to your dashboard.');
+          const lower = String(error?.detail || error?.message || '').toLowerCase();
+          if (status === 403 || lower.includes('not resumable') || lower.includes('expired')) {
+            if (mounted) setExamBlocked('This attempt can no longer be resumed. Please return to your dashboard.');
             return;
           }
-          setLoadWarning('Could not load attempt progress. You may continue, but previous progress may be unavailable.');
         }
+        if (!mounted) return;
 
-        if (questionIds.length === 0) {
-          setLoadWarning('No questions are attached to this exam yet.');
-        } else if (liveQuestions.length === 0) {
-          setLoadWarning('Could not load question details.');
-        } else if (liveQuestions.length < questionIds.length) {
-          setLoadWarning('Some question details could not be loaded. Loaded available live questions.');
-        } else {
-          setLoadWarning('');
-        }
+        const requiresCamera = typeof exam?.camera_required === 'boolean'
+          ? exam.camera_required
+          : wizardRequiresCamera(cfg);
+        pendingExamRef.current = { exam, cfg, questionIds, questionsPromise };
+        setIsResume(resumable);
+        setCameraRequired(requiresCamera);
+        setStage(requiresCamera ? 'gate' : 'starting');
       } catch {
         if (mounted) {
           setExamDataState(null);
@@ -374,7 +374,7 @@ const ExamPortal = () => {
       }
     };
 
-    fetchExam();
+    loadExam();
     return () => {
       mounted = false;
       if (violationRetryTimeoutRef.current) {
@@ -387,6 +387,111 @@ const ExamPortal = () => {
       }
     };
   }, []);
+
+  // Step 3: start (or rejoin) the session only after the gate has passed.
+  const beginExam = async (gateResult) => {
+    const pending = pendingExamRef.current;
+    if (!pending || beginningRef.current) return;
+    beginningRef.current = true;
+    const { exam, cfg, questionIds, questionsPromise } = pending;
+    const activeExamId = exam?.id || examId;
+
+    let session;
+    try {
+      session = await callApi(`/sessions/${encodeURIComponent(activeExamId)}/start`, 'POST');
+    } catch (error) {
+      setExamBlocked(error?.detail || error?.message || 'Unable to start the exam. Please return to your dashboard.');
+      return;
+    }
+    const newSessionId = session?.session_id || session?.id || null;
+    navigate(
+      `/exam-portal?examId=${encodeURIComponent(activeExamId)}${newSessionId ? `&sessionId=${encodeURIComponent(newSessionId)}` : ''}`,
+      { replace: true }
+    );
+
+    if (gateResult && INFERENCE_MODE === 'client') {
+      if (gateResult.measure && !gateResult.weakDevice) {
+        fpsCheckStore.set(activeExamId, { passed: true, faceFps: gateResult.measure.faceFps, at: Date.now() });
+      }
+      if (newSessionId) {
+        const m = gateResult.measure;
+        void callApi(`/sessions/session/${encodeURIComponent(newSessionId)}/system-check`, 'POST', {
+          camera_ok: Boolean(gateResult.camera?.ok),
+          models_ok: Boolean(gateResult.models?.ok),
+          face_fps: m?.faceFps ?? null,
+          object_fps: m?.objectFps ?? null,
+          face_inference_ms: m?.faceMs ?? null,
+          object_inference_ms: m?.objectMs ?? null,
+          delegate: gateResult.models?.delegates?.face ?? null,
+          inference_mode: INFERENCE_MODE,
+          fps_test_skipped: Boolean(gateResult.fpsSkipped),
+          resumed: isResume,
+          user_agent: navigator.userAgent.slice(0, 500),
+        }).catch((error) => console.warn('Failed to record system check', error));
+      }
+    }
+
+    let restoredAnswers = {};
+    try {
+      const resume = await callApi(`/attempts/${encodeURIComponent(activeExamId)}/resume`, 'GET');
+      if (resume?.attempt_id) setAttemptId(resume.attempt_id);
+      if (Number.isFinite(resume?.duration_remaining_seconds)) {
+        setRemainingSeconds(Math.max(0, Math.floor(resume.duration_remaining_seconds)));
+      }
+      (resume?.saved_answers || []).forEach((saved) => {
+        if (saved?.question_id) restoredAnswers[String(saved.question_id)] = saved.answer;
+      });
+    } catch {
+      restoredAnswers = {};
+      setLoadWarning('Could not load attempt progress. You may continue, but previous progress may be unavailable.');
+    }
+
+    const responses = await questionsPromise;
+    const liveQuestions = responses.filter(Boolean).map((q, idx) => mapApiQuestionToPortal(q, idx));
+    const questions = cfg
+      ? applyQuestionSecurity(liveQuestions, cfg, newSessionId || activeExamId)
+      : liveQuestions;
+
+    if (questionIds.length === 0) {
+      setLoadWarning('No questions are attached to this exam yet.');
+    } else if (liveQuestions.length === 0) {
+      setLoadWarning('Could not load question details.');
+    } else if (liveQuestions.length < questionIds.length) {
+      setLoadWarning('Some question details could not be loaded. Loaded available live questions.');
+    }
+
+    if (session?.attempt_id) setAttemptId(session.attempt_id);
+    setAnswers(restoredAnswers);
+    setSessionId(newSessionId);
+    setExamDataState({ ...exam, duration: exam?.duration_minutes || 0, questions });
+
+    if (gateResult?.calibration?.baseline && INFERENCE_MODE === 'client') {
+      await vision.start(gateResult.calibration.baseline);
+    }
+    setStage('ready');
+  };
+
+  useEffect(() => {
+    if (stage === 'starting') void beginExam(gateResultRef.current);
+    // beginExam is guarded by beginningRef and only needs to run once per stage change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
+
+  // Reports how long "Start exam" -> first question took (set by the dashboard click).
+  useEffect(() => {
+    if (stage !== 'ready') return;
+    const clickedAt = Number(sessionStorage.getItem(START_CLICK_KEY));
+    sessionStorage.removeItem(START_CLICK_KEY);
+    requestAnimationFrame(() => {
+      const timing = {
+        startToFirstQuestionMs: clickedAt ? Date.now() - clickedAt : null,
+        gate: gateResultRef.current?.timings || null,
+        resumed: isResume,
+      };
+      window.__spTiming = timing;
+      console.info('[timing] Start exam -> first question', timing);
+    });
+  }, [stage, isResume]);
 
   // httpClient never redirects to login on this route; it signals token trouble instead.
   // Requests keep their own retry behaviour; this banner only reflects the auth state.
@@ -450,7 +555,7 @@ const ExamPortal = () => {
 
           heartbeatIntervalRef.current = setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now() }));
+              ws.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now(), vision: visionTelemetryRef.current() }));
             }
           }, 5000);
         };
@@ -649,7 +754,8 @@ const ExamPortal = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isLoading, examBlocked, sourceExam, detectTabSwitchEnabled]);
 
-  const addViolation = (message, type = null, confidence = null) => {
+  // extras: { image, durationMs, reason } — vision violations carry their own evidence frame.
+  const addViolation = (message, type = null, confidence = null, extras = {}) => {
     if (examEndedRef.current) return;
     triggerViolationLock(message);
     const event_id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
@@ -659,10 +765,12 @@ const ExamPortal = () => {
       timestamp: new Date()
     };
     
-    // Attempt to capture evidence snapshot
-    let snapshotImage = null;
-    if (securityMonitorRef.current?.captureImage) {
-       snapshotImage = securityMonitorRef.current.captureImage();
+    // Evidence: the vision frame that triggered it, else a current camera frame.
+    let snapshotImage = extras.image || null;
+    if (!snapshotImage && clientVision && !document.hidden) {
+      snapshotImage = vision.captureEvidence();
+    } else if (!snapshotImage && securityMonitorRef.current?.captureImage) {
+      snapshotImage = securityMonitorRef.current.captureImage();
     }
 
     setViolations((prev) => {
@@ -683,8 +791,7 @@ const ExamPortal = () => {
       return updated;
     });
 
-    const lower = String(message || '').toLowerCase();
-    const severity = lower.includes('fullscreen') ? 'severe' : (lower.includes('tab') ? 'major' : 'minor');
+    const severity = severityForViolation(type, message);
     const body = {
       type,
       confidence,
@@ -693,9 +800,37 @@ const ExamPortal = () => {
       image: snapshotImage,
       count: 1,
       event_id,
-      reason: message,
+      reason: extras.reason || message,
+      duration_ms: Number.isFinite(extras.durationMs) ? Math.round(extras.durationMs) : null,
     };
     void persistViolation(body);
+  };
+
+  visionViolationRef.current = (event) => {
+    if (!isVisionViolationEnabled(event.type, securityConfig)) return;
+    addViolation(VISION_MESSAGES[event.type] || event.type, event.type, event.confidence, {
+      image: event.image,
+      durationMs: event.durationMs,
+      reason: event.reason,
+    });
+  };
+
+  // Vision telemetry for the HEARTBEAT (server watchdog raises PROCTORING_STOPPED from it).
+  visionTelemetryRef.current = () => {
+    if (!cameraRequired) return { mode: INFERENCE_MODE, running: false, phase: 'disabled' };
+    if (INFERENCE_MODE === 'client') {
+      return vision.getTelemetry() || { mode: 'client', running: false, phase: stage === 'ready' ? 'idle' : stage };
+    }
+    const snap = securityMonitorRef.current?.getSnapshotTelemetry?.() || null;
+    const ageMs = snap?.lastSnapshotAt ? Date.now() - snap.lastSnapshotAt : null;
+    return {
+      mode: 'server',
+      phase: snap?.active ? 'running' : 'stopped',
+      running: Boolean(snap?.active) && ageMs !== null && ageMs < 15000,
+      faceFps: null,
+      lastInferenceAt: snap?.lastSnapshotAt || null,
+      inferenceAgeMs: ageMs,
+    };
   };
 
 
@@ -783,28 +918,75 @@ const ExamPortal = () => {
     ? (examDataState?.duration_minutes ?? examDataState?.duration ?? 0)
     : (sourceExam?.duration_minutes ?? sourceExam?.duration);
 
+  // Inference video stays mounted at the same position in every branch so the
+  // vision controller keeps the same element from the gate into the exam.
+  const inferenceVideo = (
+    <video ref={vision.videoRef} style={HIDDEN_VIDEO_STYLE} muted playsInline autoPlay aria-hidden="true" />
+  );
+
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <div className="text-sm text-muted-foreground">Loading exam...</div>
-      </div>
+      <>
+        {inferenceVideo}
+        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+          <div className="text-sm text-muted-foreground">Loading exam...</div>
+        </div>
+      </>
     );
   }
 
-  if (examBlocked || !sourceExam) {
+  if (examBlocked) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <div className="max-w-lg w-full bg-card border border-border rounded-lg p-6 shadow-md text-center">
-          <p className="text-sm text-muted-foreground mb-4">Unable to load exam. Please return to your dashboard.</p>
-          <Button onClick={() => navigate('/student-dashboard')} className="w-full">
-            Return to Dashboard
-          </Button>
+      <>
+        {inferenceVideo}
+        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+          <div className="max-w-lg w-full bg-card border border-border rounded-lg p-6 shadow-md text-center">
+            <p className="text-sm text-muted-foreground mb-4">{examBlocked}</p>
+            <Button onClick={() => navigate('/student-dashboard')} className="w-full">
+              Return to Dashboard
+            </Button>
+          </div>
         </div>
-      </div>
+      </>
+    );
+  }
+
+  if (stage === 'gate') {
+    return (
+      <>
+        {inferenceVideo}
+        <Suspense fallback={<div className="min-h-screen bg-background" />}>
+        <PreExamGate
+          vision={vision}
+          variant={INFERENCE_MODE === 'server' ? 'permission-only' : (isResume ? 'resume' : 'exam')}
+          skipFps={isResume && Boolean(fpsCheckStore.get(examId)?.passed)}
+          calibrationMs={isResume ? 2000 : 3000}
+          title={isResume ? 'Resume your exam' : 'Before you start'}
+          onComplete={(result) => {
+            gateResultRef.current = result;
+            setStage('starting');
+          }}
+          onCancel={() => navigate('/student-dashboard')}
+        />
+        </Suspense>
+      </>
+    );
+  }
+
+  if (stage !== 'ready' || !sourceExam) {
+    return (
+      <>
+        {inferenceVideo}
+        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+          <div className="text-sm text-muted-foreground">Starting your exam…</div>
+        </div>
+      </>
     );
   }
 
   return (
+    <>
+    {inferenceVideo}
     <div className="relative isolate min-h-screen bg-background flex flex-col">
       {watermarkEnabled && (
         <ProctoredWatermarkOverlay
@@ -1012,6 +1194,9 @@ const ExamPortal = () => {
             securityConfig={securityConfig}
             onAddViolation={addViolation}
             onRequestSnapshot={requestSnapshot}
+            clientVision={clientVision}
+            managedStream={clientVision ? vision.stream : null}
+            getVisionTelemetry={clientVision ? vision.getTelemetry : null}
           />
         </div>
       </div>
@@ -1042,6 +1227,9 @@ const ExamPortal = () => {
               securityConfig={securityConfig}
               onAddViolation={addViolation}
               onRequestSnapshot={requestSnapshot}
+              clientVision={clientVision}
+              managedStream={clientVision ? vision.stream : null}
+              getVisionTelemetry={clientVision ? vision.getTelemetry : null}
             />
           </div>
         </div>
@@ -1060,6 +1248,7 @@ const ExamPortal = () => {
         />
       )}
     </div>
+    </>
   );
 };
 

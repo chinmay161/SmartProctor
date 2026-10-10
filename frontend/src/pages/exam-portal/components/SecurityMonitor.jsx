@@ -26,7 +26,18 @@ const getViolationMessage = (violation) => {
   return AI_VIOLATION_MESSAGES[violation?.type] || 'Suspicious activity detected';
 };
 
-const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onAddViolation, onRequestSnapshot }, ref) => {
+// clientVision: camera + inference are owned by the exam portal (on-device MediaPipe);
+// this panel then only previews managedStream and never uploads snapshots.
+const SecurityMonitor = forwardRef(({
+  violations,
+  sessionId,
+  securityConfig,
+  onAddViolation,
+  onRequestSnapshot,
+  clientVision = false,
+  managedStream = null,
+  getVisionTelemetry = null,
+}, ref) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const screenVideoRef = useRef(null);
@@ -36,6 +47,8 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const onAddViolationRef = useRef(onAddViolation);
+  const snapshotTelemetryRef = useRef({ active: false, lastSnapshotAt: null });
+  const [visionStatus, setVisionStatus] = useState(null);
   const [cameraStatus, setCameraStatus] = useState('disabled');
   const [screenStatus, setScreenStatus] = useState('disabled');
   const [audioStatus, setAudioStatus] = useState('disabled');
@@ -106,6 +119,7 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
   };
 
   useImperativeHandle(ref, () => ({
+    getSnapshotTelemetry: () => ({ ...snapshotTelemetryRef.current }),
     captureImage: () => {
       if (cameraStatus !== 'active' || !videoRef.current || !canvasRef.current || document.hidden) {
         return null;
@@ -122,6 +136,11 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
   }), [cameraStatus]);
 
   useEffect(() => {
+    if (clientVision) {
+      setCameraStatus(managedStream ? 'active' : 'initializing');
+      setCameraErrorMessage('');
+      return;
+    }
     if (!webcamRequired) {
       stopStream(webcamStreamRef);
       setCameraStatus('disabled');
@@ -159,12 +178,21 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
       mounted = false;
       stopStream(webcamStreamRef);
     };
-  }, [webcamRequired]);
+  }, [webcamRequired, clientVision, managedStream]);
 
   useEffect(() => {
-    if (cameraStatus !== 'active' || !videoRef.current || !webcamStreamRef.current) return;
-    void attachStreamToVideo(videoRef.current, webcamStreamRef.current);
-  }, [cameraStatus]);
+    const previewStream = clientVision ? managedStream : webcamStreamRef.current;
+    if (cameraStatus !== 'active' || !videoRef.current || !previewStream) return;
+    void attachStreamToVideo(videoRef.current, previewStream);
+  }, [cameraStatus, clientVision, managedStream]);
+
+  useEffect(() => {
+    if (!clientVision || !getVisionTelemetry) return undefined;
+    const update = () => setVisionStatus(getVisionTelemetry());
+    update();
+    const id = window.setInterval(update, 2000);
+    return () => window.clearInterval(id);
+  }, [clientVision, getVisionTelemetry]);
 
   useEffect(() => {
     if (!screenRecordingEnabled) {
@@ -308,8 +336,10 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
   }, [audioMonitoringEnabled]);
 
   useEffect(() => {
-    if (cameraStatus !== 'active' || !sessionId) return;
+    // Server inference mode only; client mode runs MediaPipe in the browser instead.
+    if (clientVision || cameraStatus !== 'active' || !sessionId) return;
 
+    snapshotTelemetryRef.current = { active: true, lastSnapshotAt: null };
     let mounted = true;
     let isProcessing = false;
     let captureInterval = 3000;
@@ -352,6 +382,7 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
         };
 
         const response = await onRequestSnapshot?.(sessionId, payload);
+        if (response) snapshotTelemetryRef.current.lastSnapshotAt = Date.now();
 
         if (mounted && response) {
           let isSuspicious = false;
@@ -432,9 +463,10 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
 
     return () => {
       mounted = false;
+      snapshotTelemetryRef.current = { active: false, lastSnapshotAt: snapshotTelemetryRef.current.lastSnapshotAt };
       if (intervalId) clearInterval(intervalId);
     };
-  }, [cameraStatus, sessionId, onAddViolation, onRequestSnapshot, securityConfig]);
+  }, [clientVision, cameraStatus, sessionId, onAddViolation, onRequestSnapshot, securityConfig]);
 
   return (
     <div className="p-4 border-t border-border flex flex-col h-full bg-card">
@@ -457,10 +489,15 @@ const SecurityMonitor = forwardRef(({ violations, sessionId, securityConfig, onA
             />
             <span className="text-xs font-medium text-foreground">Webcam Monitoring</span>
           </div>
-          {cameraStatus === 'active' && webcamRequired && (
-            <span className="text-[10px] bg-success/20 text-success px-2 py-0.5 rounded flex items-center gap-1 font-semibold">
+          {cameraStatus === 'active' && (webcamRequired || clientVision) && (
+            <span
+              className="text-[10px] bg-success/20 text-success px-2 py-0.5 rounded flex items-center gap-1 font-semibold"
+              title={clientVision ? 'Proctoring runs on this device; video is not uploaded.' : undefined}
+            >
               <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-              AI Active
+              {clientVision
+                ? `On-device AI${visionStatus?.running ? ` · ${visionStatus.faceFps} fps` : ''}`
+                : 'AI Active'}
             </span>
           )}
         </div>
