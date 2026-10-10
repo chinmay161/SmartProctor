@@ -16,7 +16,6 @@ from app.models.proctor import ProctorAssignment
 from app.models.question import Question
 from app.models.snapshot import Snapshot
 from app.models.user_profile import UserProfile
-from app.models.user_session import SessionAuditLog, SessionRevocationList, UserSession
 from app.models.violation import Violation
 
 config = context.config

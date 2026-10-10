@@ -22,18 +22,9 @@ from .models.exam_answer import ExamAnswer
 from .models.exam_attempt import ExamAttempt
 from .models.exam_question import ExamQuestion
 from .routes import exams, enrollments, sessions, proctoring, ai
-from .routes import session_management
 from .routes import questions
 from .routes import analytics
 from .routes import ws_proctoring, ws_signaling
-from .middleware.session_middleware import (
-    SessionTrackingMiddleware,
-    SessionSecurityMiddleware,
-    SessionValidationMiddleware,
-)
-
-# Import session models to ensure they're created
-from .models.user_session import UserSession, SessionRevocationList, SessionAuditLog
 from .models.user_profile import UserProfile
 from .services.auto_submit_worker import AutoSubmitWorker
 
@@ -50,7 +41,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="SmartProctor API",
-    description="Secure exam proctoring platform with advanced session management",
+    description="Secure exam proctoring platform",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -80,14 +71,6 @@ app.add_middleware(
 os.makedirs("data/evidence", exist_ok=True)
 app.mount("/evidence", StaticFiles(directory="data/evidence"), name="evidence")
 
-# Add session middleware (order matters - process in reverse order of addition)
-# Security validation happens first
-app.add_middleware(SessionValidationMiddleware)
-# Then general security checks
-app.add_middleware(SessionSecurityMiddleware)
-# Finally activity tracking (runs last, so processes first)
-app.add_middleware(SessionTrackingMiddleware)
-
 # Include routers
 app.include_router(student.router)
 app.include_router(teacher.router)
@@ -101,8 +84,6 @@ app.include_router(ai.router)
 app.include_router(violations.router)
 app.include_router(ws_proctoring.router)
 app.include_router(ws_signaling.router)
-# Include secure session management routes
-app.include_router(session_management.router)
 app.include_router(questions.router)
 app.include_router(analytics.router)
 from .routes import profile
@@ -125,5 +106,4 @@ def health_check():
     return {
         "status": "healthy",
         "service": "SmartProctor API",
-        "session_management": "enabled"
     }
