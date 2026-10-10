@@ -34,6 +34,7 @@ class Violation(Base):
     
     dispute_status = Column(String, default="NONE") # NONE, PENDING, ACCEPTED, REJECTED
     dispute_reason = Column(String, nullable=True)
+    integrity_deduction = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

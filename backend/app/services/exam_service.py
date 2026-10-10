@@ -153,12 +153,14 @@ def auto_terminate_on_violation(
 
     deduction = int(round(deduction))
 
+    applied_deduction = 0
     if session.attempt_id:
         from ..models.exam_attempt import ExamAttempt
         attempt = db.query(ExamAttempt).filter_by(id=session.attempt_id).first()
         if attempt:
             old_score = attempt.integrity_score
             attempt.integrity_score = max(0, attempt.integrity_score - deduction)
+            applied_deduction = old_score - attempt.integrity_score
             attempt.violation_count = (attempt.violation_count or 0) + increment
 
             # Log Integrity Score Change
@@ -174,13 +176,15 @@ def auto_terminate_on_violation(
     # Persist the violation event
     v = Violation(
         session_id=session_id,
+        attempt_id=session.attempt_id,
         student_id=session.student_id,
         severity=severity,
         count=increment,
         type=violation_type,
         evidence_files=evidence_files,
         reason=reason,
-        duration_ms=duration_ms
+        duration_ms=duration_ms,
+        integrity_deduction=applied_deduction,
     )
     db.add(v)
 

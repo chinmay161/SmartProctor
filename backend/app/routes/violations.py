@@ -122,6 +122,9 @@ def resolve_dispute(violation_id: str, payload: dict, user=Depends(require_role(
         if not violation:
             raise HTTPException(404, "Violation not found")
         
+        if violation.dispute_status != "PENDING":
+            raise HTTPException(status_code=409, detail="Dispute already resolved")
+
         status = payload.get("status", "REJECTED").upper()
         if status not in ["ACCEPTED", "REJECTED"]:
             raise HTTPException(400, "Invalid status")
@@ -129,13 +132,20 @@ def resolve_dispute(violation_id: str, payload: dict, user=Depends(require_role(
         violation.dispute_status = status
         
         if status == "ACCEPTED":
-             session = db.query(ExamSession).filter_by(id=violation.session_id).first()
-             if session and session.attempt_id:
-                 attempt = db.query(ExamAttempt).filter_by(id=session.attempt_id).first()
-                 if attempt:
-                     attempt.integrity_score = min(100, attempt.integrity_score + 15)
-                     db.add(attempt)
-                     
+             refund = violation.integrity_deduction if violation.integrity_deduction is not None else 15
+             attempt = None
+             if violation.attempt_id:
+                 attempt = db.query(ExamAttempt).filter_by(id=violation.attempt_id).first()
+             if not attempt and violation.session_id:
+                 session = db.query(ExamSession).filter_by(id=violation.session_id).first()
+                 if session and session.attempt_id:
+                     attempt = db.query(ExamAttempt).filter_by(id=session.attempt_id).first()
+
+             if attempt:
+                 attempt.integrity_score = min(100, attempt.integrity_score + refund)
+                 attempt.violation_count = max(0, (attempt.violation_count or 0) - 1)
+                 db.add(attempt)
+                      
              from ..models.audit import AuditLog
              import json
              db.add(AuditLog(
