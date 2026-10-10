@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-mediapipe-wasm.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/copy-mediapipe-wasm.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

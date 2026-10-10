@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Self-hosted MediaPipe WASM (copied from node_modules by scripts/copy-mediapipe-wasm.mjs)
+public/mediapipe/
