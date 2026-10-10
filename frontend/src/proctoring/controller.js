@@ -224,7 +224,12 @@ export function createVisionController({
 
   // ---------- features ----------
 
+  let lastDiffFramePerf = null;
   const frameDiff = () => {
+    // No new frame since the last comparison means the camera stalled; that is
+    // CAMERA_DISCONNECTED's job, so don't also report it as a frozen picture.
+    if (lastFramePerf !== null && lastFramePerf === lastDiffFramePerf) return null;
+    lastDiffFramePerf = lastFramePerf;
     if (!diffCtx) {
       const canvas = typeof OffscreenCanvas === 'function'
         ? new OffscreenCanvas(cfg.diffWidth, cfg.diffHeight)
