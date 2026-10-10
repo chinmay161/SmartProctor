@@ -807,6 +807,10 @@ const ExamPortal = () => {
   };
 
   visionViolationRef.current = (event) => {
+    if (event.type === 'CAMERA_DISCONNECTED') {
+      // Reloading re-runs the quick resume check, which re-acquires the camera.
+      setProctorWarning('Your camera was disconnected. Reconnect it, then reload this page to continue; your answers are saved.');
+    }
     if (!isVisionViolationEnabled(event.type, securityConfig)) return;
     addViolation(VISION_MESSAGES[event.type] || event.type, event.type, event.confidence, {
       image: event.image,
