@@ -15,6 +15,9 @@ const FILES = [
   'vision_wasm_internal.wasm',
   'vision_wasm_nosimd_internal.js',
   'vision_wasm_nosimd_internal.wasm',
+  // ES-module loader, used by the object-detection Web Worker.
+  'vision_wasm_module_internal.js',
+  'vision_wasm_module_internal.wasm',
 ];
 
 const outRoot = join(root, 'public', 'mediapipe');
