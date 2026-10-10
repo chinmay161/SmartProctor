@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, text, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 
@@ -32,6 +32,15 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False}  # required for SQLite
 )
+
+if DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.execute("PRAGMA busy_timeout=5000;")
+        cursor.execute("PRAGMA synchronous=NORMAL;")
+        cursor.close()
 
 SessionLocal = sessionmaker(
     autocommit=False,
@@ -166,6 +175,8 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE violations ADD COLUMN dispute_status VARCHAR DEFAULT 'NONE'")
         if "dispute_reason" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN dispute_reason VARCHAR")
+        if "integrity_deduction" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN integrity_deduction INTEGER")
         if "created_at" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
 

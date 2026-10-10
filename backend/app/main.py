@@ -59,10 +59,18 @@ app = FastAPI(
 Base.metadata.create_all(bind=engine)
 ensure_schema_compatibility()
 
+raw_cors_origins = os.getenv("CORS_ORIGINS")
+if raw_cors_origins:
+    cors_origins = [origin.strip() for origin in raw_cors_origins.split(",") if origin.strip()]
+else:
+    cors_origins = ["http://localhost:5173"]
+if not cors_origins:
+    cors_origins = ["http://localhost:5173"]
+
 # Add CORS middleware (configure as needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to specific origins in production
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
