@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
+from ..auth.dependencies import canonicalize_role, get_current_user
 from ..auth.roles import require_role
 from ..database import SessionLocal
 from ..schemas.ai import SnapshotInferenceRequest, SnapshotInferenceResponse
@@ -15,19 +16,26 @@ from ..services.session_service import assert_session_is_live
 router = APIRouter(prefix="/ai", tags=["AI"])
 
 
+def require_teacher_or_admin(user=Depends(get_current_user)):
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    if not roles.intersection({"teacher", "admin", "school_admin"}):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
+
+
 @router.get("/health")
 def ai_health():
     return get_worker_health()
 
 
 @router.get("/diagnostics/env")
-def ai_diagnostics_env():
+def ai_diagnostics_env(user=Depends(require_teacher_or_admin)):
     """Diagnostic endpoint to inspect AI worker environment and model status."""
     return get_worker_diagnostics_env()
 
 
 @router.post("/diagnostic")
-def ai_diagnostic_unified(payload: SnapshotInferenceRequest):
+def ai_diagnostic_unified(payload: SnapshotInferenceRequest, user=Depends(require_teacher_or_admin)):
     """
     Unified generic diagnostic endpoint that executes requested production AI modules
     with deep telemetry, zero duplicate inference, and timing profiling.
@@ -41,7 +49,7 @@ def ai_diagnostic_unified(payload: SnapshotInferenceRequest):
 
 
 @router.post("/diagnostics/headpose")
-def ai_diagnostics_headpose(payload: SnapshotInferenceRequest):
+def ai_diagnostics_headpose(payload: SnapshotInferenceRequest, user=Depends(require_teacher_or_admin)):
     """
     Diagnostic endpoint that executes the full head-pose pipeline stage-by-stage
     for camera and pipeline verification without requiring an active exam session.

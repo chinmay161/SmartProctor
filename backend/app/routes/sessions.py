@@ -3,6 +3,7 @@ from datetime import timezone
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import and_
 
+from ..auth.dependencies import canonicalize_role, get_current_user
 from ..auth.roles import require_role
 from ..database import SessionLocal
 from ..models.exam import Exam
@@ -14,6 +15,13 @@ from ..services import exam_service as _exam_service
 from ..services.attempt_service import start_exam_attempt, submit_attempt
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
+
+
+def require_teacher_or_admin(user=Depends(get_current_user)):
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    if not roles.intersection({"teacher", "admin", "school_admin"}):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
 
 
 def _serialize_session(session: ExamSession) -> dict:
@@ -217,9 +225,10 @@ def report_violation(
         db.close()
 
 @router.get("/{session_id}/timeline")
-def get_session_timeline(session_id: str, user=Depends(require_role("school_admin"))):
+def get_session_timeline(session_id: str, user=Depends(require_teacher_or_admin)):
     from ..models.audit import AuditLog
     from ..models.violation import Violation
+    from ..permissions.proctor_permissions import require_proctor
     import json
     
     db = SessionLocal()
@@ -227,6 +236,10 @@ def get_session_timeline(session_id: str, user=Depends(require_role("school_admi
         session = db.query(ExamSession).filter_by(id=session_id).first()
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+
+        roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+        if not roles.intersection({"admin", "school_admin"}):
+            require_proctor(db, session.exam_id, user["sub"])
             
         logs = db.query(AuditLog).filter_by(session_id=session_id).order_by(AuditLog.timestamp).all()
         violations = db.query(Violation).filter_by(session_id=session_id).order_by(Violation.timestamp).all()

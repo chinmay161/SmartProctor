@@ -12,20 +12,22 @@ def assign_proctor(
     teacher_id: str,
     user=Depends(require_role("teacher")),
 ):
-    from models.proctor import ProctorAssignment
-    from permissions.exam_permissions import require_exam_owner
+    from ..models.proctor import ProctorAssignment
+    from ..permissions.exam_permissions import require_exam_owner
 
     db = SessionLocal()
-    require_exam_owner(db, exam_id, user["sub"])
+    try:
+        require_exam_owner(db, exam_id, user["sub"])
 
-    assignment = ProctorAssignment(
-        exam_id=exam_id,
-        teacher_id=teacher_id,
-    )
+        assignment = ProctorAssignment(
+            exam_id=exam_id,
+            teacher_id=teacher_id,
+        )
 
-    db.add(assignment)
-    db.commit()
-    db.close()
+        db.add(assignment)
+        db.commit()
+    finally:
+        db.close()
 
     return {"message": "Proctor assigned"}
 
@@ -35,33 +37,35 @@ def monitor_sessions(
     user=Depends(require_role("teacher")),
 ):
     db = SessionLocal()
-    require_proctor(db, exam_id, user["sub"])
+    try:
+        require_proctor(db, exam_id, user["sub"])
 
-    sessions = (
-        db.query(ExamSession)
-        .filter_by(exam_id=exam_id)
-        .all()
-    )
+        sessions = (
+            db.query(ExamSession)
+            .filter_by(exam_id=exam_id)
+            .all()
+        )
 
-    from ..models.exam_attempt import ExamAttempt
-    result = []
-    for s in sessions:
-        base = {
-            "id": s.id,
-            "exam_id": s.exam_id,
-            "student_id": s.student_id,
-            "status": s.status,
-            "attempt_id": s.attempt_id,
-            "trust_score": 100,
-            "violation_count": 0,
-        }
-        if s.attempt_id:
-            attempt = db.query(ExamAttempt).filter_by(id=s.attempt_id).first()
-            if attempt:
-                base["trust_score"] = attempt.integrity_score
-                base["integrity_score"] = attempt.integrity_score
-                base["violation_count"] = attempt.violation_count
-        result.append(base)
+        from ..models.exam_attempt import ExamAttempt
+        result = []
+        for s in sessions:
+            base = {
+                "id": s.id,
+                "exam_id": s.exam_id,
+                "student_id": s.student_id,
+                "status": s.status,
+                "attempt_id": s.attempt_id,
+                "trust_score": 100,
+                "violation_count": 0,
+            }
+            if s.attempt_id:
+                attempt = db.query(ExamAttempt).filter_by(id=s.attempt_id).first()
+                if attempt:
+                    base["trust_score"] = attempt.integrity_score
+                    base["integrity_score"] = attempt.integrity_score
+                    base["violation_count"] = attempt.violation_count
+            result.append(base)
 
-    db.close()
-    return result
+        return result
+    finally:
+        db.close()
