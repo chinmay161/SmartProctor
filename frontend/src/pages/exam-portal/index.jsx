@@ -11,57 +11,6 @@ import SubmitConfirmationModal from './components/SubmitConfirmationModal';
 import ProctoredWatermarkOverlay from './components/ProctoredWatermarkOverlay';
 import { authAwareCall } from '../../services/authAwareCall';
 
-const fallbackExamData = {
-  title: 'Mathematics Final Exam',
-  course: 'Advanced Calculus - MATH 301',
-  duration: 120,
-  totalMarks: 100,
-  questions: [
-    {
-      id: 1,
-      type: 'multiple-choice',
-      question: 'What is the derivative of f(x) = x^2 + 3x + 2?',
-      options: [
-        { id: 'a', text: '2x + 3' },
-        { id: 'b', text: 'x + 3' },
-        { id: 'c', text: '2x + 2' },
-        { id: 'd', text: 'x^2 + 3' }
-      ],
-      marks: 2
-    },
-    {
-      id: 2,
-      type: 'true-false',
-      question: 'The integral of 1/x is ln|x| + C. True or False?',
-      marks: 1
-    },
-    {
-      id: 3,
-      type: 'fill-blank',
-      question: 'The limit of (sin x)/x as x approaches 0 is _____.',
-      marks: 2
-    },
-    {
-      id: 4,
-      type: 'essay',
-      question: 'Explain the Fundamental Theorem of Calculus and provide an example of its application.',
-      marks: 5
-    },
-    {
-      id: 5,
-      type: 'multiple-choice',
-      question: 'Which of the following is NOT a method of integration?',
-      options: [
-        { id: 'a', text: 'Substitution' },
-        { id: 'b', text: 'Integration by parts' },
-        { id: 'c', text: 'Differentiation' },
-        { id: 'd', text: 'Partial fractions' }
-      ],
-      marks: 2
-    }
-  ]
-};
-
 const normalizeQuestionType = (rawType) => {
   const type = String(rawType || '').trim().toLowerCase();
   if (type === 'mcq' || type === 'multiple-choice' || type === 'multiple_choice') return 'multiple-choice';
@@ -145,6 +94,7 @@ const ExamPortal = () => {
   const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [examDataState, setExamDataState] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [loadWarning, setLoadWarning] = useState('');
   const [examBlocked, setExamBlocked] = useState('');
   const [examId, setExamId] = useState(null);
@@ -175,7 +125,7 @@ const ExamPortal = () => {
   const [examRules, setExamRules] = useState(null);
 
 
-  const sourceExam = examDataState || fallbackExamData;
+  const sourceExam = examDataState;
   const securityConfig = examRules || sourceExam?.wizard_config || {};
   const currentQuestion = sourceExam?.questions?.[currentQuestionIndex];
   const totalQuestions = sourceExam?.questions?.length || 0;
@@ -320,98 +270,105 @@ const ExamPortal = () => {
           }
         }
 
-        if (examIdFromUrl) {
-          const exam = await callApi(`/exams/${examIdFromUrl}`, 'GET');
-          if (!mounted) return;
-
-          const questionIds = Array.isArray(exam?.question_ids) ? exam.question_ids : [];
-          let liveQuestions = [];
-          if (questionIds.length > 0) {
-            const responses = await Promise.all(
-              questionIds.map(async (questionId) => {
-                try {
-                  return await callApi(`/api/questions/${encodeURIComponent(questionId)}`, 'GET');
-                } catch {
-                  return null;
-                }
-              })
-            );
-            liveQuestions = responses
-              .filter(Boolean)
-              .map((q, idx) => mapApiQuestionToPortal(q, idx));
-          }
-
-          const hasLiveQuestions = liveQuestions.length > 0;
-          const rawExamData = {
-            ...fallbackExamData,
-            ...exam,
-            duration: exam?.duration_minutes || fallbackExamData.duration,
-            questions: hasLiveQuestions ? liveQuestions : fallbackExamData.questions,
-          };
-          if (exam?.wizard_config) {
-            try {
-              const cfg = typeof exam.wizard_config === 'string' ? JSON.parse(exam.wizard_config) : exam.wizard_config;
-              setExamRules(cfg);
-              rawExamData.questions = applyQuestionSecurity(
-                rawExamData.questions,
-                cfg,
-                attemptId || sessionIdFromUrl || examIdFromUrl
-              );
-            } catch(e) {}
-          }
-          setExamDataState(rawExamData);
-
-          try {
-            const resume = await callApi(`/attempts/${encodeURIComponent(examIdFromUrl)}/resume`, 'GET');
-            if (!mounted) return;
-            if (resume?.attempt_id) {
-              setAttemptId(resume.attempt_id);
-            }
-            if (Number.isFinite(resume?.duration_remaining_seconds)) {
-              setRemainingSeconds(Math.max(0, Math.floor(resume.duration_remaining_seconds)));
-            }
-
-            const restoredAnswers = {};
-            if (Array.isArray(resume?.saved_answers)) {
-              resume.saved_answers.forEach((saved) => {
-                if (saved?.question_id) {
-                  restoredAnswers[String(saved.question_id)] = saved.answer;
-                }
-              });
-            }
-            setAnswers(restoredAnswers);
-          } catch (error) {
-            if (!mounted) return;
-            const status = error?.status || error?.status_code || error?.response?.status;
-            const detail = error?.detail || error?.message || '';
-            const lower = String(detail).toLowerCase();
-            if (status === 403 || status === 404 || lower.includes('not found') || lower.includes('not resumable') || lower.includes('expired')) {
-              setExamBlocked('This exam attempt cannot be resumed. Return to dashboard and start from the assigned entry flow.');
-              return;
-            }
-            setLoadWarning('Could not load attempt progress. You may continue, but previous progress may be unavailable.');
-          }
-
-          if (questionIds.length === 0) {
-            setLoadWarning('No questions are attached to this exam yet. Showing sample questions.');
-          } else if (!hasLiveQuestions) {
-            setLoadWarning('Could not load question details. Showing sample questions with exam metadata.');
-          } else if (liveQuestions.length < questionIds.length) {
-            setLoadWarning('Some question details could not be loaded. Loaded available live questions.');
-          } else {
-            setLoadWarning('');
+        if (!examIdFromUrl) {
+          if (mounted) {
+            setExamDataState(null);
+            setExamBlocked('Unable to load exam. Please return to your dashboard.');
           }
           return;
         }
 
-        if (mounted) {
+        const exam = await callApi(`/exams/${examIdFromUrl}`, 'GET');
+        if (!mounted) return;
+        if (!exam) {
           setExamDataState(null);
-          setLoadWarning('Exam ID was not provided. Showing fallback exam.');
+          setExamBlocked('Unable to load exam. Please return to your dashboard.');
+          return;
+        }
+
+        const questionIds = Array.isArray(exam?.question_ids) ? exam.question_ids : [];
+        let liveQuestions = [];
+        if (questionIds.length > 0) {
+          const responses = await Promise.all(
+            questionIds.map(async (questionId) => {
+              try {
+                return await callApi(`/api/questions/${encodeURIComponent(questionId)}`, 'GET');
+              } catch {
+                return null;
+              }
+            })
+          );
+          liveQuestions = responses
+            .filter(Boolean)
+            .map((q, idx) => mapApiQuestionToPortal(q, idx));
+        }
+
+        const rawExamData = {
+          ...exam,
+          duration: exam?.duration_minutes || 0,
+          questions: liveQuestions,
+        };
+        if (exam?.wizard_config) {
+          try {
+            const cfg = typeof exam.wizard_config === 'string' ? JSON.parse(exam.wizard_config) : exam.wizard_config;
+            setExamRules(cfg);
+            rawExamData.questions = applyQuestionSecurity(
+              rawExamData.questions,
+              cfg,
+              attemptId || sessionIdFromUrl || examIdFromUrl
+            );
+          } catch(e) {}
+        }
+        setExamDataState(rawExamData);
+
+        try {
+          const resume = await callApi(`/attempts/${encodeURIComponent(examIdFromUrl)}/resume`, 'GET');
+          if (!mounted) return;
+          if (resume?.attempt_id) {
+            setAttemptId(resume.attempt_id);
+          }
+          if (Number.isFinite(resume?.duration_remaining_seconds)) {
+            setRemainingSeconds(Math.max(0, Math.floor(resume.duration_remaining_seconds)));
+          }
+
+          const restoredAnswers = {};
+          if (Array.isArray(resume?.saved_answers)) {
+            resume.saved_answers.forEach((saved) => {
+              if (saved?.question_id) {
+                restoredAnswers[String(saved.question_id)] = saved.answer;
+              }
+            });
+          }
+          setAnswers(restoredAnswers);
+        } catch (error) {
+          if (!mounted) return;
+          const status = error?.status || error?.status_code || error?.response?.status;
+          const detail = error?.detail || error?.message || '';
+          const lower = String(detail).toLowerCase();
+          if (status === 403 || status === 404 || lower.includes('not found') || lower.includes('not resumable') || lower.includes('expired')) {
+            setExamBlocked('Unable to load exam. Please return to your dashboard.');
+            return;
+          }
+          setLoadWarning('Could not load attempt progress. You may continue, but previous progress may be unavailable.');
+        }
+
+        if (questionIds.length === 0) {
+          setLoadWarning('No questions are attached to this exam yet.');
+        } else if (liveQuestions.length === 0) {
+          setLoadWarning('Could not load question details.');
+        } else if (liveQuestions.length < questionIds.length) {
+          setLoadWarning('Some question details could not be loaded. Loaded available live questions.');
+        } else {
+          setLoadWarning('');
         }
       } catch {
         if (mounted) {
           setExamDataState(null);
-          setLoadWarning('Could not load exam data from backend. Showing fallback exam.');
+          setExamBlocked('Unable to load exam. Please return to your dashboard.');
+        }
+      } finally {
+        if (mounted) {
+          setIsLoading(false);
         }
       }
     };
@@ -431,7 +388,7 @@ const ExamPortal = () => {
   }, []);
 
   useEffect(() => {
-    if (!sessionId || pendingViolationsRef.current.length === 0) return;
+    if (isLoading || examBlocked || !sourceExam || !sessionId || pendingViolationsRef.current.length === 0) return;
 
     const queued = [...pendingViolationsRef.current];
     pendingViolationsRef.current = [];
@@ -440,12 +397,12 @@ const ExamPortal = () => {
         await persistViolation(item);
       }
     })();
-  }, [sessionId]);
+  }, [isLoading, examBlocked, sourceExam, sessionId]);
 
   const handleConfirmSubmitRef = useRef();
 
   useEffect(() => {
-    if (!sessionId || !auth0Authenticated) return;
+    if (isLoading || examBlocked || !sourceExam || !sessionId || !auth0Authenticated) return;
 
     let mounted = true;
     let reconnectTimeout = null;
@@ -542,6 +499,8 @@ const ExamPortal = () => {
 
 
   useEffect(() => {
+    if (isLoading || examBlocked || !sourceExam) return;
+
     const autoSaveInterval = setInterval(() => {
       void flushPendingAnswers();
     }, 5000);
@@ -550,9 +509,11 @@ const ExamPortal = () => {
       clearInterval(autoSaveInterval);
       void flushPendingAnswers();
     };
-  }, [attemptId]);
+  }, [isLoading, examBlocked, sourceExam, attemptId]);
 
   useEffect(() => {
+    if (isLoading || examBlocked || !sourceExam) return;
+
     setIsFullscreen(!!document.fullscreenElement);
 
     const handleFullscreenChange = () => {
@@ -573,9 +534,11 @@ const ExamPortal = () => {
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [browserLockdownEnabled]);
+  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled]);
 
   useEffect(() => {
+    if (isLoading || examBlocked || !sourceExam) return;
+
     const preventContextMenu = (e) => {
       if (!disableRightClickEnabled) return;
       e?.preventDefault();
@@ -586,6 +549,12 @@ const ExamPortal = () => {
       if (!disableCopyPasteEnabled) return;
       e?.preventDefault();
       addViolation('Attempted copy', 'COPY_PASTE');
+    };
+
+    const preventPaste = (e) => {
+      if (!disableCopyPasteEnabled) return;
+      e?.preventDefault();
+      addViolation('Attempted paste', 'PASTE_ATTEMPT');
     };
 
     const handleKeyDown = (e) => {
@@ -624,6 +593,7 @@ const ExamPortal = () => {
     document.addEventListener('contextmenu', preventContextMenu);
     document.addEventListener('copy', preventCopy);
     document.addEventListener('cut', preventCopy);
+    document.addEventListener('paste', preventPaste);
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('blur', handleBlur);
     window.addEventListener('resize', handleResize);
@@ -632,15 +602,16 @@ const ExamPortal = () => {
       document.removeEventListener('contextmenu', preventContextMenu);
       document.removeEventListener('copy', preventCopy);
       document.removeEventListener('cut', preventCopy);
+      document.removeEventListener('paste', preventPaste);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('resize', handleResize);
       if (resizeTimer) clearTimeout(resizeTimer);
     };
-  }, [browserLockdownEnabled, detectTabSwitchEnabled, disableCopyPasteEnabled, disableRightClickEnabled]);
+  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled, detectTabSwitchEnabled, disableCopyPasteEnabled, disableRightClickEnabled]);
 
   useEffect(() => {
-    if (!browserLockdownEnabled || isFullscreen) return;
+    if (isLoading || examBlocked || !sourceExam || !browserLockdownEnabled || isFullscreen) return;
 
     const handlePointerDown = () => {
       document.removeEventListener('pointerdown', handlePointerDown);
@@ -649,9 +620,11 @@ const ExamPortal = () => {
 
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [browserLockdownEnabled, isFullscreen]);
+  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled, isFullscreen]);
 
   useEffect(() => {
+    if (isLoading || examBlocked || !sourceExam || !detectTabSwitchEnabled) return;
+
     const handleVisibilityChange = () => {
       if (detectTabSwitchEnabled && document.hidden && examStatusRef.current !== 'ending') {
         addViolation('Tab switched or window minimized', 'TAB_SWITCH');
@@ -660,7 +633,7 @@ const ExamPortal = () => {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [detectTabSwitchEnabled]);
+  }, [isLoading, examBlocked, sourceExam, detectTabSwitchEnabled]);
 
   const addViolation = (message, type = null, confidence = null) => {
     if (examEndedRef.current) return;
@@ -796,14 +769,21 @@ const ExamPortal = () => {
     ? (examDataState?.duration_minutes ?? examDataState?.duration ?? 0)
     : (sourceExam?.duration_minutes ?? sourceExam?.duration);
 
-  if (examBlocked) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <div className="max-w-lg w-full bg-card border border-border rounded-lg p-6 shadow-md">
-          <h1 className="text-lg font-semibold text-foreground mb-2">Unable to Resume Exam</h1>
-          <p className="text-sm text-muted-foreground mb-4">{examBlocked}</p>
+        <div className="text-sm text-muted-foreground">Loading exam...</div>
+      </div>
+    );
+  }
+
+  if (examBlocked || !sourceExam) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <div className="max-w-lg w-full bg-card border border-border rounded-lg p-6 shadow-md text-center">
+          <p className="text-sm text-muted-foreground mb-4">Unable to load exam. Please return to your dashboard.</p>
           <Button onClick={() => navigate('/student-dashboard')} className="w-full">
-            Back to Dashboard
+            Return to Dashboard
           </Button>
         </div>
       </div>
