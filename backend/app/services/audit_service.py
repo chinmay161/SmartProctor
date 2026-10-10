@@ -12,16 +12,18 @@ def _normalize_admin_actor(admin_email: str | None):
 
 def log_role_change(admin_email, user_id, action, role):
     db = SessionLocal()
-    log = RoleAuditLog(
-        id=str(uuid.uuid4()),
-        admin_email=_normalize_admin_actor(admin_email),
-        target_user_id=user_id,
-        action=action,
-        role=role,
-    )
-    db.add(log)
-    db.commit()
-    db.close()
+    try:
+        log = RoleAuditLog(
+            id=str(uuid.uuid4()),
+            admin_email=_normalize_admin_actor(admin_email),
+            target_user_id=user_id,
+            action=action,
+            role=role,
+        )
+        db.add(log)
+        db.commit()
+    finally:
+        db.close()
 
 def get_audit_logs(
     db: Session,

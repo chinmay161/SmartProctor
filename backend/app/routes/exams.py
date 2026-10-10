@@ -661,16 +661,19 @@ def put_exam_rules(
     user=Depends(require_role("teacher")),
 ):
     db = SessionLocal()
-    require_exam_owner(db, exam_id, user["sub"])
-    rules = configure_exam_rules(
-        db,
-        exam_id,
-        camera_required=camera_required,
-        mic_required=mic_required,
-        tab_switch_tolerance=tab_switch_tolerance,
-        violation_threshold_severe=violation_threshold_severe,
-        violation_threshold_major=violation_threshold_major,
-        violation_threshold_minor=violation_threshold_minor,
-    )
-    db.close()
-    return rules
+    try:
+        require_exam_owner(db, exam_id, user["sub"])
+        rules = configure_exam_rules(
+            db,
+            exam_id,
+            camera_required=camera_required,
+            mic_required=mic_required,
+            tab_switch_tolerance=tab_switch_tolerance,
+            violation_threshold_severe=violation_threshold_severe,
+            violation_threshold_major=violation_threshold_major,
+            violation_threshold_minor=violation_threshold_minor,
+        )
+        return rules
+    finally:
+        db.close()
+

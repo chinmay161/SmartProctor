@@ -13,17 +13,18 @@ def enroll_student(
     user=Depends(require_role("teacher")),
 ):
     db = SessionLocal()
-    require_exam_owner(db, exam_id, user["sub"])
+    try:
+        require_exam_owner(db, exam_id, user["sub"])
 
-    enrollment = ExamEnrollment(
-        exam_id=exam_id,
-        student_id=student_id,
-    )
-    db.add(enrollment)
-    db.commit()
-    db.close()
-
-    return {"message": "Student enrolled"}
+        enrollment = ExamEnrollment(
+            exam_id=exam_id,
+            student_id=student_id,
+        )
+        db.add(enrollment)
+        db.commit()
+        return {"message": "Student enrolled"}
+    finally:
+        db.close()
 
 @router.delete("/{exam_id}/enroll/{student_id}")
 def remove_student(
@@ -32,18 +33,20 @@ def remove_student(
     user=Depends(require_role("teacher")),
 ):
     db = SessionLocal()
-    require_exam_owner(db, exam_id, user["sub"])
+    try:
+        require_exam_owner(db, exam_id, user["sub"])
 
-    enrollment = (
-        db.query(ExamEnrollment)
-        .filter_by(exam_id=exam_id, student_id=student_id)
-        .first()
-    )
+        enrollment = (
+            db.query(ExamEnrollment)
+            .filter_by(exam_id=exam_id, student_id=student_id)
+            .first()
+        )
 
-    if enrollment:
-        db.delete(enrollment)
-        db.commit()
+        if enrollment:
+            db.delete(enrollment)
+            db.commit()
 
-    db.close()
-    return {"message": "Enrollment removed"}
+        return {"message": "Enrollment removed"}
+    finally:
+        db.close()
 

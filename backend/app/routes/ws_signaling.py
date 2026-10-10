@@ -21,70 +21,67 @@ async def _close_ws_with_reason(ws: WebSocket, code: int, reason: str):
 async def student_signaling(ws: WebSocket, session_id: str):
     db = SessionLocal()
     try:
-        user = await authenticate_websocket(ws)
-    except WebSocketException as exc:
-        db.close()
-        await _close_ws_with_reason(ws, exc.code or 4401, getattr(exc, "reason", "WebSocket authentication failed"))
-        return
+        try:
+            user = await authenticate_websocket(ws)
+        except WebSocketException as exc:
+            await _close_ws_with_reason(ws, exc.code or 4401, getattr(exc, "reason", "WebSocket authentication failed"))
+            return
 
-    if "student" not in user["roles"]:
-        db.close()
-        await _close_ws_with_reason(ws, 4403, "Student role required")
-        return
+        if "student" not in user["roles"]:
+            await _close_ws_with_reason(ws, 4403, "Student role required")
+            return
 
-    try:
-        require_session_owner(db, session_id, user["sub"])
-    except WebSocketException as exc:
-        db.close()
-        await _close_ws_with_reason(ws, exc.code or 4403, getattr(exc, "reason", "Not your session"))
-        return
+        try:
+            require_session_owner(db, session_id, user["sub"])
+        except WebSocketException as exc:
+            await _close_ws_with_reason(ws, exc.code or 4403, getattr(exc, "reason", "Not your session"))
+            return
 
-    await manager.connect(session_id, "student", ws)
+        await manager.connect(session_id, "student", ws)
 
-    try:
-        while True:
-            message = await ws.receive_json()
-            await manager.relay(session_id, "student", message)
+        try:
+            while True:
+                message = await ws.receive_json()
+                await manager.relay(session_id, "student", message)
 
-    except WebSocketDisconnect:
-        manager.disconnect(session_id, "student")
+        except WebSocketDisconnect:
+            manager.disconnect(session_id, "student")
+    finally:
         db.close()
 
 @router.websocket("/ws/signaling/proctor/{session_id}")
 async def proctor_signaling(ws: WebSocket, session_id: str):
     db = SessionLocal()
     try:
-        user = await authenticate_websocket(ws)
-    except WebSocketException as exc:
-        db.close()
-        await _close_ws_with_reason(ws, exc.code or 4401, getattr(exc, "reason", "WebSocket authentication failed"))
-        return
+        try:
+            user = await authenticate_websocket(ws)
+        except WebSocketException as exc:
+            await _close_ws_with_reason(ws, exc.code or 4401, getattr(exc, "reason", "WebSocket authentication failed"))
+            return
 
-    if "teacher" not in user["roles"]:
-        db.close()
-        await _close_ws_with_reason(ws, 4403, "Teacher role required")
-        return
+        if "teacher" not in user["roles"]:
+            await _close_ws_with_reason(ws, 4403, "Teacher role required")
+            return
 
-    session = db.query(ExamSession).filter_by(id=session_id).first()
-    if not session:
-        db.close()
-        await _close_ws_with_reason(ws, 4404, "Session not found")
-        return
+        session = db.query(ExamSession).filter_by(id=session_id).first()
+        if not session:
+            await _close_ws_with_reason(ws, 4404, "Session not found")
+            return
 
-    try:
-        require_proctor_for_session(db, session.exam_id, user["sub"])
-    except WebSocketException as exc:
-        db.close()
-        await _close_ws_with_reason(ws, exc.code or 4403, getattr(exc, "reason", "Teacher role required"))
-        return
+        try:
+            require_proctor_for_session(db, session.exam_id, user["sub"])
+        except WebSocketException as exc:
+            await _close_ws_with_reason(ws, exc.code or 4403, getattr(exc, "reason", "Teacher role required"))
+            return
 
-    await manager.connect(session_id, "proctor", ws)
+        await manager.connect(session_id, "proctor", ws)
 
-    try:
-        while True:
-            message = await ws.receive_json()
-            await manager.relay(session_id, "proctor", message)
+        try:
+            while True:
+                message = await ws.receive_json()
+                await manager.relay(session_id, "proctor", message)
 
-    except WebSocketDisconnect:
-        manager.disconnect(session_id, "proctor")
+        except WebSocketDisconnect:
+            manager.disconnect(session_id, "proctor")
+    finally:
         db.close()
