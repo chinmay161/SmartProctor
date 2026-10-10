@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { lazy, Suspense, useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useSession, useCurrentUser } from '../../../context/SessionContext';
@@ -6,6 +6,8 @@ import { authAwareCall } from '../../../services/authAwareCall';
 import { useTheme } from '../../../context/ThemeContext';
 import { formatIstDateTime } from '../../../utils/dateTime';
 import { ExamListSkeleton, HistoryTableSkeleton } from '../../../components/ui/Skeleton';
+
+const DeviceTestModal = lazy(() => import('../../../components/proctoring/DeviceTestModal'));
 
 /* ─── Inline SVG icons (no extra dep) ─── */
 const Icon = ({ d, d2, size = 20, cls = '' }) => (
@@ -257,6 +259,7 @@ const StudentDashboardExample = () => {
   const [historyStatus, setHistoryStatus] = useState('');
   const [nowTs, setNowTs] = useState(Date.now());
   const [activeTab, setActiveTab] = useState('exams'); // 'exams' | 'history' | 'account'
+  const [showDeviceTest, setShowDeviceTest] = useState(false);
 
   const callApi = useCallback((path, method = 'GET', body = null) =>
     authAwareCall({ path, method, body, auth0Authenticated, getAccessTokenSilently, auth0Audience, fallbackPaths: [] }),
@@ -286,12 +289,15 @@ const StudentDashboardExample = () => {
     logout();
   };
 
-  const handleStartExam = async (examId) => {
+  // The exam portal runs the device check first and only then starts the
+  // session/attempt, so the exam timer never runs during the check.
+  const handleStartExam = (examId) => {
     try {
-      const r = await callApi(`/sessions/${examId}/start`, 'POST');
-      const sid = r?.session_id || r?.id;
-      navigate(`/exam-portal?examId=${encodeURIComponent(examId)}${sid ? `&sessionId=${encodeURIComponent(sid)}` : ''}`);
-    } catch (err) { setError(err?.detail || err?.message || 'Failed to start exam'); }
+      sessionStorage.setItem('sp:startClickedAt', String(Date.now()));
+    } catch {
+      /* timing instrumentation only */
+    }
+    navigate(`/exam-portal?examId=${encodeURIComponent(examId)}`);
   };
 
   const handleViewResult = async (item) => {
@@ -520,7 +526,28 @@ const StudentDashboardExample = () => {
                   </span>
                 )}
               </h2>
+              <button
+                type="button"
+                onClick={() => setShowDeviceTest(true)}
+                title="Check your camera and device speed before exam day"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  padding: '7px 12px', borderRadius: '8px',
+                  background: 'var(--color-card)', border: '1px solid var(--color-border)',
+                  color: 'var(--color-foreground)', cursor: 'pointer',
+                  fontFamily: 'var(--font-body)', fontSize: '0.8rem', fontWeight: 500,
+                }}
+              >
+                <Icon d={ICONS.eye} size={15} />
+                Test my device
+              </button>
             </div>
+
+            {showDeviceTest && (
+              <Suspense fallback={null}>
+                <DeviceTestModal onClose={() => setShowDeviceTest(false)} />
+              </Suspense>
+            )}
 
             {loading ? (
               <ExamListSkeleton count={3} />
