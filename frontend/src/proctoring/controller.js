@@ -9,6 +9,7 @@ import {
   toGrayscale,
 } from './features';
 import { loadVisionTasks } from './visionEngine';
+import { withSystemPrompt } from '../utils/proctoringSuppression';
 
 export const CONTROLLER_DEFAULTS = Object.freeze({
   targetFaceFps: 5,
@@ -25,6 +26,7 @@ export const CONTROLLER_DEFAULTS = Object.freeze({
   diffHeight: 24,
   calibration: { minFaceRatio: 0.6, minSamples: 5, maxAbsYaw: 25, maxAbsPitch: 25 },
   cameraConstraints: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+  cameraRetryMs: 3000, // while the camera is lost, try to re-open it this often
 });
 
 const ewma = (prev, value, alpha = 0.2) => (prev == null ? value : prev + alpha * (value - prev));
@@ -66,6 +68,8 @@ export function createVisionController({
   onViolation = () => {},
   onShadowViolation = () => {},
   onStateChange = () => {},
+  onStreamChange = () => {},
+  onCameraStatus = () => {},
 } = {}) {
   if (!video) throw new Error('createVisionController requires a <video> element in the DOM');
   const cfg = { ...CONTROLLER_DEFAULTS, ...options };
@@ -97,6 +101,7 @@ export function createVisionController({
   let collector = null; // per-sample callback for measure/calibrate
 
   let lastFramePerf = null;
+  let lastAnalysedFramePerf = null;
   let frameSource = 'none';
   let lastPlaybackFrames = -1;
   let lastVideoTime = -1;
@@ -145,10 +150,47 @@ export function createVisionController({
     }
   };
 
-  const onTrackEvent = (kind) => {
-    if (loopMode !== 'monitor') return;
+  const onTrackEvent = (track, kind) => {
+    if (loopMode !== 'monitor' || stream?.getVideoTracks()[0] !== track) return;
     handleEvents(engine.cameraEvent(kind, performance.now()));
+    if (kind === 'ended') startRecovery();
   };
+
+  const unbindTracks = () => {
+    for (const [track, kind, handler] of trackListeners) track.removeEventListener(kind, handler);
+    trackListeners.length = 0;
+  };
+
+  /** Attach a (new) camera stream to the hidden <video> and wait for a picture. */
+  async function bindStream(next) {
+    const old = stream;
+    unbindTracks();
+    stream = next;
+    const [track] = next.getVideoTracks();
+    for (const kind of ['ended', 'mute', 'unmute']) {
+      const handler = () => onTrackEvent(track, kind);
+      track.addEventListener(kind, handler);
+      trackListeners.push([track, kind, handler]);
+    }
+    if (old && old !== next) old.getTracks().forEach((t) => t.stop());
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.srcObject = next;
+    try { await video.play(); } catch { /* autoplay race; readiness wait below */ }
+    const deadline = performance.now() + 5000;
+    while (!videoReady() && performance.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!videoReady()) return { ok: false, kind: 'busy', error: 'The camera started but sent no picture.' };
+    if (rvfcHandle !== null && typeof video.cancelVideoFrameCallback === 'function') video.cancelVideoFrameCallback(rvfcHandle);
+    watchFrames();
+    prevGray = null;
+    onStreamChange(next);
+    return { ok: true, width: video.videoWidth, height: video.videoHeight, label: track?.label || '' };
+  }
+
+  const openCamera = () => withSystemPrompt(() => navigator.mediaDevices.getUserMedia({ video: cfg.cameraConstraints, audio: false }));
 
   async function requestCamera() {
     if (stream && stream.getVideoTracks().some((t) => t.readyState === 'live')) {
@@ -159,35 +201,91 @@ export function createVisionController({
       if (!navigator.mediaDevices?.getUserMedia) {
         return { ok: false, kind: 'unsupported', error: 'This browser cannot access a camera (use a recent Chrome, Edge, Firefox or Safari over HTTPS).' };
       }
-      stream = await navigator.mediaDevices.getUserMedia({ video: cfg.cameraConstraints, audio: false });
+      const next = await openCamera();
       if (disposed) {
-        stream.getTracks().forEach((t) => t.stop());
+        next.getTracks().forEach((t) => t.stop());
         return { ok: false, kind: 'unknown', error: 'disposed' };
       }
-      const [track] = stream.getVideoTracks();
-      for (const kind of ['ended', 'mute', 'unmute']) {
-        const handler = () => onTrackEvent(kind);
-        track.addEventListener(kind, handler);
-        trackListeners.push([track, kind, handler]);
-      }
-      video.muted = true;
-      video.playsInline = true;
-      video.autoplay = true;
-      video.srcObject = stream;
-      try { await video.play(); } catch { /* autoplay race; readiness wait below */ }
-      const deadline = performance.now() + 5000;
-      while (!videoReady() && performance.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      if (!videoReady()) {
-        return { ok: false, kind: 'busy', error: 'The camera started but sent no picture.' };
-      }
-      watchFrames();
-      return { ok: true, width: video.videoWidth, height: video.videoHeight, label: track?.label || '' };
+      watchPermission();
+      return await bindStream(next);
     } catch (error) {
       setPhase('error');
       return { ok: false, kind: classifyCameraError(error), error: error?.message || String(error) };
     }
+  }
+
+  // ---------- camera recovery (no reload needed) ----------
+
+  let cameraStatus = { state: 'ok', permission: null, kind: null };
+  let recoveryTimer = null;
+  let recovering = false;
+  let permissionStatus = null;
+
+  const setCameraStatus = (next) => {
+    const merged = { ...cameraStatus, ...next };
+    if (merged.state === cameraStatus.state && merged.permission === cameraStatus.permission && merged.kind === cameraStatus.kind) return;
+    cameraStatus = merged;
+    onCameraStatus({ ...cameraStatus });
+  };
+
+  const cameraLost = () => {
+    const track = stream?.getVideoTracks()[0];
+    return !track || track.readyState === 'ended' || engine.cameraState(performance.now()).disconnected;
+  };
+
+  async function tryRecover() {
+    if (recovering || disposed || loopMode !== 'monitor' || !cameraLost()) return;
+    if (cameraStatus.permission === 'denied') return; // wait for the permission change event
+    recovering = true;
+    try {
+      const next = await openCamera();
+      if (disposed) {
+        next.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      const bound = await bindStream(next);
+      if (!bound.ok) throw Object.assign(new Error(bound.error), { name: 'NotReadableError' });
+      handleEvents(engine.cameraEvent('restored', performance.now()));
+      stopRecovery();
+      setCameraStatus({ state: 'ok', kind: null });
+    } catch (error) {
+      setCameraStatus({ state: 'lost', kind: classifyCameraError(error) });
+    } finally {
+      recovering = false;
+    }
+  }
+
+  function startRecovery() {
+    if (recoveryTimer || disposed) return;
+    setCameraStatus({ state: 'lost' });
+    recoveryTimer = setInterval(() => { void tryRecover(); }, cfg.cameraRetryMs);
+    void tryRecover();
+  }
+
+  function stopRecovery() {
+    if (recoveryTimer) clearInterval(recoveryTimer);
+    recoveryTimer = null;
+  }
+
+  const onPermissionChange = () => {
+    setCameraStatus({ permission: permissionStatus?.state ?? null });
+    if (recoveryTimer) void tryRecover();
+  };
+  const onDeviceChange = () => {
+    if (recoveryTimer) void tryRecover();
+  };
+
+  function watchPermission() {
+    if (!permissionStatus && navigator.permissions?.query) {
+      navigator.permissions.query({ name: 'camera' }).then((status) => {
+        if (disposed) return;
+        permissionStatus = status;
+        status.addEventListener('change', onPermissionChange);
+        setCameraStatus({ permission: status.state });
+      }).catch(() => { /* 'camera' not queryable in this browser */ });
+    }
+    navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
+    navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange);
   }
 
   // ---------- models ----------
@@ -367,17 +465,22 @@ export function createVisionController({
     if (monitoring) {
       if (lastFramePerf !== null) handleEvents(engine.cameraEvent('frame', lastFramePerf));
       handleEvents(engine.tick(now));
+      if (cameraLost()) startRecovery();
     }
 
-    if (!videoReady() || !tasks || tasks.face.failed) {
+    if (!videoReady() || !tasks || tasks.face.failed || (monitoring && cameraLost())) {
       if (tasks?.face.failed) setPhase('error');
-      schedule(100);
+      schedule(monitoring && cameraLost() ? 250 : 100);
       return;
     }
 
+    // A stalled camera keeps showing its last picture; only analyse new frames.
+    const freshFrame = frameSource === 'current-time' || lastFramePerf === null || lastFramePerf !== lastAnalysedFramePerf;
+
     let ran = false;
     if (now >= nextFaceAt) {
-      const sample = runFace(now);
+      const sample = freshFrame || !monitoring ? runFace(now) : null;
+      if (sample) lastAnalysedFramePerf = lastFramePerf;
       const interval = 1000 / faceFps;
       nextFaceAt = Math.max(nextFaceAt + interval, now + interval * 0.5);
       if (sample) {
@@ -509,6 +612,8 @@ export function createVisionController({
       delegate: delegates().face,
       frameSource,
       frameDiff: lastFrameDiff === null ? null : Math.round(lastFrameDiff * 100) / 100,
+      camera: cameraStatus.state,
+      cameraPermission: cameraStatus.permission,
       noBlinkShadowCount,
     };
   }
@@ -519,8 +624,10 @@ export function createVisionController({
     if (rvfcHandle !== null && typeof video.cancelVideoFrameCallback === 'function') {
       video.cancelVideoFrameCallback(rvfcHandle);
     }
-    for (const [track, kind, handler] of trackListeners) track.removeEventListener(kind, handler);
-    trackListeners.length = 0;
+    unbindTracks();
+    stopRecovery();
+    permissionStatus?.removeEventListener('change', onPermissionChange);
+    navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange);
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
     if (video.srcObject) video.srcObject = null;

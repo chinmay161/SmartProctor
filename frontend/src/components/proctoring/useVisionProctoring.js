@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { withSystemPrompt } from '../../utils/proctoringSuppression';
 
 // 'client' (default): MediaPipe in the browser. 'server': legacy snapshot upload flow.
 export const INFERENCE_MODE =
@@ -50,7 +51,7 @@ export async function probeCameraPermission() {
     return { ok: false, kind: 'unsupported' };
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const stream = await withSystemPrompt(() => navigator.mediaDevices.getUserMedia({ video: true, audio: false }));
     stream.getTracks().forEach((t) => t.stop());
     return { ok: true };
   } catch (error) {
@@ -70,6 +71,8 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
   const onShadowRef = useRef(onShadowViolation);
   const [phase, setPhase] = useState('idle');
   const [stream, setStream] = useState(null);
+  // { state: 'ok' | 'lost', permission: 'granted' | 'denied' | 'prompt' | null, kind }
+  const [cameraStatus, setCameraStatus] = useState({ state: 'ok', permission: null, kind: null });
 
   useEffect(() => {
     onViolationRef.current = onViolation;
@@ -86,6 +89,9 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
           onViolation: (v) => onViolationRef.current?.(v),
           onShadowViolation: (v) => onShadowRef.current?.(v),
           onStateChange: setPhase,
+          // Recovery swaps in a new camera stream; previews follow it.
+          onStreamChange: setStream,
+          onCameraStatus: setCameraStatus,
         });
         return controllerRef.current;
       }).catch((error) => {
@@ -136,6 +142,7 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
     controllerRef.current = null;
     loadingRef.current = null;
     setStream(null);
+    setCameraStatus({ state: 'ok', permission: null, kind: null });
     if (import.meta.env.DEV) delete window.__spVision;
   }, []);
 
@@ -145,6 +152,7 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
     videoRef,
     phase,
     stream,
+    cameraStatus,
     requestCamera,
     loadModels,
     measure,
@@ -154,5 +162,5 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
     getTelemetry,
     captureEvidence,
     dispose,
-  }), [phase, stream, requestCamera, loadModels, measure, calibrate, start, stop, getTelemetry, captureEvidence, dispose]);
+  }), [phase, stream, cameraStatus, requestCamera, loadModels, measure, calibrate, start, stop, getTelemetry, captureEvidence, dispose]);
 }
