@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from '../AppIcon';
 import Button from '../ui/Button';
 import { probeCameraPermission } from './useVisionProctoring';
+import { SCREEN_SHARE_HELP, shareEntireScreen } from './screenShare';
+import { requestExamFullscreen } from './fullscreen';
 
 export const MIN_FACE_FPS = 2;
 
@@ -63,6 +65,16 @@ const STEP_LABELS = {
   models: 'Load proctoring models',
   fps: 'Measure device speed (5 s)',
   calibrate: 'Calibrate (look at the screen)',
+  screen: 'Share your entire screen',
+  fullscreen: 'Enter fullscreen',
+};
+
+const FULLSCREEN_HELP = {
+  title: 'Fullscreen could not be turned on',
+  steps: [
+    'Click "Enter fullscreen and start" again.',
+    'If you pressed F11 (browser fullscreen), that is fine — the button still switches the exam into fullscreen.',
+  ],
 };
 
 const statusIcon = {
@@ -77,7 +89,10 @@ const statusIcon = {
 const fmtMs = (ms) => (ms == null ? '—' : `${Math.round(ms)} ms`);
 
 /**
- * Pre-exam device gate: permission -> model load -> fps check -> calibration.
+ * Pre-exam gate: camera permission -> model load -> fps check -> calibration
+ * -> screen share (if required) -> fullscreen (if required, last, on a click).
+ * Screen share and fullscreen are browser prompts started from button clicks,
+ * so their focus/fullscreen side effects never reach the exam's violation checks.
  *
  * variant:
  *   'exam'            full check before starting a new attempt
@@ -94,10 +109,21 @@ const PreExamGate = ({
   onComplete,
   onCancel,
   cancelLabel = 'Back to dashboard',
+  cameraRequired = true,
+  requireScreenShare = false,
+  requireFullscreen = false,
+  onScreenStream,
 }) => {
-  const stepIds = variant === 'permission-only'
-    ? ['camera']
-    : ['camera', 'models', ...(skipFps ? [] : ['fps']), 'calibrate'];
+  const visionSteps = !cameraRequired
+    ? []
+    : variant === 'permission-only'
+      ? ['camera']
+      : ['camera', 'models', ...(skipFps ? [] : ['fps']), 'calibrate'];
+  const stepIds = [
+    ...visionSteps,
+    ...(requireScreenShare && variant !== 'device-test' ? ['screen'] : []),
+    ...(requireFullscreen && variant !== 'device-test' ? ['fullscreen'] : []),
+  ];
 
   const [steps, setSteps] = useState(() => Object.fromEntries(stepIds.map((id) => [id, { status: 'pending', detail: '' }])));
   const [failure, setFailure] = useState(null); // { step, title, steps[] }
@@ -109,6 +135,36 @@ const PreExamGate = ({
   const continueRef = useRef(null);
   const previewRef = useRef(null);
   const startedRef = useRef(false);
+  // Steps that need a click (browser prompts require a user gesture).
+  const [action, setAction] = useState(null); // 'screen' | 'fullscreen' | null
+  const [actionError, setActionError] = useState(null);
+  const actionRef = useRef(null);
+
+  const waitForAction = (kind) => new Promise((resolve) => {
+    actionRef.current = resolve;
+    setActionError(null);
+    setAction(kind);
+  });
+
+  const onShareClick = async () => {
+    setActionError(null);
+    try {
+      const stream = await shareEntireScreen();
+      actionRef.current?.(stream);
+    } catch (error) {
+      setActionError(SCREEN_SHARE_HELP[error.kind] || SCREEN_SHARE_HELP.failed);
+    }
+  };
+
+  const onFullscreenClick = async () => {
+    setActionError(null);
+    try {
+      await requestExamFullscreen();
+      actionRef.current?.();
+    } catch {
+      setActionError(FULLSCREEN_HELP);
+    }
+  };
 
   const setStep = (id, status, detail = '') => setSteps((prev) => ({ ...prev, [id]: { status, detail } }));
 
@@ -190,6 +246,23 @@ const PreExamGate = ({
           }
           setStep(id, 'ok', `${c.faceSamples}/${c.samples} frames with your face`);
         }
+
+        if (id === 'screen') {
+          setStep(id, 'running', 'Waiting for you to share your entire screen');
+          const stream = await waitForAction('screen');
+          setAction(null);
+          onScreenStream?.(stream);
+          setStep(id, 'ok', 'Entire screen shared');
+        }
+
+        if (id === 'fullscreen') {
+          if (!document.fullscreenElement) {
+            setStep(id, 'running', 'Click the button to enter fullscreen');
+            await waitForAction('fullscreen');
+            setAction(null);
+          }
+          setStep(id, 'ok', 'Fullscreen on');
+        }
       }
 
       const summaryData = {
@@ -264,6 +337,36 @@ const PreExamGate = ({
             </div>
           )}
         </div>
+
+        {action === 'screen' && (
+          <div className="mt-6 p-4 rounded-lg bg-primary/10 border border-primary/30">
+            <p className="text-sm font-semibold text-foreground mb-1">Share your entire screen</p>
+            <p className="text-sm text-muted-foreground mb-3">
+              This exam records your screen. In the browser's picker choose <strong>Entire screen</strong>, select your
+              screen, then click <strong>Share</strong>. Windows and browser tabs are not accepted.
+            </p>
+            <Button iconName="Monitor" onClick={() => void onShareClick()}>Share entire screen</Button>
+          </div>
+        )}
+
+        {action === 'fullscreen' && (
+          <div className="mt-6 p-4 rounded-lg bg-primary/10 border border-primary/30">
+            <p className="text-sm font-semibold text-foreground mb-1">Last step: fullscreen</p>
+            <p className="text-sm text-muted-foreground mb-3">
+              The exam runs in fullscreen. Leaving fullscreen during the exam is recorded as a violation.
+            </p>
+            <Button iconName="Maximize" onClick={() => void onFullscreenClick()}>Enter fullscreen and start</Button>
+          </div>
+        )}
+
+        {actionError && (
+          <div role="alert" className="mt-4 p-4 rounded-lg bg-error/10 border border-error/30">
+            <p className="text-sm font-semibold text-foreground mb-2">{actionError.title}</p>
+            <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground">
+              {actionError.steps.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          </div>
+        )}
 
         {fpsWarning && (
           <div role="alert" className="mt-6 p-4 rounded-lg bg-warning/15 border border-warning/30">
