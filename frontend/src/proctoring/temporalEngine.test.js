@@ -238,22 +238,6 @@ describe('CAMERA_DISCONNECTED', () => {
   });
 });
 
-describe('cooldown', () => {
-  it('suppresses repeats of the same type within 10 s', () => {
-    const engine = createTemporalEngine();
-    const events = run(engine, { durationMs: 12_000, sample: () => ({ faceCount: 0 }) });
-    const noFace = events.filter((e) => e.type === 'NO_FACE');
-    expect(noFace).toHaveLength(2);
-    expect(noFace[1].ts - noFace[0].ts).toBeGreaterThanOrEqual(DEFAULT_CONFIG.cooldownMs);
-  });
-
-  it('is tracked per type', () => {
-    const engine = createTemporalEngine();
-    const events = run(engine, { durationMs: 4000, sample: () => ({ faceCount: 0, frameDiff: 0 }) });
-    expect(new Set(typesOf(events))).toEqual(new Set(['NO_FACE', 'CAMERA_FROZEN']));
-  });
-});
-
 describe('NO_BLINK', () => {
   const noBlinkRun = (mode, durationMs = 61_000, sample = () => ({})) =>
     run(createTemporalEngine({ noBlink: { mode } }), { durationMs, sample });
@@ -290,11 +274,146 @@ describe('NO_BLINK', () => {
   });
 });
 
+describe('episodes', () => {
+  const noFaceFor = (awayFrom, awayTo) => (t) => ({ faceCount: t >= awayFrom && t < awayTo ? 0 : 1 });
+
+  it('walking away for 2 minutes reports exactly 2 NO_FACE (start + prolonged)', () => {
+    const engine = createTemporalEngine();
+    const events = run(engine, { durationMs: 140_000, sample: noFaceFor(5_000, 125_000) });
+    expect(typesOf(events)).toEqual(['NO_FACE', 'NO_FACE']);
+    const [start, prolonged] = events;
+    expect(start).toMatchObject({ episode: 'start', severity: 'minor' });
+    expect(prolonged).toMatchObject({ episode: 'prolonged', severity: 'major', reason: 'No face continued for over 60 s.' });
+    expect(prolonged.durationMs).toBeGreaterThanOrEqual(60_000);
+    expect(prolonged.ts - start.ts).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it('a continuous 12 s absence is one episode, reported once', () => {
+    const engine = createTemporalEngine();
+    expect(typesOf(run(engine, { durationMs: 12_000, sample: () => ({ faceCount: 0 }) }))).toEqual(['NO_FACE']);
+  });
+
+  it('a flicker under 3 s does not end an episode', () => {
+    const engine = createTemporalEngine();
+    // Away 5-30 s, face visible for 2 s at 15-17 s, away again until 30 s.
+    const events = run(engine, {
+      durationMs: 40_000,
+      sample: (t) => ({ faceCount: (t >= 5_000 && t < 15_000) || (t >= 17_000 && t < 30_000) ? 0 : 1 }),
+    });
+    expect(typesOf(events)).toEqual(['NO_FACE']);
+  });
+
+  it('an episode ends after 3 s of the condition being false; the next one needs a 10 s gap', () => {
+    const engine = createTemporalEngine();
+    // Away 2-7 s (episode 1), back, away again 13-18 s: episode 1 ended at about 11 s,
+    // so the second absence (over before ~21 s) is not reported.
+    const close = run(engine, {
+      durationMs: 30_000,
+      sample: (t) => ({ faceCount: (t >= 2_000 && t < 7_000) || (t >= 13_000 && t < 18_000) ? 0 : 1 }),
+    });
+    expect(typesOf(close)).toEqual(['NO_FACE']);
+
+    // If the second absence is still going on when the gap has passed, it is reported then.
+    const late = createTemporalEngine();
+    const lateEvents = run(late, {
+      durationMs: 40_000,
+      sample: (t) => ({ faceCount: (t >= 2_000 && t < 7_000) || (t >= 13_000 && t < 35_000) ? 0 : 1 }),
+    });
+    expect(typesOf(lateEvents)).toEqual(['NO_FACE', 'NO_FACE']);
+    expect(lateEvents[1].ts - lateEvents[0].ts).toBeGreaterThanOrEqual(10_000);
+
+    const apart = createTemporalEngine();
+    const later = run(apart, {
+      durationMs: 40_000,
+      sample: (t) => ({ faceCount: (t >= 2_000 && t < 7_000) || (t >= 25_000 && t < 32_000) ? 0 : 1 }),
+    });
+    expect(typesOf(later)).toEqual(['NO_FACE', 'NO_FACE']);
+  });
+
+  it('a 5 s phone episode is reported once even though detections keep coming', () => {
+    const engine = createTemporalEngine();
+    const events = [];
+    for (let t = 0; t < 30_000; t += 700) {
+      const detections = t >= 1_000 && t < 20_000 ? [{ categoryName: 'cell phone', score: 0.8 }] : [];
+      events.push(...engine.pushObjects({ ts: t, detections }));
+    }
+    expect(typesOf(events)).toEqual(['PHONE_DETECTED']);
+  });
+
+  it('prolonged is sent at most once per episode', () => {
+    const engine = createTemporalEngine({ noBlink: { mode: 'off' } });
+    const events = run(engine, { durationMs: 200_000, sample: () => ({ yaw: 40 }) });
+    expect(events.map((e) => `${e.type}:${e.episode}`)).toEqual(['LOOKING_AWAY:start', 'LOOKING_AWAY:prolonged']);
+  });
+});
+
+describe('camera precedence', () => {
+  it('camera unplugged for 30 s: 1 CAMERA_DISCONNECTED and 0 NO_FACE', () => {
+    const engine = createTemporalEngine();
+    const events = [];
+    for (let t = 0; t < 45_000; t += STEP) {
+      const unplugged = t >= 5_000 && t < 35_000;
+      if (t === 5_000) events.push(...engine.cameraEvent('ended', t));
+      if (t === 35_000) events.push(...engine.cameraEvent('restored', t));
+      if (!unplugged) events.push(...engine.cameraEvent('frame', t));
+      // Black frames keep being analysed while the camera is gone.
+      events.push(...engine.pushFace(face(t, { faceCount: unplugged ? 0 : 1, frameDiff: unplugged ? null : 3 })));
+      events.push(...engine.tick(t));
+    }
+    expect(typesOf(events)).toEqual(['CAMERA_DISCONNECTED']);
+    expect(events[0].severity).toBe('major');
+  });
+
+  it('no frames for 30 s (controller stops sampling): only CAMERA_DISCONNECTED, one episode', () => {
+    const engine = createTemporalEngine();
+    const events = [];
+    for (let t = 0; t < 40_000; t += STEP) {
+      const stalled = t >= 2_000 && t < 32_000;
+      if (!stalled) {
+        events.push(...engine.cameraEvent('frame', t));
+        events.push(...engine.pushFace(face(t, { frameDiff: 3 })));
+      }
+      events.push(...engine.tick(t));
+    }
+    expect(typesOf(events)).toEqual(['CAMERA_DISCONNECTED']);
+  });
+
+  it('a covered (frozen) camera reports CAMERA_FROZEN, not NO_FACE', () => {
+    const engine = createTemporalEngine();
+    const events = run(engine, { durationMs: 20_000, sample: (t) => (t >= 2_000 && t < 15_000 ? { faceCount: 0, frameDiff: 0.1 } : {}) });
+    expect(typesOf(events)).toEqual(['CAMERA_FROZEN']);
+  });
+
+  it('face rules resume after the camera is restored, with the baseline kept', () => {
+    const engine = createTemporalEngine();
+    engine.setBaseline({ yaw: 10, pitch: 0 });
+    engine.cameraEvent('frame', 0);
+    engine.cameraEvent('ended', 1_000);
+    engine.cameraEvent('restored', 5_000);
+    expect(engine.getBaseline()).toEqual({ yaw: 10, pitch: 0 });
+    const events = run(engine, { start: 5_000, durationMs: 6_000, sample: () => ({ faceCount: 0 }) });
+    expect(typesOf(events)).toEqual(['NO_FACE']);
+  });
+
+  it('a 30 s mute is one CAMERA_DISCONNECTED episode', () => {
+    const engine = createTemporalEngine();
+    const events = [];
+    events.push(...engine.cameraEvent('mute', 1_000));
+    for (let t = 1_000; t < 31_000; t += 500) events.push(...engine.tick(t));
+    events.push(...engine.cameraEvent('unmute', 31_000));
+    for (let t = 31_000; t < 40_000; t += 500) {
+      events.push(...engine.cameraEvent('frame', t));
+      events.push(...engine.tick(t));
+    }
+    expect(typesOf(events)).toEqual(['CAMERA_DISCONNECTED']);
+  });
+});
+
 describe('event shape', () => {
   it('matches what the violation endpoint expects', () => {
     const engine = createTemporalEngine();
     const [ev] = run(engine, { durationMs: 3000, sample: () => ({ faceCount: 0 }) });
-    expect(Object.keys(ev).sort()).toEqual(['confidence', 'durationMs', 'reason', 'severity', 'ts', 'type']);
+    expect(Object.keys(ev).sort()).toEqual(['confidence', 'durationMs', 'episode', 'reason', 'severity', 'ts', 'type']);
     expect(ev.confidence).toBeGreaterThanOrEqual(0.7);
     expect(ev.confidence).toBeLessThanOrEqual(1);
     expect(typeof ev.reason).toBe('string');

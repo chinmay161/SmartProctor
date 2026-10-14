@@ -3,13 +3,21 @@
 // Pure module: no MediaPipe, no DOM. Callers feed timestamped feature objects
 // (milliseconds on any monotonic clock) and get violation events back.
 //
+// Reporting is episode-based: a rule's condition (e.g. "no face in >=70% of the
+// last 3 s") opens an episode and is reported once. The episode ends after the
+// condition has been false for 3 s. An episode that lasts 60 s is reported once
+// more (severity major). A new episode of the same type needs a 10 s gap.
+//
+// Precedence: while the camera is disconnected or frozen, face and object rules
+// are suspended (their samples are excluded and their episodes paused).
+//
 // Angle conventions (degrees, relative to the calibrated baseline):
 //   yaw   > 0 = head turned to the student's left, < 0 = to their right
 //   pitch > 0 = head tilted down,                  < 0 = tilted up
 import { VISION_VIOLATION_SEVERITY } from '../utils/violationSeverity';
 
 export const DEFAULT_CONFIG = Object.freeze({
-  cooldownMs: 10_000,
+  episode: { endAfterFalseMs: 3_000, prolongedAfterMs: 60_000, minGapMs: 10_000 },
   historyMs: 65_000,
   noFace: { windowMs: 3_000, ratio: 0.7, minSamples: 3 },
   multipleFaces: { windowMs: 2_000, ratio: 0.6, minSamples: 3 },
@@ -26,6 +34,21 @@ export const DEFAULT_CONFIG = Object.freeze({
   cameraDisconnected: { noFrameMs: 5_000, muteGraceMs: 2_000 },
 });
 
+export const EPISODE_TYPES = Object.freeze([
+  'NO_FACE', 'MULTIPLE_FACES', 'LOOKING_AWAY', 'PHONE_DETECTED', 'BOOK_DETECTED', 'CAMERA_FROZEN', 'CAMERA_DISCONNECTED',
+]);
+const CAMERA_TYPES = new Set(['CAMERA_FROZEN', 'CAMERA_DISCONNECTED']);
+
+const EPISODE_LABELS = {
+  NO_FACE: 'No face',
+  MULTIPLE_FACES: 'Multiple faces',
+  LOOKING_AWAY: 'Looking away',
+  PHONE_DETECTED: 'Phone in view',
+  BOOK_DETECTED: 'Book in view',
+  CAMERA_FROZEN: 'Frozen camera image',
+  CAMERA_DISCONNECTED: 'Camera disconnected',
+};
+
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 export const mergeConfig = (base, overrides) => {
@@ -39,42 +62,118 @@ export const mergeConfig = (base, overrides) => {
 const pct = (ratio) => `${Math.round(ratio * 100)}%`;
 const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
 const signed = (deg) => `${deg >= 0 ? '+' : ''}${Math.round(deg)}°`;
+const round2 = (x) => Math.round(Math.min(1, Math.max(0, x)) * 100) / 100;
 
 export function createTemporalEngine(overrides = {}) {
   const config = mergeConfig(DEFAULT_CONFIG, overrides);
 
   let faceHistory = [];
   let objectHistory = [];
-  const lastTrigger = {};
   let baseline = { yaw: 0, pitch: 0 };
   let lastBlinkTs = null;
+  let lastNoBlinkTs = null;
   let frozenSince = null;
   let lastFrameTs = null;
   let mutedSince = null;
+  let trackEnded = false;
+  const episodes = {};
 
-  const windowOf = (history, now, windowMs) => history.filter((s) => s.ts > now - windowMs && s.ts <= now);
+  // ---------- camera state (precedence) ----------
+
+  const cameraDisconnected = (now) => {
+    const rule = config.cameraDisconnected;
+    if (trackEnded) return { on: true, reason: 'Camera track ended (unplugged, disabled, or permission revoked).', since: null };
+    if (mutedSince !== null && now - mutedSince >= rule.muteGraceMs) {
+      return { on: true, reason: `Camera muted by the system for ${secs(now - mutedSince)}.`, since: mutedSince };
+    }
+    if (lastFrameTs !== null && now - lastFrameTs >= rule.noFrameMs) {
+      return { on: true, reason: `No camera frames received for ${secs(now - lastFrameTs)}.`, since: lastFrameTs };
+    }
+    return { on: false };
+  };
+
+  const cameraFrozen = (now) => frozenSince !== null && now - frozenSince >= config.cameraFrozen.minDurationMs;
+  const cameraImpaired = (now) => cameraDisconnected(now).on || cameraFrozen(now);
+  // Face/object rules pause as soon as the camera *might* be impaired (picture not
+  // changing, or the track muted/ended), so e.g. covering the camera is reported as
+  // CAMERA_FROZEN only, not NO_FACE first.
+  const rulesSuspended = (now) => cameraImpaired(now) || frozenSince !== null || mutedSince !== null || trackEnded;
+
+  // ---------- episodes ----------
+
+  const episodeOf = (type) => {
+    if (!episodes[type]) episodes[type] = { active: false, lastEndTs: null };
+    return episodes[type];
+  };
+
+  const maybeProlong = (events, type, ep, now) => {
+    const rule = config.episode;
+    if (ep.prolongedSent || now - ep.startTs < rule.prolongedAfterMs) return;
+    ep.prolongedSent = true;
+    events.push({
+      type,
+      severity: 'major',
+      confidence: ep.confidence,
+      durationMs: Math.round(now - ep.startTs),
+      reason: `${EPISODE_LABELS[type]} continued for over 60 s.`,
+      ts: now,
+      episode: 'prolonged',
+    });
+  };
+
+  const endEpisode = (ep, now) => {
+    ep.active = false;
+    ep.lastEndTs = now;
+  };
+
+  /**
+   * Feed one evaluation of a rule. describe() is only called when an episode starts.
+   * `sustained` keeps an open episode alive on short-window evidence, so the lag of
+   * the longer start window doesn't turn a brief flicker into an episode end.
+   */
+  const observe = (events, type, isTrue, now, describe, sustained = false) => {
+    const ep = episodeOf(type);
+    if (ep.active && (isTrue || sustained)) {
+      ep.lastTrueTs = now;
+      maybeProlong(events, type, ep, now);
+      return;
+    }
+    if (isTrue) {
+      if (ep.lastEndTs !== null && now - ep.lastEndTs < config.episode.minGapMs) return;
+      const d = describe();
+      Object.assign(ep, { active: true, startTs: now, lastTrueTs: now, prolongedSent: false, confidence: round2(d.confidence) });
+      events.push({
+        type,
+        severity: VISION_VIOLATION_SEVERITY[type] || 'minor',
+        confidence: round2(d.confidence),
+        durationMs: Math.max(0, Math.round(d.durationMs || 0)),
+        reason: d.reason,
+        ts: now,
+        episode: 'start',
+      });
+    } else if (ep.active && now - ep.lastTrueTs >= config.episode.endAfterFalseMs) {
+      endEpisode(ep, now);
+    }
+  };
+
+  /** End or prolong open episodes without a fresh evaluation (time passing). */
+  const sweepEpisodes = (events, now, { includeSuspendable }) => {
+    for (const [type, ep] of Object.entries(episodes)) {
+      if (!ep.active) continue;
+      if (!includeSuspendable && !CAMERA_TYPES.has(type)) continue;
+      if (now - ep.lastTrueTs >= config.episode.endAfterFalseMs) endEpisode(ep, now);
+      else maybeProlong(events, type, ep, now);
+    }
+  };
+
+  // ---------- rules ----------
+
+  const windowOf = (history, now, windowMs) => history.filter((s) => !s.impaired && s.ts > now - windowMs && s.ts <= now);
 
   const prune = (now) => {
     const cutoff = now - config.historyMs;
     if (faceHistory.length && faceHistory[0].ts < cutoff) faceHistory = faceHistory.filter((s) => s.ts >= cutoff);
     if (objectHistory.length && objectHistory[0].ts < cutoff) objectHistory = objectHistory.filter((s) => s.ts >= cutoff);
-  };
-
-  const emit = (events, type, ts, { confidence, durationMs = 0, reason, shadow = false }) => {
-    const last = lastTrigger[type];
-    if (last !== undefined && ts - last < config.cooldownMs) return false;
-    lastTrigger[type] = ts;
-    const event = {
-      type,
-      severity: VISION_VIOLATION_SEVERITY[type] || 'minor',
-      confidence: Math.round(Math.min(1, Math.max(0, confidence)) * 100) / 100,
-      durationMs: Math.max(0, Math.round(durationMs)),
-      reason,
-      ts,
-    };
-    if (shadow) event.shadow = true;
-    events.push(event);
-    return true;
   };
 
   const isAway = (s) => {
@@ -84,31 +183,68 @@ export function createTemporalEngine(overrides = {}) {
     return Math.abs(dYaw) > yawDeg || dPitch < pitchUpDeg || dPitch > pitchDownDeg;
   };
 
+  const SUSTAIN_WINDOW_MS = 1_000;
+
   const ratioRule = (events, now, type, rule, samples, matches, describe) => {
-    if (samples.length < rule.minSamples) return;
-    const hits = samples.filter(matches);
-    const ratio = hits.length / samples.length;
-    if (ratio < rule.ratio) return;
-    const durationMs = now - hits[0].ts;
-    emit(events, type, now, { confidence: ratio, durationMs, reason: describe(ratio, durationMs, hits) });
+    const hits = samples.length >= rule.minSamples ? samples.filter(matches) : [];
+    const ratio = samples.length ? hits.length / samples.length : 0;
+    const isTrue = samples.length >= rule.minSamples && ratio >= rule.ratio;
+    // Majority of the last second still matching: the episode is still going on.
+    const recent = samples.filter((s) => s.ts > now - SUSTAIN_WINDOW_MS);
+    const sustained = recent.length >= 2 && recent.filter(matches).length / recent.length >= 0.5;
+    observe(events, type, isTrue, now, () => ({
+      confidence: ratio,
+      durationMs: hits.length ? now - hits[0].ts : 0,
+      reason: describe(ratio, hits),
+    }), sustained);
+  };
+
+  const evaluateCamera = (events, now) => {
+    const disc = cameraDisconnected(now);
+    observe(events, 'CAMERA_DISCONNECTED', disc.on, now, () => ({
+      confidence: 1,
+      durationMs: disc.since === null ? 0 : now - disc.since,
+      reason: disc.reason,
+    }));
+    // A disconnected camera is reported as such, never also as frozen.
+    const frozen = !disc.on && cameraFrozen(now);
+    observe(events, 'CAMERA_FROZEN', frozen, now, () => ({
+      confidence: 0.9,
+      durationMs: now - frozenSince,
+      reason: `Camera image unchanged for ${secs(now - frozenSince)} (frozen, covered, or a static virtual camera).`,
+    }));
   };
 
   const evaluateFace = (now, sample) => {
     const events = [];
 
-    const noFaceWindow = windowOf(faceHistory, now, config.noFace.windowMs);
-    ratioRule(events, now, 'NO_FACE', config.noFace, noFaceWindow, (s) => s.faceCount === 0,
+    if (typeof sample.frameDiff === 'number') {
+      if (sample.frameDiff < config.cameraFrozen.diffThreshold) {
+        if (frozenSince === null) frozenSince = now;
+      } else {
+        frozenSince = null;
+      }
+    }
+    evaluateCamera(events, now);
+
+    if (rulesSuspended(now)) {
+      sample.impaired = true;
+      return events;
+    }
+
+    ratioRule(events, now, 'NO_FACE', config.noFace, windowOf(faceHistory, now, config.noFace.windowMs),
+      (s) => s.faceCount === 0,
       (r) => `No face visible in ${pct(r)} of frames over the last ${secs(config.noFace.windowMs)}.`);
 
-    const multiWindow = windowOf(faceHistory, now, config.multipleFaces.windowMs);
-    ratioRule(events, now, 'MULTIPLE_FACES', config.multipleFaces, multiWindow, (s) => s.faceCount >= 2,
-      (r, _d, hits) => `${Math.max(...hits.map((h) => h.faceCount))} faces visible in ${pct(r)} of frames over the last ${secs(config.multipleFaces.windowMs)}.`);
+    ratioRule(events, now, 'MULTIPLE_FACES', config.multipleFaces, windowOf(faceHistory, now, config.multipleFaces.windowMs),
+      (s) => s.faceCount >= 2,
+      (r, hits) => `${Math.max(...hits.map((h) => h.faceCount))} faces visible in ${pct(r)} of frames over the last ${secs(config.multipleFaces.windowMs)}.`);
 
     const poseWindow = windowOf(faceHistory, now, config.lookingAway.windowMs)
       .filter((s) => s.faceCount >= 1 && Number.isFinite(s.yaw) && Number.isFinite(s.pitch));
-    ratioRule(events, now, 'LOOKING_AWAY', config.lookingAway, poseWindow, isAway, (r, d, hits) => {
+    ratioRule(events, now, 'LOOKING_AWAY', config.lookingAway, poseWindow, isAway, (r, hits) => {
       const last = hits[hits.length - 1];
-      return `Looking away (yaw ${signed(last.yaw - baseline.yaw)}, pitch ${signed(last.pitch - baseline.pitch)} from baseline) in ${pct(r)} of frames for ${secs(d)}.`;
+      return `Looking away (yaw ${signed(last.yaw - baseline.yaw)}, pitch ${signed(last.pitch - baseline.pitch)} from baseline) in ${pct(r)} of frames.`;
     });
 
     // NO_BLINK: one event per 60 s without a blink, only when we could have seen one.
@@ -120,38 +256,31 @@ export function createTemporalEngine(overrides = {}) {
       const presentRatio = w.length ? w.filter((s) => s.faceCount >= 1).length / w.length : 0;
       const fps = w.length / (nb.windowMs / 1000);
       if (presentRatio >= nb.minFacePresentRatio && fps >= nb.minFaceFps) {
-        const fired = emit(events, 'NO_BLINK', now, {
-          confidence: presentRatio,
-          durationMs: now - lastBlinkTs,
+        const event = {
+          type: 'NO_BLINK',
+          severity: VISION_VIOLATION_SEVERITY.NO_BLINK,
+          confidence: round2(presentRatio),
+          durationMs: Math.round(now - lastBlinkTs),
           reason: `No eye blink detected for ${secs(now - lastBlinkTs)} with the face visible ${pct(presentRatio)} of the time.`,
-          shadow: nb.mode === 'shadow',
-        });
-        if (fired) lastBlinkTs = now;
-      }
-    }
-
-    // CAMERA_FROZEN: picture effectively unchanged for a continuous period.
-    if (typeof sample.frameDiff === 'number') {
-      if (sample.frameDiff < config.cameraFrozen.diffThreshold) {
-        if (frozenSince === null) frozenSince = now;
-        const frozenFor = now - frozenSince;
-        if (frozenFor >= config.cameraFrozen.minDurationMs) {
-          emit(events, 'CAMERA_FROZEN', now, {
-            confidence: 0.9,
-            durationMs: frozenFor,
-            reason: `Camera image unchanged for ${secs(frozenFor)} (frozen, covered, or a static virtual camera).`,
-          });
-        }
-      } else {
-        frozenSince = null;
+          ts: now,
+        };
+        if (nb.mode === 'shadow') event.shadow = true;
+        events.push(event);
+        lastNoBlinkTs = now;
+        lastBlinkTs = now;
       }
     }
 
     return events;
   };
 
-  const evaluateObjects = (now) => {
+  const evaluateObjects = (now, sample) => {
     const events = [];
+    evaluateCamera(events, now);
+    if (rulesSuspended(now)) {
+      sample.impaired = true;
+      return events;
+    }
     const rule = config.objects;
     const w = windowOf(objectHistory, now, rule.windowMs);
     for (const [category, type] of Object.entries(rule.categories)) {
@@ -160,14 +289,15 @@ export function createTemporalEngine(overrides = {}) {
         const best = Math.max(0, ...s.detections.filter((d) => d.categoryName === category).map((d) => d.score));
         if (best >= rule.minScore) hits.push({ ts: s.ts, score: best });
       }
-      if (hits.length >= rule.minDetections) {
+      const latestHit = hits.length > 0 && hits[hits.length - 1].ts === now;
+      observe(events, type, hits.length >= rule.minDetections, now, () => {
         const mean = hits.reduce((acc, h) => acc + h.score, 0) / hits.length;
-        emit(events, type, now, {
+        return {
           confidence: mean,
           durationMs: now - hits[0].ts,
           reason: `Detected '${category}' in ${hits.length} frames within ${secs(rule.windowMs)} (avg score ${mean.toFixed(2)}).`,
-        });
-      }
+        };
+      }, latestHit);
     }
     return events;
   };
@@ -197,38 +327,32 @@ export function createTemporalEngine(overrides = {}) {
       copy.detections = Array.isArray(copy.detections) ? copy.detections : [];
       objectHistory.push(copy);
       prune(copy.ts);
-      return evaluateObjects(copy.ts);
+      return evaluateObjects(copy.ts, copy);
     },
 
-    /** kind: 'frame' | 'mute' | 'unmute' | 'ended' */
+    /** kind: 'frame' | 'mute' | 'unmute' | 'ended' | 'restored' (a new camera stream is bound) */
     cameraEvent(kind, ts) {
       const events = [];
       if (kind === 'frame') lastFrameTs = ts;
       else if (kind === 'mute') mutedSince = mutedSince ?? ts;
       else if (kind === 'unmute') mutedSince = null;
-      else if (kind === 'ended') {
-        emit(events, 'CAMERA_DISCONNECTED', ts, { confidence: 1, reason: 'Camera track ended (unplugged, disabled, or permission revoked).' });
+      else if (kind === 'ended') trackEnded = true;
+      else if (kind === 'restored') {
+        trackEnded = false;
+        mutedSince = null;
+        frozenSince = null;
+        lastFrameTs = ts;
+        lastBlinkTs = ts;
       }
+      if (kind !== 'frame') evaluateCamera(events, ts);
       return events;
     },
 
     /** Time-based checks that don't depend on a new sample arriving. */
     tick(now) {
       const events = [];
-      const rule = config.cameraDisconnected;
-      if (mutedSince !== null && now - mutedSince >= rule.muteGraceMs) {
-        emit(events, 'CAMERA_DISCONNECTED', now, {
-          confidence: 1,
-          durationMs: now - mutedSince,
-          reason: `Camera muted by the system for ${secs(now - mutedSince)}.`,
-        });
-      } else if (lastFrameTs !== null && now - lastFrameTs >= rule.noFrameMs) {
-        emit(events, 'CAMERA_DISCONNECTED', now, {
-          confidence: 1,
-          durationMs: now - lastFrameTs,
-          reason: `No camera frames received for ${secs(now - lastFrameTs)}.`,
-        });
-      }
+      evaluateCamera(events, now);
+      sweepEpisodes(events, now, { includeSuspendable: !rulesSuspended(now) });
       return events;
     },
 
@@ -239,8 +363,17 @@ export function createTemporalEngine(overrides = {}) {
       lastBlinkTs = now;
     },
 
+    /** Camera health for the UI and the inference loop. */
+    cameraState(now) {
+      const disc = cameraDisconnected(now);
+      return { disconnected: disc.on, frozen: !disc.on && cameraFrozen(now), ended: trackEnded, rulesSuspended: rulesSuspended(now) };
+    },
+
     getHistory() {
       return { face: structuredClone(faceHistory), objects: structuredClone(objectHistory) };
     },
+
+    /** Test/diagnostic helper. */
+    getLastNoBlinkTs: () => lastNoBlinkTs,
   };
 }
