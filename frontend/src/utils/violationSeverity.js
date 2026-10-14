@@ -11,6 +11,8 @@ export const VISION_VIOLATION_SEVERITY = Object.freeze({
   LOOKING_AWAY: 'minor',
   CAMERA_FROZEN: 'minor',
   NO_BLINK: 'minor',
+  // Not a vision type, but reported by the client-side proctoring flow on resume.
+  PAGE_RELOAD: 'minor',
 });
 
 const legacySeverityFromMessage = (message) => {

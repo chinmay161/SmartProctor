@@ -37,6 +37,8 @@ const SecurityMonitor = forwardRef(({
   clientVision = false,
   managedStream = null,
   getVisionTelemetry = null,
+  // Entire-screen stream from the pre-exam gate (the portal owns it; this only previews it).
+  screenStream = null,
 }, ref) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -194,66 +196,37 @@ const SecurityMonitor = forwardRef(({
     return () => window.clearInterval(id);
   }, [clientVision, getVisionTelemetry]);
 
+  // Screen sharing is requested once, in the pre-exam gate (before fullscreen), so the
+  // picker can't knock the exam out of fullscreen. Here we only show that stream.
   useEffect(() => {
     if (!screenRecordingEnabled) {
-      stopStream(screenStreamRef);
+      screenStreamRef.current = null;
       setScreenStatus('disabled');
       setScreenErrorMessage('');
-      return;
+      return undefined;
     }
-
-    let mounted = true;
-
-    const initScreenCapture = async () => {
-      try {
-        setScreenStatus('initializing');
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            displaySurface: 'browser',
-          },
-          audio: false,
-          preferCurrentTab: true,
-          selfBrowserSurface: 'include',
-          surfaceSwitching: 'include',
-        });
-        if (!mounted) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        screenStreamRef.current = stream;
-        const [track] = stream.getVideoTracks();
-        if (track) {
-          track.addEventListener('ended', () => {
-            setScreenStatus('error');
-            onAddViolationRef.current?.('Screen sharing stopped', 'SCREEN_SHARE_STOPPED', 1.0);
-          });
-        }
-        if (screenVideoRef.current) {
-          await attachStreamToVideo(screenVideoRef.current, stream);
-        }
-        setScreenStatus('active');
-        setScreenErrorMessage('');
-      } catch (error) {
-        if (mounted) {
-          setScreenStatus('error');
-          setScreenErrorMessage(getMediaErrorMessage(error, 'Screen sharing'));
-          console.error('Failed to access screen capture:', error);
-        }
-      }
+    const [track] = screenStream?.getVideoTracks() || [];
+    if (!track || track.readyState === 'ended') {
+      screenStreamRef.current = null;
+      setScreenStatus('error');
+      setScreenErrorMessage('Screen sharing is not active.');
+      return undefined;
+    }
+    screenStreamRef.current = screenStream;
+    setScreenStatus('active');
+    setScreenErrorMessage('');
+    const onEnded = () => {
+      setScreenStatus('error');
+      setScreenErrorMessage('Screen sharing stopped.');
     };
-
-    initScreenCapture();
-
-    return () => {
-      mounted = false;
-      stopStream(screenStreamRef);
-    };
-  }, [screenRecordingEnabled]);
+    track.addEventListener('ended', onEnded);
+    return () => track.removeEventListener('ended', onEnded);
+  }, [screenRecordingEnabled, screenStream]);
 
   useEffect(() => {
     if (screenStatus !== 'active' || !screenVideoRef.current || !screenStreamRef.current) return;
     void attachStreamToVideo(screenVideoRef.current, screenStreamRef.current);
-  }, [screenStatus]);
+  }, [screenStatus, screenStream]);
 
   useEffect(() => {
     if (!audioMonitoringEnabled) {

@@ -38,6 +38,11 @@ export const markUnloading = () => {
   unloading = true;
 };
 
+/** The page came back from the back/forward cache: it is live again. */
+export const clearUnloading = () => {
+  unloading = false;
+};
+
 export const isUnloading = () => unloading;
 
 /** True when a violation of this type must not be reported right now. */

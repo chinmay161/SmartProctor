@@ -17,6 +17,13 @@ import {
   useVisionProctoring,
 } from '../../components/proctoring/useVisionProctoring';
 import { severityForViolation } from '../../utils/violationSeverity';
+import {
+  clearUnloading,
+  markUnloading,
+  shouldSuppressViolation,
+} from '../../utils/proctoringSuppression';
+import { SCREEN_SHARE_HELP, shareEntireScreen } from '../../components/proctoring/screenShare';
+import { requestExamFullscreen } from '../../components/proctoring/fullscreen';
 
 // Only camera exams need the gate UI, so it ships in its own chunk.
 const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
@@ -44,6 +51,10 @@ const isVisionViolationEnabled = (type, cfg) => {
 };
 
 const START_CLICK_KEY = 'sp:startClickedAt';
+// Set once the exam is on screen; seeing it again on resume (same tab) means a reload.
+const activeAttemptKey = (examId) => `sp:activeAttempt:${examId}`;
+// Set right before a reload the app itself asks for (camera-permission banner).
+const APP_RELOAD_KEY = 'sp:appInitiatedReload';
 
 const normalizeQuestionType = (rawType) => {
   const type = String(rawType || '').trim().toLowerCase();
@@ -166,6 +177,9 @@ const ExamPortal = () => {
   const gateResultRef = useRef(null);
   const beginningRef = useRef(false);
   const visionTelemetryRef = useRef(() => null);
+  const [screenStream, setScreenStream] = useState(null);
+  const [screenShareLost, setScreenShareLost] = useState(null); // help object when sharing stopped
+  const reloadReportedRef = useRef(false);
 
 
   const sourceExam = examDataState;
@@ -361,7 +375,8 @@ const ExamPortal = () => {
         pendingExamRef.current = { exam, cfg, questionIds, questionsPromise };
         setIsResume(resumable);
         setCameraRequired(requiresCamera);
-        setStage(requiresCamera ? 'gate' : 'starting');
+        const needsGate = requiresCamera || Boolean(cfg?.enableScreenRecording) || Boolean(cfg?.browserLockdown);
+        setStage(needsGate ? 'gate' : 'starting');
       } catch {
         if (mounted) {
           setExamDataState(null);
@@ -469,6 +484,20 @@ const ExamPortal = () => {
       await vision.start(gateResult.calibration.baseline);
     }
     setStage('ready');
+
+    // Resuming in the same tab where this attempt was already on screen = a reload.
+    try {
+      const wasActive = sessionStorage.getItem(activeAttemptKey(activeExamId));
+      const appReload = sessionStorage.getItem(APP_RELOAD_KEY);
+      sessionStorage.removeItem(APP_RELOAD_KEY);
+      if (isResume && wasActive && !appReload && !reloadReportedRef.current) {
+        reloadReportedRef.current = true;
+        addViolation('Page reloaded during the exam', 'PAGE_RELOAD', 1.0);
+      }
+      sessionStorage.setItem(activeAttemptKey(activeExamId), newSessionId || '1');
+    } catch {
+      /* storage unavailable: reload detection is best-effort */
+    }
   };
 
   useEffect(() => {
@@ -633,7 +662,9 @@ const ExamPortal = () => {
   useEffect(() => {
     if (isLoading || examBlocked || !sourceExam) return;
 
+    // The gate's last step usually put us in fullscreen already.
     setIsFullscreen(!!document.fullscreenElement);
+    if (document.fullscreenElement) hasEnteredFullscreenRef.current = true;
 
     const handleFullscreenChange = () => {
       const fullscreenActive = !!document.fullscreenElement;
@@ -729,17 +760,48 @@ const ExamPortal = () => {
     };
   }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled, detectTabSwitchEnabled, disableCopyPasteEnabled, disableRightClickEnabled]);
 
+  // Nothing reports once the page starts unloading (reload / close / navigate away).
   useEffect(() => {
-    if (isLoading || examBlocked || !sourceExam || !browserLockdownEnabled || isFullscreen) return;
-
-    const handlePointerDown = () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      void enterFullscreen();
+    const onUnload = () => markUnloading();
+    const onPageShow = (event) => { if (event.persisted) clearUnloading(); };
+    window.addEventListener('beforeunload', onUnload);
+    window.addEventListener('pagehide', onUnload);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      window.removeEventListener('beforeunload', onUnload);
+      window.removeEventListener('pagehide', onUnload);
+      window.removeEventListener('pageshow', onPageShow);
     };
+  }, []);
 
-    document.addEventListener('pointerdown', handlePointerDown);
-    return () => document.removeEventListener('pointerdown', handlePointerDown);
-  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled, isFullscreen]);
+  // The screen stream comes from the gate; if the student stops sharing, record it once
+  // and offer to share again (needs a click, like the original share).
+  useEffect(() => {
+    if (!screenStream) return undefined;
+    const [track] = screenStream.getVideoTracks();
+    const onEnded = () => {
+      setScreenShareLost({ title: 'Screen sharing stopped', steps: ['This exam requires sharing your entire screen. Click "Share entire screen" to continue.'] });
+      addViolation('Screen sharing stopped', 'SCREEN_SHARE_STOPPED', 1.0);
+    };
+    track?.addEventListener('ended', onEnded);
+    return () => track?.removeEventListener('ended', onEnded);
+    // addViolation is recreated every render; the listener only needs the latest stream
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenStream]);
+
+  useEffect(() => () => {
+    screenStream?.getTracks().forEach((t) => t.stop());
+  }, [screenStream]);
+
+  const reshareScreen = async () => {
+    try {
+      const stream = await shareEntireScreen();
+      setScreenShareLost(null);
+      setScreenStream(stream);
+    } catch (error) {
+      setScreenShareLost(SCREEN_SHARE_HELP[error.kind] || SCREEN_SHARE_HELP.failed);
+    }
+  };
 
   useEffect(() => {
     if (isLoading || examBlocked || !sourceExam || !detectTabSwitchEnabled) return;
@@ -757,6 +819,8 @@ const ExamPortal = () => {
   // extras: { image, durationMs, reason } — vision violations carry their own evidence frame.
   const addViolation = (message, type = null, confidence = null, extras = {}) => {
     if (examEndedRef.current) return;
+    // App-initiated prompts (camera, screen picker, fullscreen) and page unload are not the student's doing.
+    if (shouldSuppressViolation(type)) return;
     triggerViolationLock(message);
     const event_id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
     const newViolation = {
@@ -791,7 +855,8 @@ const ExamPortal = () => {
       return updated;
     });
 
-    const severity = severityForViolation(type, message);
+    // Vision events carry their own severity (e.g. a prolonged episode is major).
+    const severity = extras.severity || severityForViolation(type, message);
     const body = {
       type,
       confidence,
@@ -807,15 +872,12 @@ const ExamPortal = () => {
   };
 
   visionViolationRef.current = (event) => {
-    if (event.type === 'CAMERA_DISCONNECTED') {
-      // Reloading re-runs the quick resume check, which re-acquires the camera.
-      setProctorWarning('Your camera was disconnected. Reconnect it, then reload this page to continue; your answers are saved.');
-    }
     if (!isVisionViolationEnabled(event.type, securityConfig)) return;
     addViolation(VISION_MESSAGES[event.type] || event.type, event.type, event.confidence, {
       image: event.image,
       durationMs: event.durationMs,
       reason: event.reason,
+      severity: event.severity,
     });
   };
 
@@ -910,9 +972,10 @@ const ExamPortal = () => {
   }, [handleConfirmSubmit]);
 
 
+  // Click handler only: the gate and this overlay share requestExamFullscreen().
   const enterFullscreen = () => {
     if (!browserLockdownEnabled) return;
-    document.documentElement?.requestFullscreen?.();
+    requestExamFullscreen().catch((error) => console.warn('Fullscreen request was rejected', error));
   };
 
   const answeredCount = Object.keys(answers)?.length;
@@ -963,6 +1026,10 @@ const ExamPortal = () => {
         <PreExamGate
           vision={vision}
           variant={INFERENCE_MODE === 'server' ? 'permission-only' : (isResume ? 'resume' : 'exam')}
+          cameraRequired={cameraRequired}
+          requireScreenShare={Boolean(securityConfig?.enableScreenRecording)}
+          requireFullscreen={browserLockdownEnabled}
+          onScreenStream={setScreenStream}
           skipFps={isResume && Boolean(fpsCheckStore.get(examId)?.passed)}
           calibrationMs={isResume ? 2000 : 3000}
           title={isResume ? 'Resume your exam' : 'Before you start'}
@@ -1041,6 +1108,37 @@ const ExamPortal = () => {
       {loadWarning && (
         <div className="bg-warning/15 border-b border-warning/30 px-4 py-2 text-xs text-warning">
           {loadWarning}
+        </div>
+      )}
+
+      {clientVision && vision.cameraStatus.state === 'lost' && (
+        <div role="alert" className="bg-destructive/15 border-b border-destructive/30 px-4 py-3 text-sm text-destructive flex flex-wrap items-center justify-between gap-3">
+          {vision.cameraStatus.permission === 'denied' ? (
+            <>
+              <span>
+                <strong>Camera access is blocked for this site.</strong> Click the lock icon in the address bar → Site settings →
+                Camera → Allow. Proctoring resumes automatically; if your browser asks you to reload, use the button.
+              </span>
+              <Button size="sm" variant="outline" onClick={() => {
+                try { sessionStorage.setItem(APP_RELOAD_KEY, '1'); } catch { /* best-effort */ }
+                window.location.reload();
+              }}>
+                Reload
+              </Button>
+            </>
+          ) : (
+            <span>
+              <strong>Camera disconnected — reconnecting…</strong> Check that the camera is plugged in, switched on, and not used
+              by another app. Your answers are saved.
+            </span>
+          )}
+        </div>
+      )}
+
+      {screenShareLost && (
+        <div role="alert" className="bg-destructive/15 border-b border-destructive/30 px-4 py-3 text-sm text-destructive flex flex-wrap items-center justify-between gap-3">
+          <span><strong>{screenShareLost.title}.</strong> {screenShareLost.steps.join(' ')}</span>
+          <Button size="sm" variant="outline" iconName="Monitor" onClick={() => void reshareScreen()}>Share entire screen</Button>
         </div>
       )}
 
@@ -1201,6 +1299,7 @@ const ExamPortal = () => {
             clientVision={clientVision}
             managedStream={clientVision ? vision.stream : null}
             getVisionTelemetry={clientVision ? vision.getTelemetry : null}
+            screenStream={screenStream}
           />
         </div>
       </div>
@@ -1234,6 +1333,7 @@ const ExamPortal = () => {
               clientVision={clientVision}
               managedStream={clientVision ? vision.stream : null}
               getVisionTelemetry={clientVision ? vision.getTelemetry : null}
+              screenStream={screenStream}
             />
           </div>
         </div>
