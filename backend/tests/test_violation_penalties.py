@@ -39,6 +39,7 @@ NEW_TYPES = {
     "NO_BLINK": 10,
     "BOOK_DETECTED": 30,
     "PROCTORING_STOPPED": 30,
+    "PAGE_RELOAD": 5,
 }
 
 
