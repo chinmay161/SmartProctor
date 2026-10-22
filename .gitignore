@@ -33,3 +33,6 @@ ai-context/
 backend/data/*
 # Test caches
 .pytest_cache/
+
+graphify-out/
+.agents/
