@@ -7,10 +7,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const pkgDir = join(root, 'node_modules', '@mediapipe', 'tasks-vision');
-const { version } = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+const visionPkgDir = join(root, 'node_modules', '@mediapipe', 'tasks-vision');
+const { version: visionVersion } = JSON.parse(readFileSync(join(visionPkgDir, 'package.json'), 'utf8'));
 
-const FILES = [
+const audioPkgDir = join(root, 'node_modules', '@mediapipe', 'tasks-audio');
+const { version: audioVersion } = JSON.parse(readFileSync(join(audioPkgDir, 'package.json'), 'utf8'));
+
+const VISION_FILES = [
   'vision_wasm_internal.js',
   'vision_wasm_internal.wasm',
   'vision_wasm_nosimd_internal.js',
@@ -20,18 +23,36 @@ const FILES = [
   'vision_wasm_module_internal.wasm',
 ];
 
+const AUDIO_FILES = [
+  'audio_wasm_internal.js',
+  'audio_wasm_internal.wasm',
+  'audio_wasm_nosimd_internal.js',
+  'audio_wasm_nosimd_internal.wasm',
+  'audio_wasm_module_internal.js',
+  'audio_wasm_module_internal.wasm',
+];
+
 const outRoot = join(root, 'public', 'mediapipe');
-const outDir = join(outRoot, version, 'wasm');
+const visionOutDir = join(outRoot, visionVersion, 'wasm');
+const audioOutDir = join(outRoot, audioVersion, 'audio');
 
 // Drop runtimes from other versions so stale copies don't ship.
+const keepVersions = new Set([visionVersion, audioVersion]);
 if (existsSync(outRoot)) {
   for (const entry of readdirSync(outRoot)) {
-    if (entry !== version) rmSync(join(outRoot, entry), { recursive: true, force: true });
+    if (!keepVersions.has(entry)) rmSync(join(outRoot, entry), { recursive: true, force: true });
   }
 }
 
-mkdirSync(outDir, { recursive: true });
-for (const file of FILES) {
-  copyFileSync(join(pkgDir, 'wasm', file), join(outDir, file));
+mkdirSync(visionOutDir, { recursive: true });
+for (const file of VISION_FILES) {
+  copyFileSync(join(visionPkgDir, 'wasm', file), join(visionOutDir, file));
 }
-console.log(`[mediapipe] copied tasks-vision ${version} WASM to public/mediapipe/${version}/wasm`);
+console.log(`[mediapipe] copied tasks-vision ${visionVersion} WASM to public/mediapipe/${visionVersion}/wasm`);
+
+mkdirSync(audioOutDir, { recursive: true });
+for (const file of AUDIO_FILES) {
+  copyFileSync(join(audioPkgDir, 'wasm', file), join(audioOutDir, file));
+}
+console.log(`[mediapipe] copied tasks-audio ${audioVersion} WASM to public/mediapipe/${audioVersion}/audio`);
+
