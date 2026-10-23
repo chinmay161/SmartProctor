@@ -103,6 +103,18 @@ backend.
 | D3 | Calibration failures: start an exam facing away / with no face / with two faces in view | The gate refuses with the matching instructions (`You are not facing the screen` with measured angles, `We could not see your face`, or `More than one face is visible`). **Retry** works once fixed, and the exam does not start before that. |
 | D4 | Block camera permission for the site and start an exam | The gate stops at "Camera access is blocked" with fix instructions and Retry. No session is started. |
 
+### E. Voice detection and microphone loss
+
+| # | Action | Expected |
+|---|---|---|
+| E1 | Talk normally for **5 s** (read a question out loud or speak in a normal conversational voice) | Exactly **one VOICE_DETECTED** (minor) with reason text and camera evidence frame. NO AUDIO is recorded, stored, or uploaded. |
+| E2 | Type vigorously on the keyboard for **30 s** | **Zero reported violations.** Non-speech mechanical typing and clicking sounds are filtered out by the classifier. |
+| E3 | Cough once or clap hands loudly | **Zero reported violations.** Transient non-speech impulses do not reach the speech threshold. |
+| E4 | Play speech from a video through the speakers for 5 s | **One VOICE_DETECTED** (minor). Speech audio entering the microphone is recognized as speech (expected). |
+| E5 | Work in a quiet environment for **10 minutes** in silence | **Zero reported violations.** |
+| E6 | Unplug or mute the microphone for > 2 s | Exactly **one MIC_DISCONNECTED** (major). Voice rules are suspended while the mic is disconnected. Upon reconnecting or unmuting, the audio engine recovers within 3 s (or on `devicechange`) and re-enables voice detection. If disconnected for over 60 s, an escalation is reported. |
+
+
 ## What to send back
 
 - The recording sheet.
