@@ -40,7 +40,10 @@ NEW_TYPES = {
     "BOOK_DETECTED": 30,
     "PROCTORING_STOPPED": 30,
     "PAGE_RELOAD": 5,
+    "VOICE_DETECTED": 15,
+    "MIC_DISCONNECTED": 20,
 }
+
 
 
 @pytest.mark.parametrize("violation_type,expected", sorted(EXISTING_TYPES.items()))

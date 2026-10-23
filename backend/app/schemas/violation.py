@@ -40,6 +40,10 @@ class SystemCheckReport(BaseModel):
     """Result of the client-side pre-exam device check."""
     camera_ok: bool
     models_ok: bool
+    mic_ok: bool | None = None
+    mic_noise_level: float | None = None
+    speech_detected: bool | None = None
+    noisy_environment: bool | None = None
     face_fps: float | None = None
     object_fps: float | None = None
     face_inference_ms: float | None = None

@@ -40,7 +40,7 @@ from ..services.attempt_service import (
     sync_exam_status_for_now,
     utcnow,
 )
-from ..services.exam_service import configure_exam_rules, exam_requires_camera
+from ..services.exam_service import configure_exam_rules, exam_requires_camera, exam_requires_mic
 
 router = APIRouter(prefix="/exams", tags=["Exams"])
 DEFAULT_EXAM_TIMEZONE = ZoneInfo("Asia/Kolkata")
@@ -119,6 +119,7 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
         question_ids=question_ids,
         wizard_config=wizard_config,
         camera_required=exam_requires_camera(wizard_config, rules),
+        mic_required=exam_requires_mic(wizard_config, rules),
         start_time=_as_utc_timestamp(exam.start_time),
         end_time=_as_utc_timestamp(exam.end_time),
         status=exam.status,

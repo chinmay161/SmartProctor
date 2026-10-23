@@ -33,6 +33,9 @@ VIOLATION_BASE_PENALTY = {
     "NO_BLINK": 10,
     "PROCTORING_STOPPED": 30,
     "PAGE_RELOAD": 5,
+    # Client-side audio types
+    "VOICE_DETECTED": 15,
+    "MIC_DISCONNECTED": 20,
 }
 
 
@@ -58,6 +61,19 @@ def exam_requires_camera(wizard_config: dict | None, rules: ExamRules | None) ->
     return any(bool(wizard_config.get(flag)) for flag in CAMERA_WIZARD_FLAGS)
 
 
+def exam_requires_mic(wizard_config: dict | None, rules: ExamRules | None) -> bool:
+    """Single source of truth for whether an exam needs the microphone.
+
+    An explicit ExamRules row wins; otherwise fall back to wizard_config.audioMonitoring.
+    """
+    if rules is not None:
+        return bool(rules.mic_required)
+    if not isinstance(wizard_config, dict):
+        return False
+    return bool(wizard_config.get("audioMonitoring"))
+
+
+
 def _parse_wizard_config(raw) -> dict | None:
     if isinstance(raw, dict):
         return raw
@@ -73,6 +89,12 @@ def _parse_wizard_config(raw) -> dict | None:
 def camera_required_for_exam(db: Session, exam: Exam) -> bool:
     rules = db.query(ExamRules).filter_by(exam_id=exam.id).first()
     return exam_requires_camera(_parse_wizard_config(exam.wizard_config), rules)
+
+
+def mic_required_for_exam(db: Session, exam: Exam) -> bool:
+    rules = db.query(ExamRules).filter_by(exam_id=exam.id).first()
+    return exam_requires_mic(_parse_wizard_config(exam.wizard_config), rules)
+
 
 
 def create_exam(db: Session, title: str, created_by: str) -> Exam:

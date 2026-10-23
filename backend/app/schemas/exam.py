@@ -59,6 +59,7 @@ class ExamResponse(BaseModel):
     question_ids: list[str] = Field(default_factory=list)
     wizard_config: dict[str, Any] | None = None
     camera_required: bool = False
+    mic_required: bool = False
     start_time: datetime | None = None
     end_time: datetime | None = None
     status: ExamStatusLiteral = "DRAFT"
