@@ -32,12 +32,17 @@ export const DEFAULT_CONFIG = Object.freeze({
   noBlink: { mode: 'shadow', windowMs: 60_000, minFacePresentRatio: 0.8, minFaceFps: 3 },
   cameraFrozen: { diffThreshold: 0.5, minDurationMs: 3_000 },
   cameraDisconnected: { noFrameMs: 5_000, muteGraceMs: 2_000 },
+  voice: { windowMs: 4_000, ratio: 0.5, minSamples: 3, scoreThreshold: 0.5, minSustainSamples: 1, sustainWindowMs: 2_000 },
+  micDisconnected: { muteGraceMs: 2_000 },
 });
 
 export const EPISODE_TYPES = Object.freeze([
   'NO_FACE', 'MULTIPLE_FACES', 'LOOKING_AWAY', 'PHONE_DETECTED', 'BOOK_DETECTED', 'CAMERA_FROZEN', 'CAMERA_DISCONNECTED',
+  'VOICE_DETECTED', 'MIC_DISCONNECTED',
 ]);
 const CAMERA_TYPES = new Set(['CAMERA_FROZEN', 'CAMERA_DISCONNECTED']);
+const MIC_TYPES = new Set(['MIC_DISCONNECTED']);
+const VOICE_TYPES = new Set(['VOICE_DETECTED']);
 
 const EPISODE_LABELS = {
   NO_FACE: 'No face',
@@ -47,7 +52,10 @@ const EPISODE_LABELS = {
   BOOK_DETECTED: 'Book in view',
   CAMERA_FROZEN: 'Frozen camera image',
   CAMERA_DISCONNECTED: 'Camera disconnected',
+  VOICE_DETECTED: 'Voice detected',
+  MIC_DISCONNECTED: 'Microphone disconnected',
 };
+
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -69,6 +77,7 @@ export function createTemporalEngine(overrides = {}) {
 
   let faceHistory = [];
   let objectHistory = [];
+  let audioHistory = [];
   let baseline = { yaw: 0, pitch: 0 };
   let lastBlinkTs = null;
   let lastNoBlinkTs = null;
@@ -76,6 +85,9 @@ export function createTemporalEngine(overrides = {}) {
   let lastFrameTs = null;
   let mutedSince = null;
   let trackEnded = false;
+  let micMutedSince = null;
+  let micTrackEnded = false;
+  let lastAudioTs = null;
   const episodes = {};
 
   // ---------- camera state (precedence) ----------
@@ -98,6 +110,19 @@ export function createTemporalEngine(overrides = {}) {
   // changing, or the track muted/ended), so e.g. covering the camera is reported as
   // CAMERA_FROZEN only, not NO_FACE first.
   const rulesSuspended = (now) => cameraImpaired(now) || frozenSince !== null || mutedSince !== null || trackEnded;
+
+  // ---------- mic state (precedence) ----------
+
+  const micDisconnected = (now) => {
+    const rule = config.micDisconnected;
+    if (micTrackEnded) return { on: true, reason: 'Microphone track ended (unplugged, disabled, or permission revoked).', since: null };
+    if (micMutedSince !== null && now - micMutedSince >= rule.muteGraceMs) {
+      return { on: true, reason: `Microphone muted by the system for ${secs(now - micMutedSince)}.`, since: micMutedSince };
+    }
+    return { on: false };
+  };
+
+  const micSuspended = (now) => micDisconnected(now).on || micMutedSince !== null || micTrackEnded;
 
   // ---------- episodes ----------
 
@@ -157,10 +182,11 @@ export function createTemporalEngine(overrides = {}) {
   };
 
   /** End or prolong open episodes without a fresh evaluation (time passing). */
-  const sweepEpisodes = (events, now, { includeSuspendable }) => {
+  const sweepEpisodes = (events, now, { includeFaceObjects, includeVoice }) => {
     for (const [type, ep] of Object.entries(episodes)) {
       if (!ep.active) continue;
-      if (!includeSuspendable && !CAMERA_TYPES.has(type)) continue;
+      if (!includeFaceObjects && !CAMERA_TYPES.has(type) && !MIC_TYPES.has(type) && !VOICE_TYPES.has(type)) continue;
+      if (!includeVoice && VOICE_TYPES.has(type)) continue;
       if (now - ep.lastTrueTs >= config.episode.endAfterFalseMs) endEpisode(ep, now);
       else maybeProlong(events, type, ep, now);
     }
@@ -174,6 +200,7 @@ export function createTemporalEngine(overrides = {}) {
     const cutoff = now - config.historyMs;
     if (faceHistory.length && faceHistory[0].ts < cutoff) faceHistory = faceHistory.filter((s) => s.ts >= cutoff);
     if (objectHistory.length && objectHistory[0].ts < cutoff) objectHistory = objectHistory.filter((s) => s.ts >= cutoff);
+    if (audioHistory.length && audioHistory[0].ts < cutoff) audioHistory = audioHistory.filter((s) => s.ts >= cutoff);
   };
 
   const isAway = (s) => {
@@ -189,14 +216,44 @@ export function createTemporalEngine(overrides = {}) {
     const hits = samples.length >= rule.minSamples ? samples.filter(matches) : [];
     const ratio = samples.length ? hits.length / samples.length : 0;
     const isTrue = samples.length >= rule.minSamples && ratio >= rule.ratio;
-    // Majority of the last second still matching: the episode is still going on.
-    const recent = samples.filter((s) => s.ts > now - SUSTAIN_WINDOW_MS);
-    const sustained = recent.length >= 2 && recent.filter(matches).length / recent.length >= 0.5;
+    // Majority of recent window still matching: the episode is still going on.
+    const sustainWin = rule.sustainWindowMs || SUSTAIN_WINDOW_MS;
+    const minSustain = rule.minSustainSamples ?? 2;
+    const recent = samples.filter((s) => s.ts > now - sustainWin);
+    const sustained = recent.length >= minSustain && recent.filter(matches).length / recent.length >= 0.5;
     observe(events, type, isTrue, now, () => ({
       confidence: ratio,
       durationMs: hits.length ? now - hits[0].ts : 0,
       reason: describe(ratio, hits),
     }), sustained);
+  };
+
+  const evaluateMic = (events, now) => {
+    const disc = micDisconnected(now);
+    observe(events, 'MIC_DISCONNECTED', disc.on, now, () => ({
+      confidence: 1,
+      durationMs: disc.since === null ? 0 : now - disc.since,
+      reason: disc.reason,
+    }));
+  };
+
+  const evaluateAudio = (now, sample) => {
+    const events = [];
+    evaluateMic(events, now);
+    if (micSuspended(now)) {
+      sample.impaired = true;
+      return events;
+    }
+    ratioRule(
+      events,
+      now,
+      'VOICE_DETECTED',
+      config.voice,
+      windowOf(audioHistory, now, config.voice.windowMs),
+      (s) => s.speechScore >= config.voice.scoreThreshold,
+      (r) => `Voice detected in ${pct(r)} of samples over the last ${secs(config.voice.windowMs)}.`,
+    );
+    return events;
   };
 
   const evaluateCamera = (events, now) => {
@@ -330,6 +387,14 @@ export function createTemporalEngine(overrides = {}) {
       return evaluateObjects(copy.ts, copy);
     },
 
+    /** sample: { ts, speechScore, rms } */
+    pushAudio(sample) {
+      const copy = structuredClone(sample);
+      audioHistory.push(copy);
+      prune(copy.ts);
+      return evaluateAudio(copy.ts, copy);
+    },
+
     /** kind: 'frame' | 'mute' | 'unmute' | 'ended' | 'restored' (a new camera stream is bound) */
     cameraEvent(kind, ts) {
       const events = [];
@@ -348,17 +413,38 @@ export function createTemporalEngine(overrides = {}) {
       return events;
     },
 
+    /** kind: 'sample' | 'mute' | 'unmute' | 'ended' | 'restored' (a new mic stream is bound) */
+    micEvent(kind, ts) {
+      const events = [];
+      if (kind === 'sample') lastAudioTs = ts;
+      else if (kind === 'mute') micMutedSince = micMutedSince ?? ts;
+      else if (kind === 'unmute') micMutedSince = null;
+      else if (kind === 'ended') micTrackEnded = true;
+      else if (kind === 'restored') {
+        micTrackEnded = false;
+        micMutedSince = null;
+        lastAudioTs = ts;
+      }
+      if (kind !== 'sample') evaluateMic(events, ts);
+      return events;
+    },
+
     /** Time-based checks that don't depend on a new sample arriving. */
     tick(now) {
       const events = [];
       evaluateCamera(events, now);
-      sweepEpisodes(events, now, { includeSuspendable: !rulesSuspended(now) });
+      evaluateMic(events, now);
+      sweepEpisodes(events, now, {
+        includeFaceObjects: !rulesSuspended(now),
+        includeVoice: !micSuspended(now),
+      });
       return events;
     },
 
     /** Call when inference resumes after a deliberate pause (e.g. tab hidden). */
     resume(now) {
       if (lastFrameTs !== null) lastFrameTs = now;
+      if (lastAudioTs !== null) lastAudioTs = now;
       frozenSince = null;
       lastBlinkTs = now;
     },
@@ -369,11 +455,22 @@ export function createTemporalEngine(overrides = {}) {
       return { disconnected: disc.on, frozen: !disc.on && cameraFrozen(now), ended: trackEnded, rulesSuspended: rulesSuspended(now) };
     },
 
+    /** Mic health for the UI and the inference loop. */
+    micState(now) {
+      const disc = micDisconnected(now);
+      return { disconnected: disc.on, ended: micTrackEnded, muted: micMutedSince !== null, rulesSuspended: micSuspended(now) };
+    },
+
     getHistory() {
-      return { face: structuredClone(faceHistory), objects: structuredClone(objectHistory) };
+      return {
+        face: structuredClone(faceHistory),
+        objects: structuredClone(objectHistory),
+        audio: structuredClone(audioHistory),
+      };
     },
 
     /** Test/diagnostic helper. */
     getLastNoBlinkTs: () => lastNoBlinkTs,
   };
 }
+

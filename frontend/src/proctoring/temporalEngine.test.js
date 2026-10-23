@@ -419,3 +419,87 @@ describe('event shape', () => {
     expect(typeof ev.reason).toBe('string');
   });
 });
+
+describe('VOICE_DETECTED and MIC_DISCONNECTED', () => {
+  const audioSample = (ts, speechScore = 0.8, rms = 0.05) => ({ ts, speechScore, rms });
+
+  const runAudio = (engine, { start = 0, durationMs, stepMs = 1000, sample = (t) => audioSample(t) }) => {
+    const events = [];
+    for (let t = start; t < start + durationMs; t += stepMs) {
+      events.push(...engine.pushAudio(sample(t)));
+    }
+    return events;
+  };
+
+  it('1 s of speech → no VOICE_DETECTED', () => {
+    const engine = createTemporalEngine();
+    const events = runAudio(engine, { durationMs: 1500, sample: (t) => audioSample(t, 0.9) });
+    expect(typesOf(events)).not.toContain('VOICE_DETECTED');
+  });
+
+  it('4 s of speech → exactly one VOICE_DETECTED', () => {
+    const engine = createTemporalEngine();
+    const events = runAudio(engine, { durationMs: 4000, sample: (t) => audioSample(t, 0.9) });
+    expect(typesOf(events)).toEqual(['VOICE_DETECTED']);
+    expect(events[0].severity).toBe('minor');
+    expect(events[0].episode).toBe('start');
+  });
+
+  it('2 minutes of speech → exactly two (start + prolonged)', () => {
+    const engine = createTemporalEngine();
+    const events = runAudio(engine, { durationMs: 120_000, sample: (t) => audioSample(t, 0.85) });
+    expect(typesOf(events)).toEqual(['VOICE_DETECTED', 'VOICE_DETECTED']);
+    expect(events[0].episode).toBe('start');
+    expect(events[0].severity).toBe('minor');
+    expect(events[1].episode).toBe('prolonged');
+    expect(events[1].severity).toBe('major');
+  });
+
+  it('samples below the threshold (typing, noise) → none', () => {
+    const engine = createTemporalEngine();
+    const events = runAudio(engine, { durationMs: 30_000, sample: (t) => audioSample(t, 0.15, 0.08) });
+    expect(events).toEqual([]);
+  });
+
+  it('mic track ended → one MIC_DISCONNECTED and no voice reports', () => {
+    const engine = createTemporalEngine();
+    const events = [];
+    events.push(...engine.micEvent('ended', 1000));
+    for (let t = 2000; t <= 10000; t += 1000) {
+      events.push(...engine.pushAudio(audioSample(t, 0.95)));
+    }
+    expect(typesOf(events)).toEqual(['MIC_DISCONNECTED']);
+    expect(events[0].severity).toBe('major');
+  });
+
+  it('mic recovery re-enables the voice rule', () => {
+    const engine = createTemporalEngine();
+    const events = [];
+    events.push(...engine.micEvent('ended', 1000));
+    expect(typesOf(events)).toEqual(['MIC_DISCONNECTED']);
+
+    for (let t = 2000; t <= 5000; t += 1000) {
+      events.push(...engine.pushAudio(audioSample(t, 0.9)));
+    }
+    expect(typesOf(events)).toEqual(['MIC_DISCONNECTED']);
+
+    events.push(...engine.micEvent('restored', 6000));
+
+    for (let t = 7000; t <= 11000; t += 1000) {
+      events.push(...engine.pushAudio(audioSample(t, 0.9)));
+    }
+    expect(typesOf(events)).toEqual(['MIC_DISCONNECTED', 'VOICE_DETECTED']);
+  });
+
+  it('inputs not kept by reference', () => {
+    const engine = createTemporalEngine();
+    const sample = { ts: 1000, speechScore: 0.8, rms: 0.04 };
+    engine.pushAudio(sample);
+    sample.speechScore = 0.0;
+    sample.rms = 0.99;
+    const history = engine.getHistory().audio;
+    expect(history[0].speechScore).toBe(0.8);
+    expect(history[0].rms).toBe(0.04);
+  });
+});
+
