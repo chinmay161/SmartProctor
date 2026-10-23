@@ -60,11 +60,47 @@ const CALIBRATION_HELP = {
   },
 };
 
+const MIC_HELP = {
+  denied: {
+    title: 'Microphone access is blocked',
+    steps: [
+      'Click the microphone (or lock) icon at the left of the address bar.',
+      'Set Microphone to "Allow" for this site.',
+      'If you dismissed the prompt earlier, open your browser\'s Site settings and allow the microphone there.',
+      'On Windows/macOS, also check that the browser is allowed to use the microphone in system privacy settings.',
+    ],
+  },
+  'not-found': {
+    title: 'No microphone was found',
+    steps: [
+      'Connect a microphone or headset, or turn on your computer\'s built-in microphone.',
+      'If you just plugged it in, wait a few seconds and retry.',
+    ],
+  },
+  busy: {
+    title: 'Your microphone is in use or not responding',
+    steps: [
+      'Close other apps that may be using the microphone (Zoom, Teams, Meet, other browser tabs).',
+    ],
+  },
+  unsupported: {
+    title: 'This browser cannot access a microphone',
+    steps: ['Use a recent version of Chrome, Edge, Firefox or Safari, and open the exam over https.'],
+  },
+  unknown: {
+    title: 'The microphone could not be started',
+    steps: ['Reconnect your microphone or restart the browser, then retry.'],
+  },
+};
+
 const STEP_LABELS = {
   camera: 'Camera permission',
   models: 'Load proctoring models',
   fps: 'Measure device speed (5 s)',
   calibrate: 'Calibrate (look at the screen)',
+  mic: 'Microphone permission',
+  noise: 'Ambient noise check (stay quiet for 3 s)',
+  speech: 'Voice check (say: "I am ready")',
   screen: 'Share your entire screen',
   fullscreen: 'Enter fullscreen',
 };
@@ -110,6 +146,7 @@ const PreExamGate = ({
   onCancel,
   cancelLabel = 'Back to dashboard',
   cameraRequired = true,
+  micRequired = false,
   requireScreenShare = false,
   requireFullscreen = false,
   onScreenStream,
@@ -119,8 +156,12 @@ const PreExamGate = ({
     : variant === 'permission-only'
       ? ['camera']
       : ['camera', 'models', ...(skipFps ? [] : ['fps']), 'calibrate'];
+  const audioSteps = (micRequired || variant === 'device-test') && variant !== 'permission-only'
+    ? ['mic', 'noise', 'speech']
+    : [];
   const stepIds = [
     ...visionSteps,
+    ...audioSteps,
     ...(requireScreenShare && variant !== 'device-test' ? ['screen'] : []),
     ...(requireFullscreen && variant !== 'device-test' ? ['fullscreen'] : []),
   ];
@@ -130,11 +171,33 @@ const PreExamGate = ({
   const [fpsWarning, setFpsWarning] = useState(null);
   const [summary, setSummary] = useState(null);
   const [calibrating, setCalibrating] = useState(false);
+  const [micLevel, setMicLevel] = useState(0);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const resultsRef = useRef({ timings: {} });
   const runningRef = useRef(false);
   const continueRef = useRef(null);
   const previewRef = useRef(null);
   const startedRef = useRef(false);
+
+  useEffect(() => {
+    let unsubLevel = null;
+    let unsubSample = null;
+    let cancelled = false;
+
+    if (stepIds.includes('mic')) {
+      void vision?.ensureAudioEngine?.().then((ae) => {
+        if (cancelled || !ae) return;
+        unsubLevel = ae.onLevel?.((lvl) => setMicLevel(lvl));
+        unsubSample = ae.onSample?.((s) => setIsSpeaking((s?.speechScore || 0) >= 0.5));
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      unsubLevel?.();
+      unsubSample?.();
+    };
+  }, [vision, stepIds]);
   // Steps that need a click (browser prompts require a user gesture).
   const [action, setAction] = useState(null); // 'screen' | 'fullscreen' | null
   const [actionError, setActionError] = useState(null);
@@ -247,6 +310,104 @@ const PreExamGate = ({
           setStep(id, 'ok', `${c.faceSamples}/${c.samples} frames with your face`);
         }
 
+        if (id === 'mic') {
+          const r = await timed('mic', async () => {
+            const ae = await vision?.ensureAudioEngine?.();
+            if (!ae) return { ok: false, kind: 'unknown', error: 'audioEngine unavailable' };
+            const req = await vision.requestMic();
+            if (req.ok) {
+              await ae.start?.();
+            }
+            return req;
+          });
+          results.mic = r;
+          if (!r.ok) {
+            const help = MIC_HELP[r.kind] || MIC_HELP.unknown;
+            setStep(id, 'error', help.title);
+            setFailure({ index: i, ...help });
+            return;
+          }
+          setStep(id, 'ok', 'Allowed');
+        }
+
+        if (id === 'noise') {
+          setStep(id, 'running', 'Stay quiet for 3 seconds…');
+          const ae = await vision?.ensureAudioEngine?.();
+          const levels = [];
+          let maxSpeech = 0;
+
+          const unsubSample = ae?.onSample?.((s) => {
+            if (s.speechScore > maxSpeech) maxSpeech = s.speechScore;
+          });
+          const unsubLevel = ae?.onLevel?.((l) => {
+            levels.push(l);
+          });
+
+          for (let sec = 3; sec > 0; sec -= 1) {
+            setStep(id, 'running', `Stay quiet for ${sec} second${sec > 1 ? 's' : ''}…`);
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+          unsubSample?.();
+          unsubLevel?.();
+
+          const avgRms = levels.length ? levels.reduce((a, b) => a + b, 0) / levels.length : (ae?.getNoiseFloor?.() ?? 0);
+          const isLoud = maxSpeech >= 0.5 || avgRms > 0.12;
+
+          results.noiseCheck = { avgRms, maxSpeech, isLoud };
+          results.mic = {
+            ...(results.mic || {}),
+            ok: true,
+            noiseLevel: Math.round(avgRms * 1000) / 1000,
+            noisyEnvironment: isLoud,
+          };
+
+          if (isLoud) {
+            setStep(id, 'warn', `Noisy environment (${Math.round(avgRms * 100)}% level)`);
+          } else {
+            setStep(id, 'ok', `Quiet room (${Math.round(avgRms * 100)}% level)`);
+          }
+        }
+
+        if (id === 'speech') {
+          setStep(id, 'running', 'Say: "I am ready" (within 8 s)');
+          const ae = await vision?.ensureAudioEngine?.();
+          let speechDetected = false;
+
+          await new Promise((resolve) => {
+            let elapsed = 0;
+            const timer = setInterval(() => {
+              elapsed += 1;
+              if (speechDetected || elapsed >= 8) {
+                clearInterval(timer);
+                resolve();
+              } else {
+                setStep(id, 'running', `Say: "I am ready" (${8 - elapsed} s remaining)`);
+              }
+            }, 1000);
+
+            const unsub = ae?.onSample?.((s) => {
+              if (s.speechScore >= 0.5) {
+                speechDetected = true;
+                unsub?.();
+                clearInterval(timer);
+                resolve();
+              }
+            });
+          });
+
+          results.speechCheck = { detected: speechDetected };
+          results.mic = {
+            ...(results.mic || {}),
+            speechDetected,
+          };
+
+          if (speechDetected) {
+            setStep(id, 'ok', 'Voice recognized ("I am ready")');
+          } else {
+            setStep(id, 'warn', 'Speech not detected — check your microphone');
+          }
+        }
+
         if (id === 'screen') {
           setStep(id, 'running', 'Waiting for you to share your entire screen');
           const stream = await waitForAction('screen');
@@ -338,6 +499,33 @@ const PreExamGate = ({
           )}
         </div>
 
+        {stepIds.includes('mic') && steps.mic?.status !== 'pending' && (
+          <div className="mt-4 p-3 bg-muted/40 rounded-lg border border-border/50">
+            <div className="flex items-center justify-between text-xs mb-1.5">
+              <span className="flex items-center gap-1.5 font-medium text-foreground">
+                <Icon name="Mic" size={14} className={micLevel > 0.05 ? 'text-primary' : 'text-muted-foreground'} />
+                Microphone input
+              </span>
+              <span className="flex items-center gap-1.5">
+                {isSpeaking ? (
+                  <span className="text-primary font-semibold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                    Speech detected
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Listening…</span>
+                )}
+              </span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-primary h-2 rounded-full transition-all duration-75"
+                style={{ width: `${Math.min(100, Math.round(micLevel * 300))}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {action === 'screen' && (
           <div className="mt-6 p-4 rounded-lg bg-primary/10 border border-primary/30">
             <p className="text-sm font-semibold text-foreground mb-1">Share your entire screen</p>
@@ -410,6 +598,18 @@ const PreExamGate = ({
               </>)}
               <dt className="text-muted-foreground">Calibration</dt>
               <dd className="text-foreground">Passed</dd>
+              {summary.mic && (
+                <>
+                  <dt className="text-muted-foreground">Microphone</dt>
+                  <dd className="text-foreground">{summary.mic.ok ? 'OK' : 'Error'}</dd>
+                  <dt className="text-muted-foreground">Ambient noise</dt>
+                  <dd className="text-foreground">
+                    {summary.mic.noisyEnvironment ? 'Noisy room' : 'Quiet room'} ({Math.round((summary.mic.noiseLevel || 0) * 100)}% level)
+                  </dd>
+                  <dt className="text-muted-foreground">Speech detected</dt>
+                  <dd className="text-foreground">{summary.mic.speechDetected ? 'Yes' : 'No (check microphone)'}</dd>
+                </>
+              )}
             </dl>
           </div>
         )}

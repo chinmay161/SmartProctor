@@ -8,7 +8,7 @@ import { HIDDEN_VIDEO_STYLE, INFERENCE_MODE, useVisionProctoring } from './useVi
  * WASM runtime and models before exam day.
  */
 const DeviceTestModal = ({ onClose }) => {
-  const vision = useVisionProctoring({ detectObjects: true });
+  const vision = useVisionProctoring({ detectObjects: true, micRequired: true });
 
   const close = () => {
     vision.dispose();
@@ -20,6 +20,7 @@ const DeviceTestModal = ({ onClose }) => {
       <video ref={vision.videoRef} style={HIDDEN_VIDEO_STYLE} muted playsInline autoPlay aria-hidden="true" />
       <PreExamGate
         vision={vision}
+        micRequired={true}
         variant={INFERENCE_MODE === 'server' ? 'permission-only' : 'device-test'}
         title="Test my device"
         onComplete={close}
