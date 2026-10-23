@@ -4,6 +4,7 @@ import { useAuth0 } from '@auth0/auth0-react';
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { authAwareCall } from '../../services/authAwareCall';
+import { formatViolationType, getViolationIcon } from '../../utils/violationSeverity';
 
 const getBackendOrigin = () => {
   if (import.meta.env.VITE_API_URL) {
@@ -433,7 +434,7 @@ const TeacherMonitoringPage = () => {
                       <div className="flex justify-between items-center mt-3">
                         <span className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Latest</span>
                         <span className="text-xs text-foreground truncate pl-2 font-mono">
-                          {state.lastViolation}
+                          {formatViolationType(state.lastViolation)}
                         </span>
                       </div>
                     </div>
@@ -572,7 +573,10 @@ const TeacherMonitoringPage = () => {
                       )}
                       <div className="p-4 flex-1">
                         <div className="flex justify-between items-start mb-2">
-                           <h4 className="font-semibold capitalize">{ev.type || 'Unknown Violation'}</h4>
+                           <h4 className="font-semibold flex items-center gap-1.5">
+                             <Icon name={getViolationIcon(ev.type)} size={16} className="text-muted-foreground shrink-0" />
+                             {formatViolationType(ev.type)}
+                           </h4>
                            <span className={`px-2 py-0.5 text-xs font-bold rounded ${ev.severity === 'severe' ? 'bg-destructive/20 text-destructive' : ev.severity === 'major' ? 'bg-warning/20 text-warning' : 'bg-primary/20 text-primary'}`}>
                              {ev.severity}
                            </span>
@@ -695,7 +699,7 @@ const TeacherMonitoringPage = () => {
                           <div className="bg-card border border-border/60 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow">
                             <div className="flex justify-between items-start mb-1">
                               <span className={`text-sm font-semibold capitalize ${isViolation ? 'text-destructive' : isScoreDrop ? 'text-warning' : 'text-foreground'}`}>
-                                {isViolation ? `Violation: ${evt.data.type || 'Unknown'}` : evt.event.replace(/_/g, ' ')}
+                                {isViolation ? `Violation: ${formatViolationType(evt.data.type)}` : evt.event.replace(/_/g, ' ')}
                               </span>
                               <span className="text-xs text-muted-foreground font-mono">{timeStr}</span>
                             </div>

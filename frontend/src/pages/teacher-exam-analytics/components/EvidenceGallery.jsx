@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
+import { formatViolationType, getViolationIcon } from '../../../utils/violationSeverity';
 
 const getBackendOrigin = () => {
   if (import.meta.env.VITE_API_URL) {
@@ -92,7 +93,7 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
                onChange={(e) => setFilterType(e.target.value)}
              >
               <option value="ALL">All Types</option>
-              {uniqueTypes.map(t => <option key={t} value={t}>{t}</option>)}
+              {uniqueTypes.map(t => <option key={t} value={t}>{formatViolationType(t)}</option>)}
             </select>
           </div>
           <div className="ml-auto text-sm text-muted-foreground font-medium">
@@ -144,7 +145,10 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
                    <div className="p-3">
                      <h3 className="font-semibold text-sm truncate" title={v.student_name}>{v.student_name}</h3>
                      <div className="flex justify-between items-center mt-1">
-                       <span className="text-xs font-medium text-muted-foreground capitalize">{v.type || 'Unknown'}</span>
+                       <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                         <Icon name={getViolationIcon(v.type)} size={13} className="shrink-0" />
+                         {formatViolationType(v.type)}
+                       </span>
                        <span className="text-[10px] text-muted-foreground">{v.timestamp ? new Date(v.timestamp).toLocaleString() : ''}</span>
                      </div>
                    </div>

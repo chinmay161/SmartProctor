@@ -7,17 +7,21 @@ const AI_VIOLATION_MESSAGES = {
   PHONE_DETECTED: 'Phone detected',
   LOOKING_AWAY: 'Looking away',
   SPOOF_DETECTED: 'Potential spoofing detected',
+  VOICE_DETECTED: 'Voice detected',
+  MIC_DISCONNECTED: 'Microphone disconnected',
 };
 
 const isTemporalViolationEnabled = (type, securityConfig) => {
   if (type === 'NO_FACE') return Boolean(securityConfig?.detectNoFace);
   if (type === 'MULTIPLE_FACES') return Boolean(securityConfig?.detectMultipleFaces);
   if (type === 'PHONE_DETECTED') return Boolean(securityConfig?.detectMobilePhone);
+  if (type === 'VOICE_DETECTED' || type === 'MIC_DISCONNECTED') return Boolean(securityConfig?.audioMonitoring);
   return Boolean(
     securityConfig?.enableWebcam ||
     securityConfig?.detectMultipleFaces ||
     securityConfig?.detectNoFace ||
-    securityConfig?.detectMobilePhone
+    securityConfig?.detectMobilePhone ||
+    securityConfig?.audioMonitoring
   );
 };
 
@@ -229,14 +233,14 @@ const SecurityMonitor = forwardRef(({
   }, [screenStatus, screenStream]);
 
   useEffect(() => {
-    if (!audioMonitoringEnabled) {
+    if (!audioMonitoringEnabled || clientVision) {
       stopStream(audioStreamRef);
       if (audioContextRef.current) {
         audioContextRef.current.close();
         audioContextRef.current = null;
       }
       analyserRef.current = null;
-      setAudioStatus('disabled');
+      setAudioStatus(clientVision && audioMonitoringEnabled ? 'active' : 'disabled');
       setAudioErrorMessage('');
       return;
     }

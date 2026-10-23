@@ -40,6 +40,8 @@ const VISION_MESSAGES = {
   NO_BLINK: 'No blinking detected',
   CAMERA_FROZEN: 'Camera image frozen or covered',
   CAMERA_DISCONNECTED: 'Camera disconnected',
+  VOICE_DETECTED: 'Voice detected',
+  MIC_DISCONNECTED: 'Microphone disconnected',
 };
 
 // Same per-detector switches the server pipeline honours.
@@ -47,6 +49,7 @@ const isVisionViolationEnabled = (type, cfg) => {
   if (type === 'NO_FACE') return Boolean(cfg?.detectNoFace);
   if (type === 'MULTIPLE_FACES') return Boolean(cfg?.detectMultipleFaces);
   if (type === 'PHONE_DETECTED' || type === 'BOOK_DETECTED') return Boolean(cfg?.detectMobilePhone);
+  if (type === 'VOICE_DETECTED' || type === 'MIC_DISCONNECTED') return Boolean(cfg?.audioMonitoring);
   return true;
 };
 
@@ -211,10 +214,12 @@ const ExamPortal = () => {
     auth0User?.nickname ||
     'Student';
 
-  const clientVision = cameraRequired && INFERENCE_MODE === 'client';
+  const [micRequired, setMicRequired] = useState(false);
+  const clientVision = (cameraRequired || micRequired) && INFERENCE_MODE === 'client';
   const visionViolationRef = useRef(null);
   const vision = useVisionProctoring({
     detectObjects: Boolean(securityConfig?.detectMobilePhone),
+    micRequired,
     onViolation: (event) => visionViolationRef.current?.(event),
   });
 
@@ -372,10 +377,14 @@ const ExamPortal = () => {
         const requiresCamera = typeof exam?.camera_required === 'boolean'
           ? exam.camera_required
           : wizardRequiresCamera(cfg);
+        const requiresMic = typeof exam?.mic_required === 'boolean'
+          ? exam.mic_required
+          : Boolean(cfg?.audioMonitoring);
         pendingExamRef.current = { exam, cfg, questionIds, questionsPromise };
         setIsResume(resumable);
         setCameraRequired(requiresCamera);
-        const needsGate = requiresCamera || Boolean(cfg?.enableScreenRecording) || Boolean(cfg?.browserLockdown);
+        setMicRequired(requiresMic);
+        const needsGate = requiresCamera || requiresMic || Boolean(cfg?.enableScreenRecording) || Boolean(cfg?.browserLockdown);
         setStage(needsGate ? 'gate' : 'starting');
       } catch {
         if (mounted) {
@@ -442,6 +451,10 @@ const ExamPortal = () => {
           fps_test_skipped: Boolean(gateResult.fpsSkipped),
           resumed: isResume,
           user_agent: navigator.userAgent.slice(0, 500),
+          mic_ok: gateResult.mic ? Boolean(gateResult.mic?.ok) : null,
+          mic_noise_level: gateResult.mic?.noiseLevel ?? null,
+          speech_detected: gateResult.mic ? Boolean(gateResult.mic?.speechDetected) : null,
+          noisy_environment: gateResult.mic ? Boolean(gateResult.mic?.noisyEnvironment) : null,
         }).catch((error) => console.warn('Failed to record system check', error));
       }
     }
@@ -883,7 +896,7 @@ const ExamPortal = () => {
 
   // Vision telemetry for the HEARTBEAT (server watchdog raises PROCTORING_STOPPED from it).
   visionTelemetryRef.current = () => {
-    if (!cameraRequired) return { mode: INFERENCE_MODE, running: false, phase: 'disabled' };
+    if (!cameraRequired && !micRequired) return { mode: INFERENCE_MODE, running: false, phase: 'disabled' };
     if (INFERENCE_MODE === 'client') {
       return vision.getTelemetry() || { mode: 'client', running: false, phase: stage === 'ready' ? 'idle' : stage };
     }
@@ -1027,6 +1040,7 @@ const ExamPortal = () => {
           vision={vision}
           variant={INFERENCE_MODE === 'server' ? 'permission-only' : (isResume ? 'resume' : 'exam')}
           cameraRequired={cameraRequired}
+          micRequired={micRequired}
           requireScreenShare={Boolean(securityConfig?.enableScreenRecording)}
           requireFullscreen={browserLockdownEnabled}
           onScreenStream={setScreenStream}
