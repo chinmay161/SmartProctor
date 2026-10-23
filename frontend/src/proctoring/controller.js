@@ -61,6 +61,7 @@ const primaryFaceIndex = (landmarkSets) => {
 export function createVisionController({
   video,
   detectObjects = true,
+  micRequired = false,
   objectModel,
   objectDelegate,
   engineConfig = {},
@@ -76,6 +77,7 @@ export function createVisionController({
 
   let stream = null;
   let tasks = null;
+  let audioEngine = null;
   let engine = createTemporalEngine(engineConfig);
   const blinkDetector = createBlinkDetector();
 
@@ -191,6 +193,29 @@ export function createVisionController({
   }
 
   const openCamera = () => withSystemPrompt(() => navigator.mediaDevices.getUserMedia({ video: cfg.cameraConstraints, audio: false }));
+
+  async function ensureAudioEngine() {
+    if (audioEngine) return audioEngine;
+    const { createAudioEngine } = await import('./audioEngine.js');
+    audioEngine = createAudioEngine({
+      onSample: (sample) => {
+        if (loopMode === 'monitor') {
+          handleEvents(engine.pushAudio(sample));
+        }
+      },
+      onTrackEvent: (kind) => {
+        if (loopMode === 'monitor') {
+          handleEvents(engine.micEvent(kind, performance.now()));
+        }
+      },
+    });
+    return audioEngine;
+  }
+
+  async function requestMic() {
+    const ae = await ensureAudioEngine();
+    return ae.requestMic();
+  }
 
   async function requestCamera() {
     if (stream && stream.getVideoTracks().some((t) => t.readyState === 'live')) {
@@ -394,6 +419,7 @@ export function createVisionController({
   // ---------- violations ----------
 
   function captureEvidence() {
+    // NO AUDIO is recorded, stored or uploaded; snapshot evidence is the camera frame only.
     if (!videoReady()) return null;
     const scale = Math.min(1, cfg.evidenceMaxWidth / video.videoWidth);
     const width = Math.round(video.videoWidth * scale);
@@ -583,10 +609,14 @@ export function createVisionController({
     lastAdaptAt = performance.now();
     setPhase('running');
     startLoop('monitor');
+    if (micRequired) {
+      void ensureAudioEngine().then((ae) => ae.start());
+    }
   }
 
   function stop() {
     stopLoop();
+    audioEngine?.stop();
     setPhase('stopped');
   }
 
@@ -596,6 +626,9 @@ export function createVisionController({
     trimTimes(objectTimes, now);
     const windowSec = cfg.fpsWindowMs / 1000;
     const inferenceAgeMs = lastInferencePerf === null ? null : Math.round(now - lastInferencePerf);
+    const audioTelemetry = audioEngine
+      ? audioEngine.getTelemetry()
+      : { running: false, speechScore: 0, rms: 0, lastAudioAt: null };
     return {
       mode: 'client',
       phase,
@@ -615,12 +648,15 @@ export function createVisionController({
       camera: cameraStatus.state,
       cameraPermission: cameraStatus.permission,
       noBlinkShadowCount,
+      audio: audioTelemetry,
     };
   }
 
   function dispose() {
     disposed = true;
     stopLoop();
+    audioEngine?.dispose();
+    audioEngine = null;
     if (rvfcHandle !== null && typeof video.cancelVideoFrameCallback === 'function') {
       video.cancelVideoFrameCallback(rvfcHandle);
     }
@@ -638,6 +674,9 @@ export function createVisionController({
 
   return {
     requestCamera,
+    requestMic,
+    ensureAudioEngine,
+    getAudioEngine: () => audioEngine,
     loadModels,
     measure,
     calibrate,
@@ -656,3 +695,4 @@ export function createVisionController({
     },
   };
 }
+

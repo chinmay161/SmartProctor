@@ -63,7 +63,7 @@ export async function probeCameraPermission() {
  * Owns one vision controller (camera + MediaPipe + rules). The heavy module is
  * fetched with a dynamic import the first time it's needed.
  */
-export function useVisionProctoring({ detectObjects = true, onViolation, onShadowViolation } = {}) {
+export function useVisionProctoring({ detectObjects = true, micRequired = false, onViolation, onShadowViolation } = {}) {
   const videoRef = useRef(null);
   const controllerRef = useRef(null);
   const loadingRef = useRef(null);
@@ -86,6 +86,7 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
         controllerRef.current = mod.createVisionController({
           video: videoRef.current,
           detectObjects,
+          micRequired,
           onViolation: (v) => onViolationRef.current?.(v),
           onShadowViolation: (v) => onShadowRef.current?.(v),
           onStateChange: setPhase,
@@ -100,7 +101,7 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
       });
     }
     return loadingRef.current;
-  }, [detectObjects]);
+  }, [detectObjects, micRequired]);
 
   const requestCamera = useCallback(async () => {
     let controller;
@@ -112,6 +113,21 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
     const result = await controller.requestCamera();
     if (result.ok) setStream(controller.getStream());
     return result;
+  }, [ensureController]);
+
+  const requestMic = useCallback(async () => {
+    let controller;
+    try {
+      controller = await ensureController();
+    } catch (error) {
+      return { ok: false, kind: 'load-failed', error: error?.message || String(error) };
+    }
+    return controller.requestMic();
+  }, [ensureController]);
+
+  const ensureAudioEngine = useCallback(async () => {
+    const controller = await ensureController();
+    return controller.ensureAudioEngine();
   }, [ensureController]);
 
   const { loadModels, measure, calibrate, stop } = useMemo(() => {
@@ -154,6 +170,8 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
     stream,
     cameraStatus,
     requestCamera,
+    requestMic,
+    ensureAudioEngine,
     loadModels,
     measure,
     calibrate,
@@ -162,5 +180,6 @@ export function useVisionProctoring({ detectObjects = true, onViolation, onShado
     getTelemetry,
     captureEvidence,
     dispose,
-  }), [phase, stream, cameraStatus, requestCamera, loadModels, measure, calibrate, start, stop, getTelemetry, captureEvidence, dispose]);
+  }), [phase, stream, cameraStatus, requestCamera, requestMic, ensureAudioEngine, loadModels, measure, calibrate, start, stop, getTelemetry, captureEvidence, dispose]);
 }
+
