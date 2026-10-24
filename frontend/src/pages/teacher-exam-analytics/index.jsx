@@ -65,7 +65,7 @@ const TeacherExamAnalyticsPage = () => {
     setDownloading(type);
     try {
       const token = await getAccessTokenSilently();
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8000';
       const response = await fetch(`${apiUrl}/api/v1/exam-analytics/${examId}/export/${type}`, {
         headers: {
           Authorization: `Bearer ${token}`

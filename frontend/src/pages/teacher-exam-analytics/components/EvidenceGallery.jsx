@@ -4,8 +4,9 @@ import Button from '../../../components/ui/Button';
 import { formatViolationType, getViolationIcon } from '../../../utils/violationSeverity';
 
 const getBackendOrigin = () => {
-  if (import.meta.env.VITE_API_URL) {
-    return String(import.meta.env.VITE_API_URL).replace(/\/$/, '');
+  const apiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL;
+  if (apiBase) {
+    return String(apiBase).replace(/\/$/, '');
   }
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://localhost:8000';

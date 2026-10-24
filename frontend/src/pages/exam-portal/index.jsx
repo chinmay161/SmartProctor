@@ -25,6 +25,7 @@ import {
 import { SCREEN_SHARE_HELP, shareEntireScreen } from '../../components/proctoring/screenShare';
 import { requestExamFullscreen } from '../../components/proctoring/fullscreen';
 import { isVisionViolationEnabled } from '../../utils/violationSeverity';
+import { ReconnectingSocket } from '../../services/reconnectingSocket';
 
 // Only camera exams need the gate UI, so it ships in its own chunk.
 const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
@@ -153,6 +154,7 @@ const ExamPortal = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [proctorWarning, setProctorWarning] = useState('');
   const [authReconnecting, setAuthReconnecting] = useState(false);
+  const [socketReconnecting, setSocketReconnecting] = useState(false);
   const [violationLock, setViolationLock] = useState(null);
   const pendingSavesRef = useRef({});
   const pendingViolationsRef = useRef([]);
@@ -583,94 +585,94 @@ const ExamPortal = () => {
     if (isLoading || examBlocked || !sourceExam || !sessionId || !auth0Authenticated) return;
 
     let mounted = true;
-    let reconnectTimeout = null;
     const lastTimestamps = new Map();
 
-    const connectWs = async () => {
+    const getWsUrl = async () => {
+      const token = await getAccessTokenSilently({ authorizationParams: { audience: auth0Audience } });
+      const apiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      let wsProtocol = 'ws:';
+      let wsHost = 'localhost:8000';
       try {
-        const token = await getAccessTokenSilently({ authorizationParams: { audience: auth0Audience } });
-        if (!mounted) return;
-
-        let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        let wsHost = window.location.host;
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-          wsHost = 'localhost:8000';
-        } else if (import.meta.env.VITE_API_URL) {
-          try {
-            const url = new URL(import.meta.env.VITE_API_URL);
-            wsHost = url.host;
-          } catch (e) {}
-        }
-
-        const wsUrl = `${wsProtocol}//${wsHost}/ws/student/${sessionId}?token=${encodeURIComponent(token)}`;
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          if (ws.readyState === WebSocket.OPEN) {
-             ws.send(JSON.stringify({ type: 'SYNC_REQUEST' }));
-          }
-          if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-
-          heartbeatIntervalRef.current = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'HEARTBEAT', timestamp: Date.now(), vision: visionTelemetryRef.current() }));
-            }
-          }, 5000);
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            
-            if (data.timestamp) {
-                const lastTs = lastTimestamps.get('cmd') || 0;
-                if (data.timestamp < lastTs) return;
-                lastTimestamps.set('cmd', data.timestamp);
-            }
-
-            if (data.type === 'WARN_STUDENT') {
-              if (examEndedRef.current) return;
-              if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
-              setProctorWarning(data.message || 'Warning from Proctor: Stay focused');
-              warningTimeoutRef.current = setTimeout(() => setProctorWarning(''), 10000);
-            } else if (data.type === 'END_EXAM' || data.type === 'FORCE_SUBMIT') {
-              if (examEndedRef.current) return;
-              examEndedRef.current = true;
-              examStatusRef.current = 'ending';
-              setProctorWarning('Exam terminated by proctor.');
-              if (handleConfirmSubmitRef.current) handleConfirmSubmitRef.current();
-            }
-          } catch(e) {}
-        };
-
-        ws.onclose = (event) => {
-          if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-          if (mounted) {
-            if (event?.code === 4401 || event?.code === 4403 || event?.code === 4404) {
-              console.warn('Student WS closed with authorization/session error.', event.code, event.reason);
-              setProctorWarning('Live proctoring connection could not be established for this exam session.');
-              return;
-            }
-            console.warn('Student WS disconnected. Reconnecting in 3s...');
-            reconnectTimeout = setTimeout(connectWs, 3000);
-          }
-        };
-      } catch (e) {
-        console.error('WS Connection failed', e);
-        if (mounted) {
-          reconnectTimeout = setTimeout(connectWs, 5000);
-        }
+        const parsed = new URL(apiBase, window.location.origin);
+        wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsHost = parsed.host;
+      } catch {
+        wsProtocol = apiBase.startsWith('https') ? 'wss:' : 'ws:';
+        wsHost = apiBase.replace(/^https?:\/\//, '').split('/')[0];
       }
+      return `${wsProtocol}//${wsHost}/ws/student/${sessionId}?token=${encodeURIComponent(token)}`;
     };
 
-    connectWs();
+    const socket = new ReconnectingSocket({
+      getUrl: getWsUrl,
+      onStateChange: (state) => {
+        if (!mounted) return;
+        if (state === 'open') {
+          setSocketReconnecting(false);
+        } else if (state === 'reconnecting' || state === 'connecting') {
+          setSocketReconnecting(true);
+        } else if (state === 'failed') {
+          setSocketReconnecting(false);
+          setProctorWarning('Live proctoring connection could not be established for this exam session.');
+        }
+      },
+      onOpen: (event, rws) => {
+        rws.send(JSON.stringify({ type: 'SYNC_REQUEST' }));
+
+        // Immediately send heartbeat with current vision telemetry upon connect/reconnect
+        rws.send(JSON.stringify({
+          type: 'HEARTBEAT',
+          timestamp: Date.now(),
+          vision: visionTelemetryRef.current(),
+        }));
+
+        if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = setInterval(() => {
+          rws.send(JSON.stringify({
+            type: 'HEARTBEAT',
+            timestamp: Date.now(),
+            vision: visionTelemetryRef.current(),
+          }));
+        }, 5000);
+      },
+      onMessage: (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.timestamp) {
+            const lastTs = lastTimestamps.get('cmd') || 0;
+            if (data.timestamp < lastTs) return;
+            lastTimestamps.set('cmd', data.timestamp);
+          }
+
+          if (data.type === 'WARN_STUDENT') {
+            if (examEndedRef.current) return;
+            if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+            setProctorWarning(data.message || 'Warning from Proctor: Stay focused');
+            warningTimeoutRef.current = setTimeout(() => setProctorWarning(''), 10000);
+          } else if (data.type === 'END_EXAM' || data.type === 'FORCE_SUBMIT') {
+            if (examEndedRef.current) return;
+            examEndedRef.current = true;
+            examStatusRef.current = 'ending';
+            setProctorWarning('Exam terminated by proctor.');
+            if (handleConfirmSubmitRef.current) handleConfirmSubmitRef.current();
+          }
+        } catch {
+          // ignore parse errors
+        }
+      },
+      onClose: () => {
+        if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      },
+    });
+
+    wsRef.current = socket;
 
     return () => {
       mounted = false;
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
-      if (wsRef.current) wsRef.current.close();
+      socket.close();
+      wsRef.current = null;
     };
   }, [sessionId, auth0Authenticated, getAccessTokenSilently, auth0Audience]);
 
@@ -1342,7 +1344,7 @@ const ExamPortal = () => {
         </div>
       )}
 
-      {authReconnecting && (
+      {(authReconnecting || socketReconnecting) && (
         <div role="status" className="bg-warning/15 border-b border-warning/30 px-4 py-2 text-xs text-warning">
           Reconnecting… your answers are kept and will sync once the connection is restored.
         </div>

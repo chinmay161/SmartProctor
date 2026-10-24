@@ -5,12 +5,21 @@ from urllib import error, request
 from fastapi import HTTPException
 
 
-AI_WORKER_BASE_URL = os.getenv("AI_WORKER_BASE_URL", "http://localhost:8001").rstrip("/")
+def get_ai_worker_base_url() -> str:
+    url = os.getenv("AI_WORKER_BASE_URL", "").strip().rstrip("/")
+    if not url:
+        raise HTTPException(
+            status_code=503,
+            detail="AI worker service is not configured (AI_WORKER_BASE_URL is unset)",
+        )
+    return url
+
+
 AI_WORKER_TIMEOUT_SECONDS = float(os.getenv("AI_WORKER_TIMEOUT_SECONDS", "10"))
 
 
 def _worker_url(path: str) -> str:
-    return f"{AI_WORKER_BASE_URL}{path}"
+    return f"{get_ai_worker_base_url()}{path}"
 
 
 def _severity_for_violation(violation_type: str) -> str:

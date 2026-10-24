@@ -5,10 +5,12 @@ import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import { authAwareCall } from '../../services/authAwareCall';
 import { formatViolationType, getViolationIcon } from '../../utils/violationSeverity';
+import { ReconnectingSocket } from '../../services/reconnectingSocket';
 
 const getBackendOrigin = () => {
-  if (import.meta.env.VITE_API_URL) {
-    return String(import.meta.env.VITE_API_URL).replace(/\/$/, '');
+  const apiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL;
+  if (apiBase) {
+    return String(apiBase).replace(/\/$/, '');
   }
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://localhost:8000';
@@ -26,6 +28,7 @@ const TeacherMonitoringPage = () => {
   const [sessions, setSessions] = useState([]);
   const [studentStates, setStudentStates] = useState({});
   const [loading, setLoading] = useState(true);
+  const [socketReconnecting, setSocketReconnecting] = useState(false);
   const [error, setError] = useState('');
   const [toasts, setToasts] = useState([]);
   
@@ -81,6 +84,7 @@ const TeacherMonitoringPage = () => {
                   next[s.id] = { violations: s.violation_count || 0, lastViolation: 'None', lastSeen: Date.now(), trustScore: s.integrity_score ?? s.trust_score ?? 100 };
               } else {
                   next[s.id].trustScore = s.integrity_score ?? s.trust_score ?? next[s.id].trustScore;
+                  next[s.id].violations = s.violation_count ?? next[s.id].violations;
               }
           });
           return next;
@@ -121,131 +125,130 @@ const TeacherMonitoringPage = () => {
   useEffect(() => {
     if (authLoading || !isAuthenticated) return;
 
-    const connectSockets = async () => {
-      let token = null;
-      try {
-        token = await getAccessTokenSilently({
-          authorizationParams: { audience: auth0Audience }
-        });
-      } catch (e) {
-        console.warn('Could not retrieve audience token for websockets', e);
-      }
+    const processedEvents = new Map();
+    const lastTimestamps = new Map();
 
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      let wsHost = window.location.host;
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        wsHost = 'localhost:8000';
-      } else if (import.meta.env.VITE_API_URL) {
-        try {
-          const url = new URL(import.meta.env.VITE_API_URL);
-          wsHost = url.host;
-        } catch (e) {}
-      }
-
-      if (!wsRefs.current['exam']) {
-        if (!token) {
-          if (mountedRef.current) {
-            setLoading(false);
-          }
-          showToast('Unable to authenticate live monitoring socket', 'error');
-          return;
+    const cleanupInterval = setInterval(() => {
+      const now = Date.now();
+      for (const [eventId, timestamp] of processedEvents.entries()) {
+        if (now - timestamp > 60000) {
+          processedEvents.delete(eventId);
         }
-        const wsUrl = `${wsProtocol}//${wsHost}/ws/proctor/exam/${examId}?token=${encodeURIComponent(token)}`;
-        const ws = new WebSocket(wsUrl);
-        wsRefs.current['exam'] = ws;
-
-        ws.onopen = () => {
-          console.log(`Connected to proctor WS for exam: ${examId}`);
-          if (mountedRef.current) {
-            setLoading(false);
-          }
-        };
-
-        const processedEvents = new Map();
-        const lastTimestamps = new Map();
-        
-        // LRU / TTL cleanup
-        const cleanupInterval = setInterval(() => {
-           const now = Date.now();
-           for (const [eventId, timestamp] of processedEvents.entries()) {
-               if (now - timestamp > 60000) { // 1 min TTL
-                   processedEvents.delete(eventId);
-               }
-           }
-        }, 30000);
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            
-            if (data.type === 'STATUS_SYNC') {
-                if (data.timestamp) {
-                    const lastStatusTs = lastTimestamps.get('status_sync') || 0;
-                    if (data.timestamp < lastStatusTs) return;
-                    lastTimestamps.set('status_sync', data.timestamp);
-                }
-                const statuses = data.statuses;
-                setStudentStates(prev => {
-                    const next = { ...prev };
-                    for (const [sid, status] of Object.entries(statuses)) {
-                        if (!next[sid]) next[sid] = { violations: 0, lastViolation: 'None', lastSeen: Date.now() };
-                        next[sid].serverStatus = status;
-                    }
-                    return next;
-                });
-                return;
-            }
-
-            const sid = data.session_id;
-            if (!sid) return;
-
-            if (data.timestamp) {
-                const lastTs = lastTimestamps.get(sid) || 0;
-                if (data.timestamp < lastTs) return;
-                lastTimestamps.set(sid, data.timestamp);
-            }
-
-            // Idempotency check for violations
-            if (data.event_id) {
-               if (processedEvents.has(data.event_id)) return;
-               processedEvents.set(data.event_id, Date.now());
-            }
-
-            if (data.type === 'VIOLATION') {
-              setStudentStates(prev => ({
-                ...prev,
-                [sid]: {
-                  ...(prev[sid] || { lastSeen: Date.now() }),
-                  violations: (prev[sid]?.violations || 0) + 1,
-                  lastViolation: data.violation_type || 'Unknown Violation',
-                  trustScore: data.integrity_score ?? data.trust_score ?? (prev[sid]?.trustScore ?? 100),
-                  lastSeen: Date.now()
-                }
-              }));
-              showToast(`New violation from ${data.student_id || sid}`, 'warning');
-            }
-          } catch (err) {
-            console.error('WS MSG Parse Error', err);
-          }
-        };
-
-        ws.onclose = () => {
-          clearInterval(cleanupInterval);
-          if (wsRefs.current['exam'] === ws) {
-            delete wsRefs.current['exam'];
-          }
-        };
-
-        ws.onerror = (event) => {
-          console.error('Proctor websocket error', event);
-        };
-
       }
+    }, 30000);
+
+    const getWsUrl = async () => {
+      const token = await getAccessTokenSilently({
+        authorizationParams: { audience: auth0Audience }
+      });
+      const apiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      let wsProtocol = 'ws:';
+      let wsHost = 'localhost:8000';
+      try {
+        const parsed = new URL(apiBase, window.location.origin);
+        wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsHost = parsed.host;
+      } catch {
+        wsProtocol = apiBase.startsWith('https') ? 'wss:' : 'ws:';
+        wsHost = apiBase.replace(/^https?:\/\//, '').split('/')[0];
+      }
+      return `${wsProtocol}//${wsHost}/ws/proctor/exam/${examId}?token=${encodeURIComponent(token)}`;
     };
 
-    connectSockets();
+    const socket = new ReconnectingSocket({
+      getUrl: getWsUrl,
+      onStateChange: (state) => {
+        if (!mountedRef.current) return;
+        if (state === 'open') {
+          setSocketReconnecting(false);
+        } else if (state === 'reconnecting' || state === 'connecting') {
+          setSocketReconnecting(true);
+        } else if (state === 'failed') {
+          setSocketReconnecting(false);
+          showToast('Live monitoring connection could not be established', 'error');
+        }
+      },
+      onOpen: async () => {
+        console.log(`Connected to proctor WS for exam: ${examId}`);
+        // After every (re)connect, refetch the sessions list over REST and reapply it before processing new events
+        try {
+          await fetchSessions();
+        } catch (e) {
+          console.warn('Failed to refresh sessions on socket reconnect', e);
+        }
+        if (mountedRef.current) {
+          setLoading(false);
+        }
+      },
+      onMessage: (event) => {
+        try {
+          const data = JSON.parse(event.data);
 
-    return () => {};
+          if (data.type === 'STATUS_SYNC') {
+            if (data.timestamp) {
+              const lastStatusTs = lastTimestamps.get('status_sync') || 0;
+              if (data.timestamp < lastStatusTs) return;
+              lastTimestamps.set('status_sync', data.timestamp);
+            }
+            const statuses = data.statuses;
+            setStudentStates(prev => {
+              const next = { ...prev };
+              for (const [sid, status] of Object.entries(statuses)) {
+                if (!next[sid]) next[sid] = { violations: 0, lastViolation: 'None', lastSeen: Date.now() };
+                next[sid].serverStatus = status;
+              }
+              return next;
+            });
+            return;
+          }
+
+          const sid = data.session_id;
+          if (!sid) return;
+
+          if (data.timestamp) {
+            const lastTs = lastTimestamps.get(sid) || 0;
+            if (data.timestamp < lastTs) return;
+            lastTimestamps.set(sid, data.timestamp);
+          }
+
+          // Idempotency check for violations
+          if (data.event_id) {
+            if (processedEvents.has(data.event_id)) return;
+            processedEvents.set(data.event_id, Date.now());
+          }
+
+          if (data.type === 'VIOLATION') {
+            setStudentStates(prev => ({
+              ...prev,
+              [sid]: {
+                ...(prev[sid] || { lastSeen: Date.now() }),
+                violations: (prev[sid]?.violations || 0) + 1,
+                lastViolation: data.violation_type || 'Unknown Violation',
+                trustScore: data.integrity_score ?? data.trust_score ?? (prev[sid]?.trustScore ?? 100),
+                lastSeen: Date.now()
+              }
+            }));
+            showToast(`New violation from ${data.student_id || sid}`, 'warning');
+          }
+        } catch (err) {
+          console.error('WS MSG Parse Error', err);
+        }
+      },
+      onClose: () => {
+        clearInterval(cleanupInterval);
+      },
+      onError: (err) => {
+        console.warn('Proctor websocket error', err);
+      }
+    });
+
+    wsRefs.current['exam'] = socket;
+
+    return () => {
+      clearInterval(cleanupInterval);
+      socket.close();
+      delete wsRefs.current['exam'];
+    };
   }, [examId, isAuthenticated, authLoading, getAccessTokenSilently, auth0Audience]);
 
 
@@ -371,6 +374,12 @@ const TeacherMonitoringPage = () => {
               Live Exam Monitoring
             </h1>
             <p className="text-muted-foreground">Monitoring active sessions for Exam ID: {examId}</p>
+            {socketReconnecting && (
+              <div role="status" className="mt-2 inline-flex items-center gap-2 px-2.5 py-1 bg-warning/15 border border-warning/30 rounded text-xs text-warning font-medium">
+                <Icon name="RefreshCw" size={13} className="animate-spin shrink-0" />
+                <span>Live updates reconnecting…</span>
+              </div>
+            )}
           </div>
           <div className="mt-4 md:mt-0">
             <Button variant="outline" iconName="ArrowLeft" onClick={() => navigate('/teacher-dashboard')}>
@@ -559,7 +568,7 @@ const TeacherMonitoringPage = () => {
                           {images.map((img, i) => (
                             <img 
                               key={i}
-                              src={`${backendOrigin}${img}`}
+                              src={(img.startsWith('http://') || img.startsWith('https://')) ? img : `${backendOrigin}${img}`}
                               alt="Violation Evidence" 
                               className="w-full h-32 md:min-w-[150px] object-cover flex-shrink-0"
                               onError={(e) => e.target.style.display = 'none'}
@@ -714,7 +723,7 @@ const TeacherMonitoringPage = () => {
                                 {evt.data.evidence && Array.isArray(evt.data.evidence) && evt.data.evidence.length > 0 && (
                                   <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
                                     {evt.data.evidence.map((img, i) => (
-                                      <img key={i} src={`${backendOrigin}${img}`} alt="Evidence" className="h-16 w-16 object-cover rounded border border-border" />
+                                      <img key={i} src={(img.startsWith('http://') || img.startsWith('https://')) ? img : `${backendOrigin}${img}`} alt="Evidence" className="h-16 w-16 object-cover rounded border border-border" />
                                     ))}
                                   </div>
                                 )}

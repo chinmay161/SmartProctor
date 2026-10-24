@@ -1,0 +1,137 @@
+import logging
+import os
+import pytest
+
+from app.main import TokenRedactionFilter, app
+
+
+def test_token_redaction_filter():
+    filter_obj = TokenRedactionFilter()
+
+    # Test msg redaction
+    record1 = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="GET /ws/student/123?token=secret_token_123&other=param HTTP/1.1",
+        args=(),
+        exc_info=None,
+    )
+    assert filter_obj.filter(record1) is True
+    assert record1.msg == "GET /ws/student/123?token=REDACTED&other=param HTTP/1.1"
+
+    # Test tuple args redaction
+    record2 = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='%s - "%s" %s',
+        args=("127.0.0.1:5000", "GET /ws/proctor/exam/456?token=my_secret_token HTTP/1.1", 101),
+        exc_info=None,
+    )
+    assert filter_obj.filter(record2) is True
+    assert record2.args[1] == "GET /ws/proctor/exam/456?token=REDACTED HTTP/1.1"
+
+
+def test_ai_worker_unset_returns_503(monkeypatch):
+    from fastapi import HTTPException
+    from app.routes.ai import check_ai_worker_configured
+    from app.services.ai_worker import _worker_url
+    from app.main import health_check
+
+    monkeypatch.delenv("AI_WORKER_BASE_URL", raising=False)
+
+    # Calling check_ai_worker_configured raises 503
+    with pytest.raises(HTTPException) as exc_info:
+        check_ai_worker_configured()
+    assert exc_info.value.status_code == 503
+    assert "AI worker service is not configured" in str(exc_info.value.detail)
+
+    # Calling _worker_url raises 503
+    with pytest.raises(HTTPException) as exc_info2:
+        _worker_url("/health")
+    assert exc_info2.value.status_code == 503
+
+    # Main health endpoint never calls AI worker and returns healthy
+    health_resp = health_check()
+    assert health_resp["status"] == "healthy"
+
+
+def test_production_fails_fast_on_missing_env_vars(monkeypatch):
+    import subprocess
+    import sys
+
+    # Run a subprocess with ENVIRONMENT=production and stripped env vars to verify fail-fast
+    env = os.environ.copy()
+    env["ENVIRONMENT"] = "production"
+    env["AUTH0_DOMAIN"] = ""
+    env["AUTH0_API_AUDIENCE"] = ""
+    env["DATABASE_URL"] = ""
+    env["CORS_ORIGINS"] = ""
+
+    code = "from app.main import app"
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.path.join(os.path.dirname(__file__), ".."),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "Missing required production environment variables" in proc.stderr
+    assert "AUTH0_DOMAIN" in proc.stderr
+    assert "DATABASE_URL" in proc.stderr
+
+
+def test_production_fails_on_wildcard_cors(monkeypatch):
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["ENVIRONMENT"] = "production"
+    env["AUTH0_DOMAIN"] = "test.auth0.com"
+    env["AUTH0_API_AUDIENCE"] = "https://api.test.com"
+    env["DATABASE_URL"] = "sqlite:///./test.db"
+    env["CORS_ORIGINS"] = "*"
+
+    code = "from app.main import app"
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.path.join(os.path.dirname(__file__), ".."),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "CORS_ORIGINS cannot contain '*' in production" in proc.stderr
+
+
+def test_production_disables_docs(monkeypatch):
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env["ENVIRONMENT"] = "production"
+    env["AUTH0_DOMAIN"] = "test.auth0.com"
+    env["AUTH0_API_AUDIENCE"] = "https://api.test.com"
+    env["DATABASE_URL"] = "sqlite:///./test.db"
+    env["CORS_ORIGINS"] = "https://myfrontend.vercel.app"
+
+    code = """
+from app.main import app
+assert app.docs_url is None
+assert app.redoc_url is None
+assert app.openapi_url is None
+print('DOCS_DISABLED_OK')
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.path.join(os.path.dirname(__file__), ".."),
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    assert "DOCS_DISABLED_OK" in proc.stdout

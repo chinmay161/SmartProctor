@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..auth.dependencies import canonicalize_role, get_current_user
@@ -13,7 +14,17 @@ from ..services.ai_worker import (
 )
 from ..services.session_service import assert_session_is_live
 
-router = APIRouter(prefix="/ai", tags=["AI"])
+
+def check_ai_worker_configured():
+    url = os.getenv("AI_WORKER_BASE_URL", "").strip()
+    if not url:
+        raise HTTPException(
+            status_code=503,
+            detail="AI worker service is not configured (AI_WORKER_BASE_URL is unset)",
+        )
+
+
+router = APIRouter(prefix="/ai", tags=["AI"], dependencies=[Depends(check_ai_worker_configured)])
 
 
 def require_teacher_or_admin(user=Depends(get_current_user)):

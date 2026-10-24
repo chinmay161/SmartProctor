@@ -9,10 +9,55 @@ except ImportError:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import logging
 import os
+import re
 
 # Load backend/app/.env before importing routers/services that read env vars
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+
+environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+is_production = environment == "production"
+
+# In production: fail fast at startup if required variables are missing (log names only)
+if is_production:
+    required_vars = ["AUTH0_DOMAIN", "AUTH0_API_AUDIENCE", "DATABASE_URL", "CORS_ORIGINS"]
+    missing_vars = [var for var in required_vars if not os.getenv(var, "").strip()]
+    if missing_vars:
+        missing_str = ", ".join(missing_vars)
+        logging.getLogger("uvicorn.error").error(
+            f"FATAL: Missing required environment variables in production: {missing_str}"
+        )
+        raise RuntimeError(f"Missing required production environment variables: {missing_str}")
+
+class TokenRedactionFilter(logging.Filter):
+    """Redacts query string token values in uvicorn access logs (e.g. WebSocket tokens)."""
+    _TOKEN_REGEX = re.compile(r"([?&]token=)[^&\s\"'`]+")
+
+    def _redact(self, text: str) -> str:
+        return self._TOKEN_REGEX.sub(r"\g<1>REDACTED", text)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = self._redact(record.msg)
+        if record.args:
+            if isinstance(record.args, tuple):
+                record.args = tuple(
+                    self._redact(arg) if isinstance(arg, str) else arg
+                    for arg in record.args
+                )
+            elif isinstance(record.args, dict):
+                record.args = {
+                    k: (self._redact(v) if isinstance(v, str) else v)
+                    for k, v in record.args.items()
+                }
+        return True
+
+
+# Install token redaction filter on uvicorn access logger
+access_logger = logging.getLogger("uvicorn.access")
+if not any(isinstance(f, TokenRedactionFilter) for f in access_logger.filters):
+    access_logger.addFilter(TokenRedactionFilter())
 
 from .routes import attempts, student, teacher, admin, violations
 from .database import engine, Base, ensure_schema_compatibility
@@ -39,16 +84,6 @@ async def lifespan(_: FastAPI):
     finally:
         worker.shutdown()
 
-app = FastAPI(
-    title="SmartProctor API",
-    description="Secure exam proctoring platform",
-    version="1.0.0",
-    lifespan=lifespan,
-)
-
-# Initialize database and create all tables
-Base.metadata.create_all(bind=engine)
-ensure_schema_compatibility()
 
 raw_cors_origins = os.getenv("CORS_ORIGINS")
 if raw_cors_origins:
@@ -57,6 +92,27 @@ else:
     cors_origins = ["http://localhost:5173"]
 if not cors_origins:
     cors_origins = ["http://localhost:5173"]
+
+if is_production:
+    if any(origin == "*" for origin in cors_origins):
+        logging.getLogger("uvicorn.error").error(
+            "FATAL: Wildcard CORS origin '*' is forbidden when ENVIRONMENT=production"
+        )
+        raise RuntimeError("CORS_ORIGINS cannot contain '*' in production")
+
+app = FastAPI(
+    title="SmartProctor API",
+    description="Secure exam proctoring platform",
+    version="1.0.0",
+    docs_url=None if is_production else "/docs",
+    redoc_url=None if is_production else "/redoc",
+    openapi_url=None if is_production else "/openapi.json",
+    lifespan=lifespan,
+)
+
+# Initialize database and create all tables
+Base.metadata.create_all(bind=engine)
+ensure_schema_compatibility()
 
 # Add CORS middleware (configure as needed)
 app.add_middleware(
@@ -67,9 +123,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount evidence static files
-os.makedirs("data/evidence", exist_ok=True)
-app.mount("/evidence", StaticFiles(directory="data/evidence"), name="evidence")
+# Mount evidence static files only in non-production local storage mode
+evidence_storage_mode = os.getenv("EVIDENCE_STORAGE", "local").strip().lower()
+environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+if evidence_storage_mode == "local" and environment != "production":
+    os.makedirs("data/evidence", exist_ok=True)
+    app.mount("/evidence", StaticFiles(directory="data/evidence"), name="evidence")
 
 # Include routers
 app.include_router(student.router)
