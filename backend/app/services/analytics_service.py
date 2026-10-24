@@ -36,7 +36,15 @@ def get_exam_analytics(db: Session, exam_id: str):
             "students": []
         }
     
-    total_students = len(sessions)
+    sessions_by_student: dict[str, list[ExamSession]] = {}
+    for s in sessions:
+        sessions_by_student.setdefault(s.student_id, []).append(s)
+    latest_sessions = [
+        sorted(student_sessions, key=lambda s: (s.started_at.isoformat() if s.started_at else "", s.id), reverse=True)[0]
+        for student_sessions in sessions_by_student.values()
+    ]
+
+    total_students = len(latest_sessions)
     completed = 0
     auto_submitted = 0
     total_score = 0
@@ -46,7 +54,7 @@ def get_exam_analytics(db: Session, exam_id: str):
     risk_distribution = {"SAFE": 0, "SUSPICIOUS": 0, "HIGH_RISK": 0}
     students_data = []
     
-    for s in sessions:
+    for s in latest_sessions:
         uid = s.student_id
         user = db.query(UserProfile).filter_by(auth0_sub=uid).first()
         name = _display_name_for_profile(user, uid)

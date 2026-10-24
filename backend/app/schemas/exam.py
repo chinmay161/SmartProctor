@@ -70,6 +70,9 @@ class ExamResponse(BaseModel):
     evaluated_count: int | None = None
     violation_count: int | None = None
     average_score_percent: float | None = None
+    max_attempts: int = 1
+    attempts_used: int | None = None
+    has_in_progress: bool | None = None
     created_by: str
     created_at: datetime | None = None
 

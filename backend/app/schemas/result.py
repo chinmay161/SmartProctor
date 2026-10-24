@@ -10,6 +10,8 @@ class ExamResultResponse(BaseModel):
     out_of: int
     submitted_at: datetime | None
     evaluated: bool
+    is_provisional: bool = False
+    provisional_message: str | None = None
 
 
 class StudentExamHistoryItemResponse(BaseModel):
@@ -23,3 +25,7 @@ class StudentExamHistoryItemResponse(BaseModel):
     score: int | None
     out_of: int
     can_view_result: bool
+    is_provisional: bool = False
+    provisional_message: str | None = None
+    max_attempts: int = 1
+    attempts_used: int = 1

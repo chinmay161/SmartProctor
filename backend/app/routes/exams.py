@@ -32,6 +32,7 @@ from ..schemas.exam import (
 )
 from ..schemas.attempt import AttemptGradePatchRequest, AttemptReviewResponse
 from ..services.attempt_service import (
+    _max_attempts_for_exam,
     apply_manual_grades,
     build_attempt_review_payload,
     force_end_exam,
@@ -93,7 +94,11 @@ def _ensure_exam_is_not_already_over(exam: Exam) -> None:
     sync_exam_status_for_now(exam, utcnow())
 
 
-def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None) -> ExamResponse:
+def _serialize_exam(
+    exam: Exam,
+    completed_metrics: dict[str, Any] | None = None,
+    student_id: str | None = None,
+) -> ExamResponse:
     question_ids = []
     wizard_config = None
 
@@ -110,6 +115,21 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
 
     db = object_session(exam)
     rules = db.query(ExamRules).filter_by(exam_id=exam.id).first() if db is not None else None
+
+    attempts_used = None
+    has_in_progress = None
+    if student_id and db is not None:
+        attempts_used = (
+            db.query(ExamAttempt)
+            .filter_by(exam_id=exam.id, student_id=student_id)
+            .filter(ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED]))
+            .count()
+        )
+        has_in_progress = bool(
+            db.query(ExamAttempt)
+            .filter_by(exam_id=exam.id, student_id=student_id, status=AttemptStatus.IN_PROGRESS)
+            .first()
+        )
 
     return ExamResponse(
         id=exam.id,
@@ -130,6 +150,9 @@ def _serialize_exam(exam: Exam, completed_metrics: dict[str, Any] | None = None)
         evaluated_count=completed_metrics.get("evaluated_count") if completed_metrics else None,
         violation_count=completed_metrics.get("total_violations") if completed_metrics else None,
         average_score_percent=completed_metrics.get("average_score_percent") if completed_metrics else None,
+        max_attempts=_max_attempts_for_exam(exam),
+        attempts_used=attempts_used,
+        has_in_progress=has_in_progress,
         created_by=exam.created_by,
         created_at=_as_utc_timestamp(exam.created_at),
     )
@@ -155,15 +178,25 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
     session_by_id = {session.id: session for session in sessions}
 
     enrollment_count = db.query(ExamEnrollment).filter_by(exam_id=exam.id).count()
-    attempt_count = len(attempts)
+
+    # Group attempts by student_id and select each student's latest attempt to prevent double-counting
+    attempts_by_student: dict[str, list[ExamAttempt]] = {}
+    for a in attempts:
+        attempts_by_student.setdefault(a.student_id, []).append(a)
+    latest_attempts = [
+        sorted(student_attempts, key=lambda a: (((a.submitted_at or a.start_time).isoformat() if (a.submitted_at or a.start_time) else ""), a.id), reverse=True)[0]
+        for student_attempts in attempts_by_student.values()
+    ]
+
+    attempt_count = len(latest_attempts)
     submitted_count = sum(
         1
-        for attempt in attempts
+        for attempt in latest_attempts
         if attempt.status in (AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED)
     )
     evaluated = [
         attempt
-        for attempt in attempts
+        for attempt in latest_attempts
         if attempt.status == AttemptStatus.EVALUATED and attempt.score is not None
     ]
     evaluated_count = len(evaluated)
@@ -172,7 +205,7 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
     question_count = len(_load_question_ids(exam.question_ids))
     scored_attempts = [
         attempt
-        for attempt in attempts
+        for attempt in latest_attempts
         if attempt.score is not None
         and attempt.status in (AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED)
         and ((attempt.max_score_total or question_count) > 0)
@@ -204,7 +237,7 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
             grade_distribution["F"] += 1
 
     completion_minutes = []
-    for attempt in attempts:
+    for attempt in latest_attempts:
         if (
             attempt.status in (AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED)
             and attempt.start_time is not None
@@ -450,7 +483,7 @@ def list_exams(user=Depends(get_current_user)):
             return response
         if "student" in roles:
             exams = list_available_exams_for_student(db, user["sub"])
-            return [_serialize_exam(exam) for exam in exams]
+            return [_serialize_exam(exam, student_id=user["sub"]) for exam in exams]
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     finally:
         db.close()
@@ -461,7 +494,7 @@ def list_available_exams(user=Depends(require_role("student"))):
     db = SessionLocal()
     try:
         exams = list_available_exams_for_student(db, user["sub"])
-        return [_serialize_exam(exam) for exam in exams]
+        return [_serialize_exam(exam, student_id=user["sub"]) for exam in exams]
     finally:
         db.close()
 

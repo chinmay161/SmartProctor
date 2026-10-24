@@ -18,7 +18,9 @@ from ..schemas.attempt import (
 )
 from ..schemas.result import ExamResultResponse
 from ..services.attempt_service import (
+    _max_attempts_for_exam,
     build_attempt_review_payload_for_student,
+    check_result_visibility,
     evaluate_attempt,
     resume_attempt,
     save_answer,
@@ -149,7 +151,14 @@ def list_student_attempt_history(user=Depends(require_role("student"))):
             exam = exam_by_id.get(attempt.exam_id)
             if not exam:
                 continue
-            is_result_visible = bool(exam.results_visible and attempt.status == AttemptStatus.EVALUATED)
+            is_result_visible, _, is_provisional, prov_msg = check_result_visibility(exam, attempt)
+            max_att = _max_attempts_for_exam(exam)
+            used_count = (
+                db.query(ExamAttempt)
+                .filter_by(exam_id=exam.id, student_id=user["sub"])
+                .filter(ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED]))
+                .count()
+            )
             history.append(
                 StudentExamHistoryItemResponse(
                     exam_id=exam.id,
@@ -162,6 +171,10 @@ def list_student_attempt_history(user=Depends(require_role("student"))):
                     score=attempt.score if is_result_visible else None,
                     out_of=_resolve_out_of(attempt, exam),
                     can_view_result=is_result_visible,
+                    is_provisional=is_provisional,
+                    provisional_message=prov_msg,
+                    max_attempts=max_att,
+                    attempts_used=used_count,
                 )
             )
 
@@ -188,22 +201,23 @@ def evaluate_attempt_endpoint(
 def get_result(exam_id: str, user=Depends(require_role("student"))):
     db = SessionLocal()
     try:
+        exam = db.query(Exam).filter_by(id=exam_id).first()
+        if not exam:
+            raise HTTPException(status_code=404, detail="Exam not found")
         attempt = (
             db.query(ExamAttempt)
             .filter_by(exam_id=exam_id, student_id=user["sub"])
-            .filter(ExamAttempt.status == AttemptStatus.EVALUATED)
+            .filter(ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED]))
             .order_by(ExamAttempt.submitted_at.desc(), ExamAttempt.start_time.desc(), ExamAttempt.id.desc())
             .first()
         )
         if not attempt:
             raise HTTPException(status_code=404, detail="Result not found")
-        exam = db.query(Exam).filter_by(id=exam_id).first()
-        if not exam:
-            raise HTTPException(status_code=404, detail="Exam not found")
-        if attempt.status != AttemptStatus.EVALUATED:
-            raise HTTPException(status_code=403, detail="Result not available")
-        if not exam.results_visible:
-            raise HTTPException(status_code=403, detail="Results are not published")
+
+        is_visible, reason, is_provisional, prov_msg = check_result_visibility(exam, attempt)
+        if not is_visible:
+            raise HTTPException(status_code=403, detail=reason or "Results are not published")
+
         return ExamResultResponse(
             exam_id=exam_id,
             attempt_id=attempt.id,
@@ -211,7 +225,9 @@ def get_result(exam_id: str, user=Depends(require_role("student"))):
             score=attempt.score,
             out_of=_resolve_out_of(attempt, exam),
             submitted_at=attempt.submitted_at,
-            evaluated=True,
+            evaluated=attempt.status == AttemptStatus.EVALUATED,
+            is_provisional=is_provisional,
+            provisional_message=prov_msg,
         )
     finally:
         db.close()

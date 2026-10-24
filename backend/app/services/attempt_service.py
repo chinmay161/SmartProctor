@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -88,12 +89,89 @@ def _exam_wizard_config(exam: Exam) -> dict[str, Any]:
 
 def _max_attempts_for_exam(exam: Exam) -> int:
     config = _exam_wizard_config(exam)
-    raw = config.get("maxAttempts", 1)
+    raw = config.get("maxAttempts")
+    if raw is None:
+        raw = config.get("max_attempts", 1)
     try:
         value = int(raw)
     except (TypeError, ValueError):
         value = 1
     return max(1, value)
+
+
+def _parse_scheduled_release_datetime(wizard_config: dict[str, Any]) -> datetime | None:
+    date_str = wizard_config.get("resultReleaseDate")
+    time_str = wizard_config.get("resultReleaseTime") or "00:00"
+    if not date_str:
+        return None
+    try:
+        date_str = str(date_str).strip()
+        time_str = str(time_str).strip()
+        if len(time_str) == 5:
+            dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+        elif len(time_str) == 8:
+            dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
+        else:
+            dt = datetime.strptime(f"{date_str} 00:00", "%Y-%m-%d %H:%M")
+
+        tz_name = wizard_config.get("timezone") or "Asia/Kolkata"
+        try:
+            tz = ZoneInfo(str(tz_name))
+        except Exception:
+            tz = ZoneInfo("Asia/Kolkata")
+        return dt.replace(tzinfo=tz).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def check_result_visibility(
+    exam: Exam,
+    attempt: ExamAttempt | None = None,
+    now_utc: datetime | None = None,
+) -> tuple[bool, str | None, bool, str | None]:
+    """Single backend helper for computing result visibility across all options.
+
+    Returns:
+        (is_visible, reason_if_not_visible, is_provisional, provisional_message)
+    """
+    now = _as_utc(now_utc) or utcnow()
+
+    # 1. Instructor explicitly published results via PATCH /exams/{id}/publish-results
+    if bool(exam.results_visible):
+        is_prov = bool(attempt and attempt.status == AttemptStatus.PARTIALLY_EVALUATED)
+        msg = "Provisional — manual grading pending" if is_prov else None
+        return True, None, is_prov, msg
+
+    config = _exam_wizard_config(exam)
+    visibility = str(config.get("resultVisibility") or "manual").lower().strip()
+
+    if visibility == "immediate":
+        if attempt and attempt.status in (
+            AttemptStatus.SUBMITTED,
+            AttemptStatus.PARTIALLY_EVALUATED,
+            AttemptStatus.EVALUATED,
+        ):
+            is_prov = (attempt.status == AttemptStatus.PARTIALLY_EVALUATED)
+            msg = "Provisional — manual grading pending" if is_prov else None
+            return True, None, is_prov, msg
+        return False, "Results will be available immediately after submission", False, None
+
+    elif visibility == "scheduled":
+        scheduled_dt = _parse_scheduled_release_datetime(config)
+        if scheduled_dt is not None:
+            if now >= scheduled_dt:
+                is_prov = bool(attempt and attempt.status == AttemptStatus.PARTIALLY_EVALUATED)
+                msg = "Provisional — manual grading pending" if is_prov else None
+                return True, None, is_prov, msg
+            date_str = config.get("resultReleaseDate")
+            time_str = config.get("resultReleaseTime") or ""
+            time_part = f" at {time_str}" if time_str else ""
+            return False, f"Results will be published on {date_str}{time_part}", False, None
+        return False, "Results will be published on the scheduled release date", False, None
+
+    else:
+        # "manual" or other default
+        return False, "Results have not been released by the instructor yet", False, None
 
 
 def _latest_attempt_for_student(db: Session, exam_id: str, student_id: str) -> ExamAttempt | None:
@@ -458,7 +536,7 @@ def start_exam_attempt(db: Session, exam_id: str, student_id: str) -> ExamAttemp
         .count()
     )
     if submitted_count >= _max_attempts_for_exam(exam):
-        raise HTTPException(status_code=403, detail="Maximum attempts reached")
+        raise HTTPException(status_code=409, detail="Maximum attempts reached")
 
     ensure_exam_question_snapshots(db, exam)
 
@@ -621,21 +699,24 @@ def build_attempt_review_payload_for_student(db: Session, exam_id: str, student_
     attempt = (
         db.query(ExamAttempt)
         .filter_by(exam_id=exam_id, student_id=student_id)
-        .filter(ExamAttempt.status == AttemptStatus.EVALUATED)
+        .filter(ExamAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.PARTIALLY_EVALUATED, AttemptStatus.EVALUATED]))
         .order_by(ExamAttempt.submitted_at.desc(), ExamAttempt.start_time.desc(), ExamAttempt.id.desc())
         .first()
     )
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
-    if attempt.status != AttemptStatus.EVALUATED:
-        raise HTTPException(status_code=403, detail="Result not available")
-    if not bool(exam.results_visible):
-        raise HTTPException(status_code=403, detail="Results are not published")
+
+    is_visible, reason, is_provisional, prov_msg = check_result_visibility(exam, attempt)
+    if not is_visible:
+        raise HTTPException(status_code=403, detail=reason or "Results are not published")
 
     pairs = _hydrate_attempt_answers_for_all_questions(db, attempt)
     db.commit()
     db.refresh(attempt)
-    return _build_attempt_review_payload(db, exam, attempt, pairs, read_only=True)
+    payload = _build_attempt_review_payload(db, exam, attempt, pairs, read_only=True)
+    payload["is_provisional"] = is_provisional
+    payload["provisional_message"] = prov_msg
+    return payload
 
 
 def apply_manual_grades(
