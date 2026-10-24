@@ -57,6 +57,13 @@ def add_roles_to_user(user_id: str, role_names: list[str]):
     r = requests.post(url, json=payload, headers=headers)
     r.raise_for_status()
 
+    from .dependencies import sync_user_profile_role
+    try:
+        current_roles = get_user_role_names(user_id)
+    except Exception:
+        current_roles = list(normalized)
+    sync_user_profile_role(user_id, current_roles)
+
 
 def remove_roles_from_user(user_id: str, role_names: list[str]):
     normalized = [r for r in dict.fromkeys(role_names) if r]
@@ -75,11 +82,21 @@ def remove_roles_from_user(user_id: str, role_names: list[str]):
     r = requests.delete(url, json=payload, headers=headers)
     r.raise_for_status()
 
+    from .dependencies import sync_user_profile_role
+    try:
+        remaining_roles = get_user_role_names(user_id)
+    except Exception:
+        remaining_roles = []
+    sync_user_profile_role(user_id, remaining_roles)
+
+
 def remove_all_roles(user_id: str):
     token = get_management_token()
     roles = get_user_roles(user_id)
 
     if not roles:
+        from .dependencies import sync_user_profile_role
+        sync_user_profile_role(user_id, [])
         return
 
     role_ids = [r["id"] for r in roles]
@@ -94,3 +111,6 @@ def remove_all_roles(user_id: str):
     payload = {"roles": role_ids}
     r = requests.delete(url, json=payload, headers=headers)
     r.raise_for_status()
+
+    from .dependencies import sync_user_profile_role
+    sync_user_profile_role(user_id, [])

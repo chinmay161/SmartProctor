@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from ..auth.dependencies import get_current_user, canonicalize_role
+from ..auth.dependencies import get_current_user, canonicalize_role, _upsert_local_profile_role, resolve_highest_role
 from ..auth.auth0_management import get_management_token
 from ..database import SessionLocal
 from ..models.user_profile import UserProfile
@@ -187,6 +187,9 @@ def get_my_profile(user=Depends(get_current_user)):
 
     institution = (auth0_user.get("app_metadata") or {}).get("institution") or (local_profile.institution if local_profile else None)
     email = auth0_user.get("email") or (local_profile.email if local_profile else None)
+
+    highest_supported_role = resolve_highest_role(auth0_roles if auth0_roles else combined_roles)
+    _upsert_local_profile_role(auth0_sub, email, highest_supported_role)
 
     return {
         "auth0_sub": auth0_sub,

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from ..auth.assign_role import assign_role_to_user, replace_user_role
-from ..auth.dependencies import canonicalize_role, get_current_user
+from ..auth.dependencies import canonicalize_role, get_current_user, sync_user_profile_role
 from ..auth.roles import require_role
 from ..auth.roles_service import (
     add_roles_to_user,
@@ -173,6 +173,7 @@ def patch_user_roles(
             )
 
     roles_after = sorted((current_set - set(removed)) | set(added))
+    sync_user_profile_role(user_id, roles_after)
     return {
         "user_id": user_id,
         "roles_before": sorted(current_set),
@@ -230,6 +231,7 @@ def assign_role(
 ):
     normalized_role = _normalize_assignable_role(data.role)
     assign_role_to_user(data.user_id, normalized_role)
+    sync_user_profile_role(data.user_id, [normalized_role])
     log_role_change(
         admin_email=_admin_actor(admin),
         user_id=data.user_id,
@@ -251,6 +253,7 @@ def replace_role(
 ):
     normalized_role = _normalize_assignable_role(data.role)
     replace_user_role(data.user_id, normalized_role)
+    sync_user_profile_role(data.user_id, [normalized_role])
     log_role_change(
         admin_email=_admin_actor(admin),
         user_id=data.user_id,

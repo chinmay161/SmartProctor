@@ -45,6 +45,23 @@ def _first_supported_role(roles: list[str]) -> Optional[str]:
     return None
 
 
+ROLE_HIERARCHY = ["admin", "teacher", "student"]
+
+
+def resolve_highest_role(roles: list[str]) -> str:
+    normalized = [canonicalize_role(r) for r in roles if str(r).strip()]
+    for role in ROLE_HIERARCHY:
+        if role in normalized:
+            return role
+    return "student"
+
+
+def sync_user_profile_role(sub: str, roles: list[str], email: Optional[str] = None) -> str:
+    highest = resolve_highest_role(roles)
+    _upsert_local_profile_role(sub, email, highest)
+    return highest
+
+
 def _load_local_role(sub: str, email: Optional[str]):
     db = SessionLocal()
     try:
@@ -223,41 +240,42 @@ def get_current_user(
     sub = payload["sub"]
     email = payload.get("email")
 
-    # Keep a local profile row in sync for stable role fallback and metadata.
+    # Keep a local profile row in sync for metadata.
     _upsert_local_profile_role(sub, email)
 
-    # Prefer roles from token claims.
-    roles = []
-    roles.extend(_normalize_roles(payload.get(ROLE_NAMESPACE, [])))
-    roles.extend(_normalize_roles(payload.get("roles", [])))
-    roles.extend(_normalize_roles(payload.get("role", [])))
-    token_supported_role = _first_supported_role(roles)
+    # 1. Token claims (highest precedence)
+    token_roles = []
+    token_roles.extend(_normalize_roles(payload.get(ROLE_NAMESPACE, [])))
+    token_roles.extend(_normalize_roles(payload.get("roles", [])))
+    token_roles.extend(_normalize_roles(payload.get("role", [])))
+    token_supported_role = _first_supported_role(token_roles)
+
     if token_supported_role:
         _upsert_local_profile_role(sub, email, token_supported_role)
+        roles = list(dict.fromkeys(token_roles))
+        return {
+            "sub": sub,
+            "email": email,
+            "roles": roles,
+            "role_source": "token",
+        }
 
-    # Merge locally mirrored profile role as an additional source of truth.
+    # 2. Local database row
     local_role = _load_local_role(sub, email)
     if local_role:
-        roles.append(local_role)
+        return {
+            "sub": sub,
+            "email": email,
+            "roles": [local_role],
+            "role_source": "local",
+        }
 
-    # Avoid network flakiness on every request; call Auth0 only when no supported role is available.
-    if not _has_supported_role(roles):
-        auth0_roles = _load_auth0_roles(sub)
-        roles.extend(auth0_roles)
-        auth0_supported_role = _first_supported_role(auth0_roles)
-        if auth0_supported_role:
-            _upsert_local_profile_role(sub, email, auth0_supported_role)
-
-    if not _has_supported_role(roles):
-        default_role = _ensure_default_student_role(sub, email)
-        if default_role:
-            roles.append(default_role)
-            _upsert_local_profile_role(sub, email, default_role)
-
-    roles = list(dict.fromkeys(roles))
-
+    # 3. Default student fallback
+    default_role = _ensure_default_student_role(sub, email) or "student"
+    _upsert_local_profile_role(sub, email, default_role)
     return {
         "sub": sub,
         "email": email,
-        "roles": roles,
+        "roles": [default_role],
+        "role_source": "default",
     }
