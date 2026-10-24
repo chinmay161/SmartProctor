@@ -16,6 +16,9 @@ import re
 # Load backend/app/.env before importing routers/services that read env vars
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
+from .monitoring import init_sentry, RequestIdAndLoggingMiddleware
+init_sentry()
+
 environment = os.getenv("ENVIRONMENT", "development").strip().lower()
 is_production = environment == "production"
 
@@ -120,8 +123,10 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
+app.add_middleware(RequestIdAndLoggingMiddleware)
 
 # Mount evidence static files only in non-production local storage mode
 evidence_storage_mode = os.getenv("EVIDENCE_STORAGE", "local").strip().lower()
@@ -145,8 +150,9 @@ app.include_router(ws_proctoring.router)
 app.include_router(ws_signaling.router)
 app.include_router(questions.router)
 app.include_router(analytics.router)
-from .routes import profile
+from .routes import profile, telemetry
 app.include_router(profile.router)
+app.include_router(telemetry.router)
 
 
 @app.get("/")

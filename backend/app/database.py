@@ -363,3 +363,31 @@ def ensure_schema_compatibility() -> None:
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_attempts_exam_id ON exam_attempts (exam_id)"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_attempts_student_id ON exam_attempts (student_id)"))
                 connection.execute(text("PRAGMA foreign_keys=ON"))
+
+        # Numbers and short strings only: NO audio, NO images, NO tokens, NO emails, NO answer text.
+        if "session_events" not in tables:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE session_events (
+                        id VARCHAR(36) NOT NULL PRIMARY KEY,
+                        trace_id VARCHAR(64) NOT NULL,
+                        session_id VARCHAR(36),
+                        exam_id VARCHAR(36),
+                        student_id VARCHAR(128) NOT NULL,
+                        seq INTEGER NOT NULL,
+                        client_ts BIGINT,
+                        server_ts DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        category VARCHAR(32) NOT NULL,
+                        name VARCHAR(64) NOT NULL,
+                        data JSON,
+                        request_id VARCHAR(64)
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_trace_id_seq ON session_events (trace_id, seq)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_session_id_server_ts ON session_events (session_id, server_ts)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_trace_id ON session_events (trace_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_session_id ON session_events (session_id)"))
+
