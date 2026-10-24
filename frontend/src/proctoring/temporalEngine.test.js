@@ -147,6 +147,14 @@ describe('NO_FACE / MULTIPLE_FACES', () => {
     expect(events[0].severity).toBe('major');
   });
 
+  it('2 faces for 3 s emits exactly one MULTIPLE_FACES', () => {
+    const engine = createTemporalEngine();
+    const events = run(engine, { durationMs: 8000, sample: (t) => ({ faceCount: t >= 2000 && t < 5000 ? 2 : 1 }) });
+    const multi = events.filter((e) => e.type === 'MULTIPLE_FACES');
+    expect(multi).toHaveLength(1);
+    expect(multi[0].severity).toBe('major');
+  });
+
   it('a 0.6 s second face does not emit MULTIPLE_FACES', () => {
     const engine = createTemporalEngine();
     const events = run(engine, { durationMs: 6000, sample: (t) => ({ faceCount: t >= 2000 && t < 2600 ? 2 : 1 }) });
@@ -164,6 +172,23 @@ describe('objects', () => {
     }
     expect(typesOf(events)).toEqual(['PHONE_DETECTED']);
     expect(events[0]).toMatchObject({ severity: 'major', confidence: 0.72 });
+  });
+
+  it('a half-visible phone with score 0.38 emits PHONE_DETECTED (threshold 0.35)', () => {
+    const engine = createTemporalEngine();
+    const events = [];
+    for (let t = 0; t < 5000; t += 700) {
+      const detections = t >= 1000 && t < 3000 ? [{ categoryName: 'cell phone', score: 0.38 }] : [];
+      events.push(...engine.pushObjects({ ts: t, detections }));
+    }
+    expect(typesOf(events)).toEqual(['PHONE_DETECTED']);
+    expect(events[0]).toMatchObject({ severity: 'major', confidence: 0.38 });
+  });
+
+  it('phone detections below threshold 0.35 do not trigger PHONE_DETECTED', () => {
+    const engine = createTemporalEngine();
+    const weak = [0, 700, 1400].flatMap((ts) => engine.pushObjects({ ts, detections: [{ categoryName: 'cell phone', score: 0.28 }] }));
+    expect(weak).toEqual([]);
   });
 
   it('two book detections within 4 s emit BOOK_DETECTED; low scores do not', () => {

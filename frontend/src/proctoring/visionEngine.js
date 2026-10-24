@@ -37,8 +37,8 @@ const faceOptions = (delegate) => ({
   outputFacialTransformationMatrixes: true,
 });
 
-const OBJECT_SCORE_THRESHOLD = 0.3;
-const OBJECT_MAX_RESULTS = 5;
+export const OBJECT_SCORE_THRESHOLD = 0.2;
+export const OBJECT_MAX_RESULTS = 5;
 
 const objectOptions = (delegate, modelAssetPath) => ({
   baseOptions: { modelAssetPath, delegate },

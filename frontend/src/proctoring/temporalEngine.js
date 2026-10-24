@@ -25,7 +25,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   objects: {
     windowMs: 4_000,
     minDetections: 2,
-    minScore: 0.5,
+    minScore: 0.35,
+    categoryThresholds: { 'cell phone': 0.35, book: 0.5 },
     categories: { 'cell phone': 'PHONE_DETECTED', book: 'BOOK_DETECTED' },
   },
   // mode: 'off' | 'shadow' (computed, never reported) | 'on'
@@ -88,6 +89,7 @@ export function createTemporalEngine(overrides = {}) {
   let micMutedSince = null;
   let micTrackEnded = false;
   let lastAudioTs = null;
+  let lastVoiceDroppedReason = null;
   const episodes = {};
 
   // ---------- camera state (precedence) ----------
@@ -242,14 +244,40 @@ export function createTemporalEngine(overrides = {}) {
     evaluateMic(events, now);
     if (micSuspended(now)) {
       sample.impaired = true;
+      lastVoiceDroppedReason = 'mic_suspended';
       return events;
     }
+
+    const audioWin = windowOf(audioHistory, now, config.voice.windowMs);
+    const hits = audioWin.length >= config.voice.minSamples
+      ? audioWin.filter((s) => s.speechScore >= config.voice.scoreThreshold)
+      : [];
+    const ratio = audioWin.length ? hits.length / audioWin.length : 0;
+    const isTrue = audioWin.length >= config.voice.minSamples && ratio >= config.voice.ratio;
+
+    if (!isTrue) {
+      if (audioWin.length < config.voice.minSamples) {
+        lastVoiceDroppedReason = `insufficient_samples (${audioWin.length}/${config.voice.minSamples})`;
+      } else if (ratio < config.voice.ratio) {
+        lastVoiceDroppedReason = `speech_ratio_below_threshold (${Math.round(ratio * 100)}% < ${Math.round(config.voice.ratio * 100)}%)`;
+      }
+    } else {
+      const ep = episodeOf('VOICE_DETECTED');
+      if (ep.active) {
+        lastVoiceDroppedReason = 'episode_already_open';
+      } else if (ep.lastEndTs !== null && now - ep.lastEndTs < config.episode.minGapMs) {
+        lastVoiceDroppedReason = `cooldown_active (within ${config.episode.minGapMs}ms gap)`;
+      } else {
+        lastVoiceDroppedReason = null;
+      }
+    }
+
     ratioRule(
       events,
       now,
       'VOICE_DETECTED',
       config.voice,
-      windowOf(audioHistory, now, config.voice.windowMs),
+      audioWin,
       (s) => s.speechScore >= config.voice.scoreThreshold,
       (r) => `Voice detected in ${pct(r)} of samples over the last ${secs(config.voice.windowMs)}.`,
     );
@@ -344,7 +372,8 @@ export function createTemporalEngine(overrides = {}) {
       const hits = [];
       for (const s of w) {
         const best = Math.max(0, ...s.detections.filter((d) => d.categoryName === category).map((d) => d.score));
-        if (best >= rule.minScore) hits.push({ ts: s.ts, score: best });
+        const threshold = rule.categoryThresholds?.[category] ?? rule.minScore;
+        if (best >= threshold) hits.push({ ts: s.ts, score: best });
       }
       const latestHit = hits.length > 0 && hits[hits.length - 1].ts === now;
       observe(events, type, hits.length >= rule.minDetections, now, () => {
@@ -467,6 +496,12 @@ export function createTemporalEngine(overrides = {}) {
         objects: structuredClone(objectHistory),
         audio: structuredClone(audioHistory),
       };
+    },
+
+    getEpisodes: () => structuredClone(episodes),
+    getLastVoiceDroppedReason: () => lastVoiceDroppedReason,
+    setVoiceDroppedReason: (reason) => {
+      lastVoiceDroppedReason = reason;
     },
 
     /** Test/diagnostic helper. */
