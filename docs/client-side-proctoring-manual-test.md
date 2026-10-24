@@ -136,6 +136,12 @@ backend.
 | G3 | Create an exam with **On Scheduled Date** (`scheduled`) in the future. Student submits. | Confirmation screen displays "Results will be published on [Date]". Score is hidden. Student dashboard shows **Result pending release** and button **Result Not Published**. Calling `GET /results/{exam_id}` returns **HTTP 403** with clear release date message. Once scheduled date/time passes, results become visible automatically. |
 | G4 | Create an exam with **Manual Release by Instructor** (`manual`). Student submits. | Score is hidden; endpoints return **HTTP 403** `"Results have not been released by the instructor yet"`. Instructor navigates to exam management and clicks **Publish Results** (`PATCH /exams/{id}/publish-results`). Results immediately become visible to student. |
 
+### H. Server Outage & WebSocket Recovery (Render Sleep / Restart)
+
+| # | Action | Expected |
+|---|---|---|
+| H1 | Stop the backend mid-exam for 40 s, then restart it | While backend is down: student portal displays non-blocking banner ("Reconnecting… your answers are kept and will sync once the connection is restored."); teacher dashboard displays "Live updates reconnecting…" indicator; student answers still save locally / queue. Once backend restarts: student socket recovers by itself with exponential backoff and sends immediate vision heartbeat; zero false violations created (30 s grace prevents `PROCTORING_STOPPED`); student banner disappears; teacher dashboard recovers, refetches sessions list over REST to catch up on missed events, and resumes live updates. |
+
 ## What to send back
 
 - The recording sheet.

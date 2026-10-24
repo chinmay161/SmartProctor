@@ -73,7 +73,7 @@ class ConnectionManager:
     async def connect_student(self, session_id: str, exam_id: str, ws: WebSocket):
         await ws.accept()
         old_ws = self.student_connections.get(session_id)
-        if old_ws and getattr(old_ws, "client_state", None) == WebSocketState.CONNECTED:
+        if old_ws and old_ws != ws:
             try:
                 await old_ws.close(code=4000)
             except Exception:
@@ -87,6 +87,11 @@ class ConnectionManager:
 
     async def connect_proctor(self, exam_id: str, ws: WebSocket):
         await ws.accept()
+        # Prune any stale / closed sockets before appending new proctor connection
+        self.proctor_connections[exam_id] = [
+            p for p in self.proctor_connections.get(exam_id, [])
+            if getattr(p, "client_state", None) == WebSocketState.CONNECTED and p != ws
+        ]
         self.proctor_connections[exam_id].append(ws)
         self._ensure_broadcaster(exam_id)
         self._ensure_offline_sweeper()

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 @dataclass
 class _SessionState:
     connected_at: float
+    last_connected_at: float
     armed: bool = False
     bad_since: float | None = None
     fired_this_outage: bool = False
@@ -21,13 +22,21 @@ class VisionWatchdog:
     ARM_GRACE_SEC = 60.0      # arm even without a healthy report after this long
     COOLDOWN_SEC = 10.0       # same per-type cooldown the client uses
     INFERENCE_STALE_MS = 10_000  # "running" but no inference for this long counts as stopped
+    RECONNECT_GRACE_SEC = 30.0  # no violation fired within 30s of (re)connect
+    SERVER_START_GRACE_SEC = 30.0  # no violation fired within 30s of server start
 
-    def __init__(self):
+    def __init__(self, started_at: float | None = None):
         self._sessions: dict[str, _SessionState] = {}
+        self._started_at: float | None = started_at
 
     def observe_connect(self, session_id: str, now: float) -> None:
-        # Only the first connect starts the grace period; reconnecting must not reset it.
-        self._sessions.setdefault(session_id, _SessionState(connected_at=now))
+        if self._started_at is None:
+            self._started_at = now
+        state = self._sessions.get(session_id)
+        if state is None:
+            self._sessions[session_id] = _SessionState(connected_at=now, last_connected_at=now)
+        else:
+            state.last_connected_at = now
 
     def forget(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
@@ -54,9 +63,12 @@ class VisionWatchdog:
 
     def observe(self, session_id: str, telemetry, now: float) -> bool:
         """Record one heartbeat. Returns True when PROCTORING_STOPPED should fire."""
+        if self._started_at is None:
+            self._started_at = now
+
         state = self._sessions.get(session_id)
         if state is None:
-            state = _SessionState(connected_at=now)
+            state = _SessionState(connected_at=now, last_connected_at=now)
             self._sessions[session_id] = state
 
         if self.is_healthy(telemetry):
@@ -74,6 +86,13 @@ class VisionWatchdog:
 
         if state.bad_since is None:
             state.bad_since = now
+            return False
+
+        # Grace checks: do not fire within 30s of server start or (re)connect
+        if now - self._started_at < self.SERVER_START_GRACE_SEC:
+            return False
+
+        if now - state.last_connected_at < self.RECONNECT_GRACE_SEC:
             return False
 
         if state.fired_this_outage or now - state.bad_since <= self.STOPPED_AFTER_SEC:

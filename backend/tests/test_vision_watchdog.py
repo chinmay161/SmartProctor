@@ -69,12 +69,60 @@ def test_grace_period_before_first_healthy_report():
     assert fired == [60]
 
 
-def test_reconnect_does_not_reset_grace():
+def test_reconnect_does_not_fire_within_30s_grace():
     wd = VisionWatchdog()
     wd.observe_connect("s", 0)
     feed(wd, "s", None, 0, 40)
     wd.observe_connect("s", 45)
-    assert feed(wd, "s", None, 45, 70) == [60]
+    # Reconnecting at 45 provides 30s grace: cannot fire at 45..70 (e.g. 60)
+    assert feed(wd, "s", None, 45, 70) == []
+    # Fires at 75 (first heartbeat >= 30s from reconnect)
+    assert wd.observe("s", None, 75) is True
+
+
+def test_server_start_provides_30s_grace():
+    # Server starts at t=100
+    wd = VisionWatchdog(started_at=100.0)
+    wd.observe_connect("s", 100.0)
+    wd.observe("s", HEALTHY, 100.0)
+    # Telemetry stops at 105
+    assert feed(wd, "s", STOPPED, 105, 125) == []
+    assert feed(wd, "s", STOPPED, 130, 140) == [140]
+
+
+def test_reconnecting_student_replaces_stale_connection_cleanly():
+    import asyncio
+    from app.websocket.manager import ConnectionManager
+    from starlette.websockets import WebSocketState
+
+    class FakeWS:
+        def __init__(self):
+            self.client_state = WebSocketState.CONNECTED
+            self.closed_code = None
+
+        async def accept(self):
+            pass
+
+        async def close(self, code=1000):
+            self.closed_code = code
+            self.client_state = WebSocketState.DISCONNECTED
+
+    mgr = ConnectionManager()
+    ws1 = FakeWS()
+    ws2 = FakeWS()
+
+    asyncio.run(mgr.connect_student("session_1", "exam_1", ws1))
+    assert mgr.student_connections["session_1"] is ws1
+
+    # Reconnect for same session with ws2 replaces ws1 and closes it cleanly
+    asyncio.run(mgr.connect_student("session_1", "exam_1", ws2))
+    assert mgr.student_connections["session_1"] is ws2
+    assert ws1.closed_code == 4000
+    assert ws1.client_state == WebSocketState.DISCONNECTED
+
+    # Delayed disconnect from old socket does not drop the new connection
+    mgr.disconnect_student("session_1", ws1)
+    assert mgr.student_connections["session_1"] is ws2
 
 
 def test_rearms_after_recovery_and_respects_cooldown():
