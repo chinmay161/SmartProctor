@@ -60,4 +60,6 @@ services:
         sync: false
       - key: LOG_HASH_SALT
         sync: false
+      - key: EVENT_RETENTION_DAYS
+        value: "30"
 
