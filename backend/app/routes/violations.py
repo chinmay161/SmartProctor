@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
+from ..auth.dependencies import canonicalize_role, get_current_user
 from ..auth.roles import require_role
 from ..database import SessionLocal
 from ..models.exam_attempt import ExamAttempt
@@ -7,6 +8,7 @@ from ..models.exam_session import ExamSession
 from ..models.violation import Violation
 from ..schemas.violation import ViolationIngestRequest, ViolationIngestResponse
 from ..services.attempt_service import ingest_violation
+from ..services.evidence_storage import get_evidence_storage, resolve_evidence_field
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
 
@@ -86,16 +88,50 @@ def ingest_violation_endpoint(
 
 
 @router.get("/session/{session_id}")
-def list_violations(session_id: str, user=Depends(require_role("teacher"))):
+def list_violations(session_id: str, user=Depends(get_current_user)):
     db = SessionLocal()
     try:
+        session = db.query(ExamSession).filter_by(id=session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+        is_staff = bool(roles.intersection({"teacher", "admin", "school_admin", "proctor"}))
+        is_owner = (session.student_id == user.get("sub"))
+
+        if not (is_staff or is_owner):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+
         violations = (
             db.query(Violation)
             .filter_by(session_id=session_id)
             .order_by(Violation.created_at.desc())
             .all()
         )
-        return violations
+        storage = get_evidence_storage()
+        results = []
+        for v in violations:
+            results.append({
+                "id": str(v.id),
+                "session_id": v.session_id,
+                "attempt_id": v.attempt_id,
+                "student_id": v.student_id,
+                "type": v.type,
+                "severity": v.severity,
+                "source": v.source,
+                "timestamp": v.timestamp.isoformat() if v.timestamp else None,
+                "count": v.count,
+                "details": v.details,
+                "reason": v.reason,
+                "duration_ms": v.duration_ms,
+                "metadata": v.metadata_,
+                "evidence_files": resolve_evidence_field(v.evidence_files, storage),
+                "dispute_status": v.dispute_status,
+                "dispute_reason": v.dispute_reason,
+                "integrity_deduction": v.integrity_deduction,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+            })
+        return results
     finally:
         db.close()
 

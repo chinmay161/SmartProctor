@@ -164,22 +164,28 @@ def report_violation(
             
         evidence_path = None
         if payload.image:
+            header, encoded = payload.image.split(",", 1) if "," in payload.image else ("", payload.image)
             try:
-                # Ensure directory exists
-                evidence_dir = os.path.join("data", "evidence")
-                os.makedirs(evidence_dir, exist_ok=True)
-                
-                # Decode base64 
-                header, encoded = payload.image.split(",", 1) if "," in payload.image else ("", payload.image)
                 image_data = base64.b64decode(encoded)
-                filename = f"{session_id}_{uuid.uuid4().hex[:8]}.jpg"
-                filepath = os.path.join(evidence_dir, filename)
-                
-                with open(filepath, "wb") as f:
-                    f.write(image_data)
-                evidence_path = f"/evidence/{filename}"
+            except Exception:
+                raise HTTPException(400, "Invalid base64 image data")
+
+            if len(image_data) > 1 * 1024 * 1024:
+                raise HTTPException(400, "Evidence image exceeds 1MB limit")
+
+            if not image_data.startswith(b"\xff\xd8\xff"):
+                raise HTTPException(400, "Evidence image must be a valid JPEG")
+
+            from ..services.evidence_storage import get_evidence_storage
+            storage = get_evidence_storage()
+            exam_id_segment = session.exam_id or "unknown"
+            key = f"evidence/{exam_id_segment}/{session_id}/{uuid.uuid4().hex}.jpg"
+            try:
+                evidence_path = storage.save(image_data, key)
             except Exception as e:
-                print(f"Failed to save evidence snapshot: {e}")
+                import logging
+                logging.getLogger(__name__).warning("Failed to save evidence snapshot: %s", type(e).__name__)
+                evidence_path = None
 
         updated, message = record_violation(
             db,
@@ -258,6 +264,8 @@ def get_session_timeline(session_id: str, user=Depends(require_teacher_or_admin)
             })
             
         # Merge violations (if not sufficiently covered by audit logs, or to provide evidence)
+        from ..services.evidence_storage import get_evidence_storage
+        storage = get_evidence_storage()
         for v in violations:
             evidence = []
             if v.evidence_files:
@@ -265,6 +273,7 @@ def get_session_timeline(session_id: str, user=Depends(require_teacher_or_admin)
                     evidence = json.loads(v.evidence_files) if '[' in v.evidence_files else [v.evidence_files]
                 except:
                     evidence = [v.evidence_files]
+            resolved_evidence = [storage.resolve_url(item) for item in evidence if item]
                     
             timeline.append({
                 "timestamp": v.timestamp.isoformat(),
@@ -275,7 +284,7 @@ def get_session_timeline(session_id: str, user=Depends(require_teacher_or_admin)
                     "severity": v.severity,
                     "reason": v.reason,
                     "duration_ms": v.duration_ms,
-                    "evidence": evidence,
+                    "evidence": resolved_evidence,
                     "dispute_status": v.dispute_status
                 },
                 "source": "violation"

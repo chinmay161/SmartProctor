@@ -22,3 +22,5 @@ APScheduler==3.11.0
 alembic==1.17.1
 reportlab==4.4.9
 tzdata==2026.5
+psycopg[binary]==3.3.6
+boto3==1.43.118
