@@ -55,6 +55,25 @@ export function calculateRms(samples) {
   return Math.sqrt(sum / samples.length);
 }
 
+/** Linear-interpolation resampler for mono Float32 audio to 16 kHz. */
+export function resampleAudio(inputSamples, sourceRate, targetRate = 16000) {
+  if (!inputSamples || inputSamples.length === 0) return new Float32Array(0);
+  if (sourceRate === targetRate) {
+    return new Float32Array(inputSamples);
+  }
+  const ratio = sourceRate / targetRate;
+  const targetLength = Math.floor(inputSamples.length / ratio);
+  const result = new Float32Array(targetLength);
+  for (let i = 0; i < targetLength; i += 1) {
+    const srcIndex = i * ratio;
+    const i0 = Math.floor(srcIndex);
+    const i1 = Math.min(i0 + 1, inputSamples.length - 1);
+    const frac = srcIndex - i0;
+    result[i] = inputSamples[i0] * (1 - frac) + inputSamples[i1] * frac;
+  }
+  return result;
+}
+
 let tasksAudioModulePromise = null;
 export async function loadTasksAudio() {
   if (!tasksAudioModulePromise) {
@@ -75,6 +94,8 @@ export async function createAudioClassifier() {
 }
 
 export function createAudioEngine({
+  classifier: initialClassifier = null,
+  sourceSampleRate = null,
   onSample = () => {},
   onTrackEvent = () => {},
   onLevel = () => {},
@@ -84,8 +105,8 @@ export function createAudioEngine({
   let audioContext = null;
   let sourceNode = null;
   let processorNode = null;
-  let classifier = null;
-  let running = false;
+  let classifier = initialClassifier;
+  let running = Boolean(initialClassifier);
   let disposed = false;
   let recovering = false;
   let recoveryTimer = null;
@@ -95,6 +116,8 @@ export function createAudioEngine({
   let lastSample = null;
   let lastAudioAt = null;
   let currentLevel = 0;
+  let samplesCount = 0;
+  let lastTopCategory = null;
 
   let longTaskCount = 0;
   let maxMainThreadMs = 0;
@@ -240,22 +263,26 @@ export function createAudioEngine({
     let workletSuccess = false;
     if (typeof audioContext.audioWorklet?.addModule === 'function') {
       try {
-        const workletCode = `
-          class AudioCollectorProcessor extends AudioWorkletProcessor {
-            process(inputs) {
-              const input = inputs[0];
-              if (input && input[0]) {
-                this.port.postMessage(input[0]);
+        try {
+          await audioContext.audioWorklet.addModule('/audioCollectorProcessor.js');
+        } catch {
+          const workletCode = `
+            class AudioCollectorProcessor extends AudioWorkletProcessor {
+              process(inputs) {
+                const input = inputs[0];
+                if (input && input[0]) {
+                  this.port.postMessage(input[0]);
+                }
+                return true;
               }
-              return true;
             }
-          }
-          registerProcessor('audio-collector-processor', AudioCollectorProcessor);
-        `;
-        const blob = new Blob([workletCode], { type: 'application/javascript' });
-        const url = URL.createObjectURL(blob);
-        await audioContext.audioWorklet.addModule(url);
-        URL.revokeObjectURL(url);
+            registerProcessor('audio-collector-processor', AudioCollectorProcessor);
+          `;
+          const blob = new Blob([workletCode], { type: 'application/javascript' });
+          const url = URL.createObjectURL(blob);
+          await audioContext.audioWorklet.addModule(url);
+          setTimeout(() => URL.revokeObjectURL(url), 2000);
+        }
 
         const workletNode = new AudioWorkletNode(audioContext, 'audio-collector-processor');
         workletNode.port.onmessage = (event) => {
@@ -289,26 +316,29 @@ export function createAudioEngine({
     }
   }
 
-  function handlePcmChunk(pcmData) {
+  function handlePcmChunk(pcmData, rateOverride = null) {
     if (!running || disposed || !pcmData) return;
     const rms = calculateRms(pcmData);
     emitLevel(rms);
 
-    // Collect mono samples in the buffer
-    for (let i = 0; i < pcmData.length; i += 1) {
-      samplesBuffer.push(pcmData[i]);
+    const sourceRate = rateOverride || audioContext?.sampleRate || sourceSampleRate || 48000;
+    const resampled = resampleAudio(pcmData, sourceRate, 16000);
+
+    // Collect mono 16kHz samples in the buffer
+    for (let i = 0; i < resampled.length; i += 1) {
+      samplesBuffer.push(resampled[i]);
     }
 
-    const targetRate = audioContext?.sampleRate || 16000;
-    // When buffer reaches ~1 second of samples, trigger classification
-    if (samplesBuffer.length >= targetRate) {
-      const chunk = new Float32Array(samplesBuffer.slice(0, targetRate));
-      samplesBuffer = samplesBuffer.slice(targetRate);
-      performClassification(chunk, targetRate);
+    // YAMNet model standard window is 15600 samples (0.975 s) at 16 kHz
+    const TARGET_CHUNK_SIZE = 15600;
+    if (samplesBuffer.length >= TARGET_CHUNK_SIZE) {
+      const chunk = new Float32Array(samplesBuffer.slice(0, TARGET_CHUNK_SIZE));
+      samplesBuffer = samplesBuffer.slice(TARGET_CHUNK_SIZE);
+      performClassification(chunk, 16000);
     }
   }
 
-  function performClassification(chunk, sampleRate) {
+  function performClassification(chunk, sampleRate = 16000) {
     if (!classifier || !running || disposed) return;
     const t0 = performance.now();
     let results = null;
@@ -328,14 +358,25 @@ export function createAudioEngine({
     }
 
     let speechScore = 0;
+    let topCategory = null;
+    let topScore = 0;
+
     if (results && results.length > 0) {
       for (const classification of results[0]?.classifications || []) {
         for (const cat of classification?.categories || []) {
+          if (cat.score > topScore) {
+            topScore = cat.score;
+            topCategory = cat.categoryName;
+          }
           if (SPEECH_CATEGORY_SET.has(cat?.categoryName)) {
             if (cat.score > speechScore) speechScore = cat.score;
           }
         }
       }
+    }
+
+    if (import.meta.env.DEV) {
+      console.debug(`[audioEngine] classification: top="${topCategory}" (${topScore.toFixed(3)}), speechScore=${speechScore.toFixed(3)}`);
     }
 
     const chunkRms = calculateRms(chunk);
@@ -347,11 +388,15 @@ export function createAudioEngine({
       ambientNoiseFloor = 0.99 * ambientNoiseFloor + 0.01 * chunkRms;
     }
 
-    emitSample({
-      ts: Date.now(),
+    lastAudioAt = performance.now();
+    samplesCount += 1;
+    lastTopCategory = topCategory;
+    lastSample = {
+      ts: lastAudioAt,
       speechScore: Math.round(speechScore * 100) / 100,
       rms: Math.round(chunkRms * 1000) / 1000,
-    });
+    };
+    emitSample(lastSample);
   }
 
   async function requestMic() {
@@ -372,20 +417,34 @@ export function createAudioEngine({
   }
 
   async function start() {
-    if (running) return;
-    running = true;
-    if (!classifier) {
-      try {
+    try {
+      if (!classifier) {
         classifier = await createAudioClassifier();
-      } catch (err) {
-        console.error('[audioEngine] Failed to load YAMNet audio classifier:', err);
       }
+      const hasLiveTrack = stream?.getAudioTracks()?.some((t) => t.readyState === 'live');
+      if (!stream || !hasLiveTrack) {
+        const req = await requestMic();
+        if (!req.ok) {
+          throw new Error(req.error || 'Failed to acquire microphone stream');
+        }
+      }
+      if (audioContext && audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+      running = true;
+    } catch (err) {
+      running = false;
+      console.error('[audioEngine] Audio engine start failed:', err);
+      throw err;
     }
-    if (!stream) {
-      await requestMic();
-    }
+  }
+
+  async function resume() {
     if (audioContext && audioContext.state === 'suspended') {
-      await audioContext.resume().catch(() => {});
+      try { await audioContext.resume(); } catch { /* ignore */ }
+    }
+    if (!running) {
+      await start();
     }
   }
 
@@ -424,8 +483,14 @@ export function createAudioEngine({
   return {
     requestMic,
     start,
+    resume,
     stop,
     dispose,
+    isReady: () => Boolean(classifier && stream && running && audioContext && audioContext.state !== 'closed'),
+    isRunning: () => Boolean(running && stream && (!audioContext || audioContext.state === 'running') && stream.getAudioTracks().some((t) => t.readyState === 'live')),
+    getAudioContextState: () => audioContext?.state || null,
+    getTrackReadyState: () => stream?.getAudioTracks()?.[0]?.readyState || null,
+    processChunkForTest: (pcm, rate) => handlePcmChunk(pcm, rate),
     onSample: (cb) => {
       sampleCallbacks.add(cb);
       return () => sampleCallbacks.delete(cb);
@@ -442,10 +507,12 @@ export function createAudioEngine({
     getLevel: () => currentLevel,
     getNoiseFloor: () => ambientNoiseFloor,
     getTelemetry: () => ({
-      running: running && (!audioContext || audioContext.state === 'running'),
+      running: Boolean(running && (!audioContext || audioContext.state === 'running') && stream?.getAudioTracks()?.some((t) => t.readyState === 'live')),
       speechScore: lastSample?.speechScore ?? 0,
       rms: lastSample?.rms ?? 0,
       lastAudioAt,
+      samplesCount,
+      lastTopCategory,
       longTaskCount,
       maxInferenceMs: Math.round(maxMainThreadMs),
     }),
