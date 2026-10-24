@@ -64,13 +64,14 @@ def exam_requires_camera(wizard_config: dict | None, rules: ExamRules | None) ->
 def exam_requires_mic(wizard_config: dict | None, rules: ExamRules | None) -> bool:
     """Single source of truth for whether an exam needs the microphone.
 
-    An explicit ExamRules row wins; otherwise fall back to wizard_config.audioMonitoring.
+    A ticked audioMonitoring in wizard_config always results in mic_required=True.
+    Otherwise fall back to an explicit rules.mic_required if present.
     """
+    if isinstance(wizard_config, dict) and bool(wizard_config.get("audioMonitoring")):
+        return True
     if rules is not None:
         return bool(rules.mic_required)
-    if not isinstance(wizard_config, dict):
-        return False
-    return bool(wizard_config.get("audioMonitoring"))
+    return False
 
 
 

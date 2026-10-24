@@ -62,9 +62,13 @@ def test_mic_wizard_expression_when_no_rules_row(wizard, expected):
     assert exam_requires_mic(wizard, None) is expected
 
 
-def test_mic_rules_row_wins_over_wizard():
-    assert exam_requires_mic({"audioMonitoring": True}, ExamRules(exam_id="e", mic_required=False)) is False
+def test_mic_audio_monitoring_wins_over_rules_row():
+    # A ticked audioMonitoring always results in mic_required=True
+    assert exam_requires_mic({"audioMonitoring": True}, ExamRules(exam_id="e", mic_required=False)) is True
+    # If not ticked in wizard, explicit rules row wins
     assert exam_requires_mic({}, ExamRules(exam_id="e", mic_required=True)) is True
+    assert exam_requires_mic({"audioMonitoring": False}, ExamRules(exam_id="e", mic_required=True)) is True
+    assert exam_requires_mic({}, ExamRules(exam_id="e", mic_required=False)) is False
 
 
 def test_exam_response_exposes_mic_required(db):
@@ -74,8 +78,9 @@ def test_exam_response_exposes_mic_required(db):
     assert _serialize_exam(exam).mic_required is True
     assert mic_required_for_exam(db, exam) is True
 
+    # Even with rules row having mic_required=False, ticked audioMonitoring keeps mic_required=True
     db.add(ExamRules(exam_id=exam.id, mic_required=False))
     db.commit()
-    assert _serialize_exam(exam).mic_required is False
-    assert mic_required_for_exam(db, exam) is False
+    assert _serialize_exam(exam).mic_required is True
+    assert mic_required_for_exam(db, exam) is True
 
