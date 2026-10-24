@@ -124,10 +124,15 @@ const StudentResultReviewPage = () => {
         {!loading && review && (
           <div className="space-y-4">
             <div className="bg-card border border-border rounded-lg p-4 flex flex-wrap gap-4 items-center justify-between">
-              <div className="text-sm text-foreground">
-                <span className="font-medium">Status:</span> {review.status}
-                <span className="mx-3 text-muted-foreground">|</span>
-                <span className="font-medium">Score:</span> {review.score ?? 0} / {review.max_score_total ?? 0}
+              <div className="text-sm text-foreground flex items-center flex-wrap gap-2">
+                <span><span className="font-medium">Status:</span> {review.status}</span>
+                <span className="text-muted-foreground">|</span>
+                <span><span className="font-medium">Score:</span> {review.score ?? 0} / {review.max_score_total ?? 0}</span>
+                {(review.is_provisional || review.status === 'PARTIALLY_EVALUATED') && (
+                  <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-warning/15 text-warning border border-warning/30">
+                    {review.provisional_message || 'Provisional — manual grading pending'}
+                  </span>
+                )}
               </div>
             </div>
 

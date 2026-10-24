@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useState, useCallback } from 'react';
+import React, { lazy, Suspense, useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useSession, useCurrentUser } from '../../../context/SessionContext';
@@ -99,11 +99,17 @@ const StatusBadge = ({ status }) => {
 const ExamCard = ({ exam, nowTs, onStart, delay }) => {
   const startTime   = exam?.start_time ? new Date(exam.start_time) : null;
   const hasStart    = Boolean(startTime && !Number.isNaN(startTime.getTime()));
-  const canStart    = !hasStart || nowTs >= startTime.getTime();
+  const isStarted   = !hasStart || nowTs >= startTime.getTime();
+  const maxAttempts = Number(exam?.max_attempts ?? exam?.wizard_config?.maxAttempts ?? 1);
+  const attemptsUsed = Number(exam?.attempts_used ?? 0);
+  const isResume    = Boolean(exam?.has_in_progress);
+  const canStart    = isResume || isStarted;
+  const attemptNum  = isResume ? (attemptsUsed + 1) : Math.min(attemptsUsed + 1, maxAttempts);
+
   const startLabel  = hasStart
     ? `${formatIstDateTime(exam.start_time, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' })} IST`
     : 'Open access';
-  const timeUntil   = hasStart && !canStart
+  const timeUntil   = hasStart && !isStarted && !isResume
     ? (() => {
         const d = startTime.getTime() - nowTs;
         const h = Math.floor(d / 3600000);
@@ -121,12 +127,22 @@ const ExamCard = ({ exam, nowTs, onStart, delay }) => {
       <div style={{
         position: 'absolute', left: 0, top: '20%', bottom: '20%',
         width: '3px', borderRadius: '0 3px 3px 0',
-        background: canStart ? 'var(--sp-accent)' : 'var(--color-border)',
+        background: canStart ? (isResume ? '#F59E0B' : 'var(--sp-accent)') : 'var(--color-border)',
         transition: 'background 0.3s',
       }} />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center',
+              padding: '2px 8px', borderRadius: '6px',
+              background: 'rgba(59,130,246,0.1)', color: '#3B82F6',
+              fontFamily: 'var(--font-body)', fontSize: '0.74rem', fontWeight: 600,
+            }}>
+              Attempt {attemptNum} of {maxAttempts}
+            </span>
+          </div>
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--color-foreground)', marginBottom: '4px', lineHeight: 1.25 }}>
             {exam.title}
           </h3>
@@ -134,7 +150,7 @@ const ExamCard = ({ exam, nowTs, onStart, delay }) => {
             {exam.description || 'No description available'}
           </p>
         </div>
-        <StatusBadge status={canStart ? 'available' : 'scheduled'} />
+        <StatusBadge status={isResume ? 'in_progress' : (canStart ? 'available' : 'scheduled')} />
       </div>
 
       {/* Meta row */}
@@ -168,18 +184,121 @@ const ExamCard = ({ exam, nowTs, onStart, delay }) => {
         style={{
           width: '100%', padding: '10px',
           borderRadius: '9px',
-          background: canStart ? 'var(--sp-accent)' : 'var(--color-muted)',
+          background: canStart ? (isResume ? '#F59E0B' : 'var(--sp-accent)') : 'var(--color-muted)',
           color: canStart ? '#fff' : 'var(--color-muted-foreground)',
           fontFamily: 'var(--font-body)', fontSize: '0.88rem', fontWeight: 600,
           border: 'none', cursor: canStart ? 'pointer' : 'not-allowed',
           transition: 'background 0.2s, transform 0.15s, box-shadow 0.2s',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
         }}
-        onMouseEnter={e => { if (canStart) { e.currentTarget.style.background = 'var(--sp-accent-hover)'; e.currentTarget.style.boxShadow = '0 0 18px var(--sp-accent-glow)'; e.currentTarget.style.transform = 'scale(1.01)'; } }}
-        onMouseLeave={e => { e.currentTarget.style.background = canStart ? 'var(--sp-accent)' : 'var(--color-muted)'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'scale(1)'; }}
+        onMouseEnter={e => {
+          if (canStart) {
+            e.currentTarget.style.background = isResume ? '#D97706' : 'var(--sp-accent-hover)';
+            e.currentTarget.style.boxShadow = '0 0 18px var(--sp-accent-glow)';
+            e.currentTarget.style.transform = 'scale(1.01)';
+          }
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = canStart ? (isResume ? '#F59E0B' : 'var(--sp-accent)') : 'var(--color-muted)';
+          e.currentTarget.style.boxShadow = 'none';
+          e.currentTarget.style.transform = 'scale(1)';
+        }}
       >
         <Icon d={ICONS.play} size={15} />
-        {canStart ? 'Begin Exam' : 'Not Yet Available'}
+        {isResume ? 'Resume Exam' : (canStart ? 'Begin Exam' : 'Not Yet Available')}
+      </button>
+    </div>
+  );
+};
+
+/* ─── Completed exam card ─── */
+const CompletedExamCard = ({ item, onViewResult, delay }) => {
+  const maxAttempts = item.max_attempts || 1;
+  const isProv = Boolean(item.is_provisional || item.attempt_status === 'PARTIALLY_EVALUATED');
+  const scoreText = item.score != null ? `${item.score} / ${item.out_of ?? 0}` : null;
+
+  return (
+    <div
+      className="sp-card sp-fade-up"
+      style={{ padding: '20px 24px', animationDelay: delay, position: 'relative', overflow: 'hidden' }}
+    >
+      <div style={{
+        position: 'absolute', left: 0, top: '20%', bottom: '20%',
+        width: '3px', borderRadius: '0 3px 3px 0',
+        background: 'var(--color-border)',
+      }} />
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--color-foreground)', marginBottom: '4px', lineHeight: 1.25 }}>
+            {item.exam_title}
+          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              padding: '2px 8px', borderRadius: '6px',
+              background: 'rgba(239,68,68,0.1)', color: '#EF4444',
+              fontFamily: 'var(--font-body)', fontSize: '0.74rem', fontWeight: 600,
+            }}>
+              No attempts left
+            </span>
+            <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.74rem', color: 'var(--color-muted-foreground)' }}>
+              ({item.attempts_used || maxAttempts} of {maxAttempts} attempts used)
+            </span>
+          </div>
+        </div>
+        <StatusBadge status={item.attempt_status || 'completed'} />
+      </div>
+
+      {scoreText && (
+        <div style={{
+          padding: '10px 14px', borderRadius: '8px', background: 'rgba(59,130,246,0.06)',
+          border: '1px solid rgba(59,130,246,0.15)', marginBottom: '14px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px',
+        }}>
+          <div>
+            <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.74rem', color: 'var(--color-muted-foreground)', display: 'block' }}>Score</span>
+            <span style={{ fontFamily: 'var(--font-data)', fontSize: '1.05rem', color: 'var(--color-foreground)', fontWeight: 600 }}>{scoreText}</span>
+          </div>
+          {isProv && (
+            <span style={{
+              padding: '2px 8px', borderRadius: '6px',
+              background: 'rgba(245,158,11,0.15)', color: '#F59E0B',
+              border: '1px solid rgba(245,158,11,0.3)',
+              fontFamily: 'var(--font-body)', fontSize: '0.72rem', fontWeight: 500,
+            }}>
+              Provisional — manual grading pending
+            </span>
+          )}
+        </div>
+      )}
+
+      {!scoreText && (
+        <div style={{
+          padding: '8px 14px', borderRadius: '8px', background: 'var(--color-muted)',
+          marginBottom: '14px', fontFamily: 'var(--font-body)', fontSize: '0.78rem', color: 'var(--color-muted-foreground)',
+        }}>
+          Result pending release
+        </div>
+      )}
+
+      <button
+        onClick={() => onViewResult(item)}
+        disabled={!item?.can_view_result}
+        style={{
+          width: '100%', padding: '10px',
+          borderRadius: '9px',
+          background: item?.can_view_result ? 'rgba(59,130,246,0.12)' : 'var(--color-muted)',
+          color: item?.can_view_result ? 'var(--sp-accent)' : 'var(--color-muted-foreground)',
+          border: `1px solid ${item?.can_view_result ? 'rgba(59,130,246,0.3)' : 'var(--color-border)'}`,
+          fontFamily: 'var(--font-body)', fontSize: '0.88rem', fontWeight: 600,
+          cursor: item?.can_view_result ? 'pointer' : 'not-allowed',
+          transition: 'all 0.2s',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+        }}
+      >
+        <Icon d={ICONS.eye} size={15} />
+        {item?.can_view_result ? 'View Result' : 'Result Not Published'}
       </button>
     </div>
   );
@@ -191,6 +310,7 @@ const HistoryRow = ({ item, onViewResult, index }) => {
     ? new Date(item.submitted_at).toLocaleString('en-US', { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '—';
   const score = `${item?.score ?? '—'} / ${item?.out_of ?? 0}`;
+  const isProv = Boolean(item?.is_provisional || item?.attempt_status === 'PARTIALLY_EVALUATED');
 
   return (
     <tr
@@ -216,6 +336,11 @@ const HistoryRow = ({ item, onViewResult, index }) => {
       </td>
       <td style={{ padding: '14px 16px', fontFamily: 'var(--font-data)', fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-foreground)' }}>
         {score}
+        {isProv && (
+          <span style={{ display: 'block', fontSize: '0.7rem', fontWeight: 500, color: '#F59E0B', marginTop: '2px' }}>
+            Provisional — manual grading pending
+          </span>
+        )}
       </td>
       <td style={{ padding: '14px 16px', textAlign: 'right' }}>
         <button
@@ -260,6 +385,23 @@ const StudentDashboardExample = () => {
   const [nowTs, setNowTs] = useState(Date.now());
   const [activeTab, setActiveTab] = useState('exams'); // 'exams' | 'history' | 'account'
   const [showDeviceTest, setShowDeviceTest] = useState(false);
+
+  const completedExams = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    for (const h of examHistory) {
+      if (!seen.has(h.exam_id)) {
+        seen.add(h.exam_id);
+        const maxAttempts = h.max_attempts || 1;
+        const attemptsUsed = h.attempts_used || 1;
+        const isUsedUp = attemptsUsed >= maxAttempts || !exams.some((e) => e.id === h.exam_id);
+        if (isUsedUp) {
+          list.push(h);
+        }
+      }
+    }
+    return list;
+  }, [examHistory, exams]);
 
   const callApi = useCallback((path, method = 'GET', body = null) =>
     authAwareCall({ path, method, body, auth0Authenticated, getAccessTokenSilently, auth0Audience, fallbackPaths: [] }),
@@ -570,6 +712,29 @@ const StudentDashboardExample = () => {
                     delay={`${0.07 * i}s`}
                   />
                 ))}
+              </div>
+            )}
+
+            {completedExams.length > 0 && (
+              <div style={{ marginTop: '36px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                  <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.3rem', color: 'var(--color-foreground)', fontWeight: 400 }}>
+                    Completed Exams
+                    <span style={{ marginLeft: '10px', fontFamily: 'var(--font-body)', fontSize: '0.8rem', color: 'var(--color-muted-foreground)', fontWeight: 400 }}>
+                      {completedExams.length} exam{completedExams.length !== 1 ? 's' : ''}
+                    </span>
+                  </h2>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                  {completedExams.map((item, i) => (
+                    <CompletedExamCard
+                      key={item.exam_id}
+                      item={item}
+                      onViewResult={handleViewResult}
+                      delay={`${0.07 * i}s`}
+                    />
+                  ))}
+                </div>
               </div>
             )}
           </div>
