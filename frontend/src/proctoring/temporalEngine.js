@@ -15,6 +15,8 @@
 //   yaw   > 0 = head turned to the student's left, < 0 = to their right
 //   pitch > 0 = head tilted down,                  < 0 = tilted up
 import { VISION_VIOLATION_SEVERITY } from '../utils/violationSeverity';
+import { VIOLATION_DROP_REASONS } from '../telemetry/violationDropReasons';
+
 
 export const DEFAULT_CONFIG = Object.freeze({
   episode: { endAfterFalseMs: 3_000, prolongedAfterMs: 60_000, minGapMs: 10_000 },
@@ -73,7 +75,7 @@ const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
 const signed = (deg) => `${deg >= 0 ? '+' : ''}${Math.round(deg)}°`;
 const round2 = (x) => Math.round(Math.min(1, Math.max(0, x)) * 100) / 100;
 
-export function createTemporalEngine(overrides = {}) {
+export function createTemporalEngine(overrides = {}, onViolationDropped = () => {}) {
   const config = mergeConfig(DEFAULT_CONFIG, overrides);
 
   let faceHistory = [];
@@ -163,10 +165,16 @@ export function createTemporalEngine(overrides = {}) {
     if (ep.active && (isTrue || sustained)) {
       ep.lastTrueTs = now;
       maybeProlong(events, type, ep, now);
+      if (isTrue) {
+        onViolationDropped(type, VIOLATION_DROP_REASONS.EPISODE_OPEN);
+      }
       return;
     }
     if (isTrue) {
-      if (ep.lastEndTs !== null && now - ep.lastEndTs < config.episode.minGapMs) return;
+      if (ep.lastEndTs !== null && now - ep.lastEndTs < config.episode.minGapMs) {
+        onViolationDropped(type, VIOLATION_DROP_REASONS.COOLDOWN, { gap_ms: Math.round(now - ep.lastEndTs) });
+        return;
+      }
       const d = describe();
       Object.assign(ep, { active: true, startTs: now, lastTrueTs: now, prolongedSent: false, confidence: round2(d.confidence) });
       events.push({
@@ -245,6 +253,7 @@ export function createTemporalEngine(overrides = {}) {
     if (micSuspended(now)) {
       sample.impaired = true;
       lastVoiceDroppedReason = 'mic_suspended';
+      onViolationDropped('VOICE_DETECTED', VIOLATION_DROP_REASONS.MIC_SUSPENDED);
       return events;
     }
 
@@ -314,6 +323,7 @@ export function createTemporalEngine(overrides = {}) {
 
     if (rulesSuspended(now)) {
       sample.impaired = true;
+      onViolationDropped('FACE_RULES', VIOLATION_DROP_REASONS.CAMERA_LOST);
       return events;
     }
 
@@ -364,6 +374,7 @@ export function createTemporalEngine(overrides = {}) {
     evaluateCamera(events, now);
     if (rulesSuspended(now)) {
       sample.impaired = true;
+      onViolationDropped('OBJECT_RULES', VIOLATION_DROP_REASONS.CAMERA_LOST);
       return events;
     }
     const rule = config.objects;

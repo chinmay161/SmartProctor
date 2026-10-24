@@ -19,13 +19,19 @@ import {
 import { severityForViolation } from '../../utils/violationSeverity';
 import {
   clearUnloading,
+  isSystemPromptGraceActive,
+  isUnloading,
   markUnloading,
+  PROMPT_SENSITIVE_TYPES,
   shouldSuppressViolation,
 } from '../../utils/proctoringSuppression';
 import { SCREEN_SHARE_HELP, shareEntireScreen } from '../../components/proctoring/screenShare';
 import { requestExamFullscreen } from '../../components/proctoring/fullscreen';
 import { isVisionViolationEnabled } from '../../utils/violationSeverity';
 import { ReconnectingSocket } from '../../services/reconnectingSocket';
+import { setSentrySessionId } from '../../utils/sentryScrubber';
+import flightRecorder from '../../telemetry/flightRecorder';
+import { VIOLATION_DROP_REASONS } from '../../telemetry/violationDropReasons';
 
 // Only camera exams need the gate UI, so it ships in its own chunk.
 const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
@@ -245,6 +251,10 @@ const ExamPortal = () => {
 
   const persistViolation = async (violationPayload) => {
     if (!sessionId || !violationPayload) {
+      flightRecorder.record('violation', 'violation_dropped', {
+        type: violationPayload?.type || 'UNKNOWN',
+        reason: VIOLATION_DROP_REASONS.OFFLINE_QUEUED,
+      });
       pendingViolationsRef.current.push(violationPayload);
       return false;
     }
@@ -491,6 +501,13 @@ const ExamPortal = () => {
     if (session?.attempt_id) setAttemptId(session.attempt_id);
     setAnswers(restoredAnswers);
     setSessionId(newSessionId);
+    setSentrySessionId(newSessionId);
+    flightRecorder.setSessionId(newSessionId);
+    flightRecorder.setExamId(activeExamId);
+    flightRecorder.record('lifecycle', isResume ? 'resume' : 'exam_start', {
+      session_id: newSessionId,
+      exam_id: activeExamId,
+    });
     setExamDataState({ ...exam, duration: exam?.duration_minutes || 0, questions });
     const requiresCamera = typeof exam?.camera_required === 'boolean'
       ? exam.camera_required
@@ -524,6 +541,7 @@ const ExamPortal = () => {
       sessionStorage.removeItem(APP_RELOAD_KEY);
       if (isResume && wasActive && !appReload && !reloadReportedRef.current) {
         reloadReportedRef.current = true;
+        flightRecorder.record('lifecycle', 'reload_detected', { session_id: newSessionId });
         addViolation('Page reloaded during the exam', 'PAGE_RELOAD', 1.0);
       }
       sessionStorage.setItem(activeAttemptKey(activeExamId), newSessionId || '1');
@@ -606,6 +624,10 @@ const ExamPortal = () => {
     const socket = new ReconnectingSocket({
       getUrl: getWsUrl,
       onStateChange: (state) => {
+        flightRecorder.record('socket', 'socket_state_change', { state });
+        if (state === 'reconnecting' || state === 'connecting') {
+          flightRecorder.record('socket', 'socket_reconnect_attempt', { state });
+        }
         if (!mounted) return;
         if (state === 'open') {
           setSocketReconnecting(false);
@@ -700,6 +722,7 @@ const ExamPortal = () => {
 
     const handleFullscreenChange = () => {
       const fullscreenActive = !!document.fullscreenElement;
+      flightRecorder.record('lifecycle', 'fullscreen_change', { is_fullscreen: fullscreenActive });
       setIsFullscreen(fullscreenActive);
       if (fullscreenActive) {
         hasEnteredFullscreenRef.current = true;
@@ -794,7 +817,11 @@ const ExamPortal = () => {
 
   // Nothing reports once the page starts unloading (reload / close / navigate away).
   useEffect(() => {
-    const onUnload = () => markUnloading();
+    const onUnload = (event) => {
+      markUnloading();
+      flightRecorder.record('lifecycle', 'pagehide', { persisted: Boolean(event?.persisted) });
+      flightRecorder.flush({ keepalive: true });
+    };
     const onPageShow = (event) => { if (event.persisted) clearUnloading(); };
     window.addEventListener('beforeunload', onUnload);
     window.addEventListener('pagehide', onUnload);
@@ -846,6 +873,7 @@ const ExamPortal = () => {
     if (isLoading || examBlocked || !sourceExam || !detectTabSwitchEnabled) return;
 
     const handleVisibilityChange = () => {
+      flightRecorder.record('lifecycle', 'visibility', { hidden: document.hidden });
       if (detectTabSwitchEnabled && document.hidden && examStatusRef.current !== 'ending') {
         addViolation('Tab switched or window minimized', 'TAB_SWITCH');
       }
@@ -855,14 +883,104 @@ const ExamPortal = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isLoading, examBlocked, sourceExam, detectTabSwitchEnabled]);
 
+  // Periodic vision fps summary every 30s
+  useEffect(() => {
+    if (stage !== 'ready') return undefined;
+    const interval = setInterval(() => {
+      const tel = visionTelemetryRef.current?.();
+      if (tel) {
+        flightRecorder.record('perf', 'vision_fps_summary', {
+          running: Boolean(tel.running),
+          phase: tel.phase || null,
+          face_fps: tel.faceFps ?? null,
+          object_fps: tel.objectFps ?? null,
+          inference_age_ms: tel.inferenceAgeMs ?? null,
+        });
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [stage]);
+
+  // Periodic long-task counts every 30s using PerformanceObserver
+  useEffect(() => {
+    let count = 0;
+    let totalDurationMs = 0;
+    let observer = null;
+    try {
+      if (typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes?.includes('longtask')) {
+        observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            count += 1;
+            totalDurationMs += entry.duration;
+          }
+        });
+        observer.observe({ type: 'longtask', buffered: true });
+      }
+    } catch {
+      // Long tasks observer not supported in this browser
+    }
+
+    const interval = setInterval(() => {
+      flightRecorder.record('perf', 'long_tasks_summary', {
+        count,
+        total_duration_ms: Math.round(totalDurationMs),
+      });
+      count = 0;
+      totalDurationMs = 0;
+    }, 30000);
+
+    return () => {
+      clearInterval(interval);
+      observer?.disconnect();
+    };
+  }, []);
+
+  // Client error reporting to flight recorder
+  useEffect(() => {
+    const onError = (e) => {
+      flightRecorder.record('error', 'client_error', {
+        message: e?.message || String(e),
+        filename: e?.filename ? String(e.filename).slice(-64) : null,
+        lineno: typeof e?.lineno === 'number' ? e.lineno : null,
+      });
+    };
+    window.addEventListener('error', onError);
+    return () => window.removeEventListener('error', onError);
+  }, []);
+
+
   // extras: { image, durationMs, reason } — vision violations carry their own evidence frame.
   const addViolation = (message, type = null, confidence = null, extras = {}) => {
-    if (examEndedRef.current) return;
+    if (examEndedRef.current) {
+      flightRecorder.record('violation', 'violation_dropped', {
+        type: type || 'UNKNOWN',
+        reason: VIOLATION_DROP_REASONS.EXAM_ENDED,
+      });
+      return;
+    }
     // App-initiated prompts (camera, screen picker, fullscreen) and page unload are not the student's doing.
-    if (shouldSuppressViolation(type)) {
+    if (isUnloading()) {
+      flightRecorder.record('violation', 'violation_dropped', {
+        type: type || 'UNKNOWN',
+        reason: VIOLATION_DROP_REASONS.UNLOADING,
+      });
       if (type === 'VOICE_DETECTED' || type === 'MIC_DISCONNECTED') {
         vision?.setVoiceDroppedReason?.('suppressed_by_grace_or_unload');
       }
+      return;
+    }
+    if (PROMPT_SENSITIVE_TYPES.has(type) && isSystemPromptGraceActive()) {
+      flightRecorder.record('violation', 'violation_dropped', {
+        type: type || 'UNKNOWN',
+        reason: VIOLATION_DROP_REASONS.GRACE,
+      });
+      return;
+    }
+    if (shouldSuppressViolation(type)) {
+      flightRecorder.record('violation', 'violation_dropped', {
+        type: type || 'UNKNOWN',
+        reason: VIOLATION_DROP_REASONS.GRACE,
+      });
       return;
     }
     if (type === 'VOICE_DETECTED') {
@@ -915,11 +1033,26 @@ const ExamPortal = () => {
       reason: extras.reason || message,
       duration_ms: Number.isFinite(extras.durationMs) ? Math.round(extras.durationMs) : null,
     };
+
+    flightRecorder.record('violation', 'violation_reported', {
+      type: type || 'UNKNOWN',
+      severity,
+      confidence: Number.isFinite(confidence) ? Math.round(confidence * 100) / 100 : null,
+      duration_ms: Number.isFinite(extras.durationMs) ? Math.round(extras.durationMs) : null,
+      reason: extras.reason || message,
+    });
+
     void persistViolation(body);
   };
 
   visionViolationRef.current = (event) => {
     if (!isVisionViolationEnabled(event.type, securityConfig)) {
+      flightRecorder.record('violation', 'violation_dropped', {
+        type: event.type,
+        reason: VIOLATION_DROP_REASONS.RULE_DISABLED,
+        severity: event.severity,
+        confidence: event.confidence,
+      });
       if (event.type === 'VOICE_DETECTED' || event.type === 'MIC_DISCONNECTED') {
         vision?.setVoiceDroppedReason?.('disabled_by_wizard_toggle');
       }
@@ -1000,6 +1133,11 @@ const ExamPortal = () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmitError('');
+    flightRecorder.record('lifecycle', 'submit', {
+      session_id: sessionId || null,
+      attempt_id: attemptId || null,
+    });
+    void flightRecorder.flush();
 
     try {
       await flushPendingAnswers();

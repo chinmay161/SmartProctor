@@ -10,6 +10,8 @@ import {
 } from './features';
 import { loadVisionTasks } from './visionEngine';
 import { withSystemPrompt } from '../utils/proctoringSuppression';
+import flightRecorder from '../telemetry/flightRecorder';
+import { VIOLATION_DROP_REASONS } from '../telemetry/violationDropReasons';
 
 export const CONTROLLER_DEFAULTS = Object.freeze({
   targetFaceFps: 5,
@@ -81,6 +83,10 @@ export function createVisionController({
   let lastDetections = [];
   let stream = null;
   let tasks = null;
+  const handleViolationDropped = (type, reason, data = {}) => {
+    flightRecorder.record('violation', 'violation_dropped', { type, reason, ...data });
+  };
+
   const handleAudioSample = (sample) => {
     if (loopMode === 'monitor') {
       const events = engine.pushAudio(sample);
@@ -97,6 +103,7 @@ export function createVisionController({
       handleEvents(events);
     } else {
       lastVoiceDroppedReason = 'not_monitoring';
+      handleViolationDropped('VOICE_DETECTED', VIOLATION_DROP_REASONS.NOT_MONITORING);
     }
   };
 
@@ -104,7 +111,7 @@ export function createVisionController({
   if (audioEngine?.onSample) {
     audioEngine.onSample(handleAudioSample);
   }
-  let engine = createTemporalEngine(engineConfig);
+  let engine = createTemporalEngine(engineConfig, handleViolationDropped);
   const blinkDetector = createBlinkDetector();
 
   let phase = 'idle'; // idle | camera | models | measuring | calibrating | running | paused | stopped | error
@@ -149,6 +156,7 @@ export function createVisionController({
   const setPhase = (next) => {
     if (phase === next) return;
     phase = next;
+    flightRecorder.record('lifecycle', 'controller_phase_change', { phase: next });
     onStateChange(next);
   };
 
@@ -277,6 +285,11 @@ export function createVisionController({
     const merged = { ...cameraStatus, ...next };
     if (merged.state === cameraStatus.state && merged.permission === cameraStatus.permission && merged.kind === cameraStatus.kind) return;
     cameraStatus = merged;
+    flightRecorder.record('device', 'camera_status_change', {
+      state: cameraStatus.state,
+      permission: cameraStatus.permission,
+      kind: cameraStatus.kind,
+    });
     onCameraStatus({ ...cameraStatus });
   };
 
@@ -482,6 +495,11 @@ export function createVisionController({
     for (const event of events) {
       if (event.shadow) {
         noBlinkShadowCount += 1;
+        flightRecorder.record('violation', 'violation_dropped', {
+          type: event.type,
+          reason: VIOLATION_DROP_REASONS.SHADOW_MODE,
+          confidence: event.confidence,
+        });
         if (import.meta.env.DEV) console.info('[vision] shadow violation (not reported)', event);
         onShadowViolation(event);
         continue;
@@ -648,7 +666,7 @@ export function createVisionController({
   }
 
   function start(baseline) {
-    engine = createTemporalEngine(engineConfig);
+    engine = createTemporalEngine(engineConfig, handleViolationDropped);
     engine.setBaseline(baseline || { yaw: 0, pitch: 0 });
     faceFps = cfg.targetFaceFps;
     objectFps = cfg.targetObjectFps;

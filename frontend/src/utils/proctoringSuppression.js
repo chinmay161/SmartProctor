@@ -20,14 +20,21 @@ let unloading = false;
 
 const now = () => performance.now();
 
+import flightRecorder from '../telemetry/flightRecorder';
+
 /** Run an app-initiated browser prompt; grace lasts while pending and 1.5 s after. */
 export async function withSystemPrompt(run) {
   pendingPrompts += 1;
+  flightRecorder.record('lifecycle', 'system_prompt_grace_begin', { pending_prompts: pendingPrompts });
   try {
     return await run();
   } finally {
     pendingPrompts -= 1;
     lastPromptSettledAt = now();
+    flightRecorder.record('lifecycle', 'system_prompt_grace_end', {
+      grace_duration_ms: SYSTEM_PROMPT_GRACE_MS,
+      pending_prompts: pendingPrompts,
+    });
   }
 }
 

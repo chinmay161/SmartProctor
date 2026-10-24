@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import Icon from '../../../components/AppIcon';
+import flightRecorder from '../../../telemetry/flightRecorder';
+import { VIOLATION_DROP_REASONS } from '../../../telemetry/violationDropReasons';
 
 const AI_VIOLATION_MESSAGES = {
   NO_FACE: 'No face detected',
@@ -338,7 +340,13 @@ const SecurityMonitor = forwardRef(({
       if (!mounted || !videoRef.current || !canvasRef.current) return;
       
       // 3. No Visibility Check - Avoid firing if document is hidden
-      if (document.hidden) return;
+      if (document.hidden) {
+        flightRecorder.record('violation', 'violation_dropped', {
+          type: 'SNAPSHOT',
+          reason: VIOLATION_DROP_REASONS.DOCUMENT_HIDDEN,
+        });
+        return;
+      }
 
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -383,6 +391,12 @@ const SecurityMonitor = forwardRef(({
             if (conf >= 0.7) {
               isSuspicious = true;
               if (shouldTrigger('PHONE_DETECTED')) onAddViolationRef.current?.('Phone detected', 'PHONE_DETECTED', conf);
+            } else {
+              flightRecorder.record('violation', 'violation_dropped', {
+                type: 'PHONE_DETECTED',
+                reason: VIOLATION_DROP_REASONS.CONFIDENCE_THRESHOLD,
+                confidence: conf,
+              });
             }
           }
 
@@ -394,8 +408,20 @@ const SecurityMonitor = forwardRef(({
           }
 
           for (const violation of response.violations || []) {
-            if (!isTemporalViolationEnabled(violation?.type, securityConfig)) continue;
-            if (!shouldTrigger(violation.type)) continue;
+            if (!isTemporalViolationEnabled(violation?.type, securityConfig)) {
+              flightRecorder.record('violation', 'violation_dropped', {
+                type: violation?.type || 'UNKNOWN',
+                reason: VIOLATION_DROP_REASONS.RULE_DISABLED,
+              });
+              continue;
+            }
+            if (!shouldTrigger(violation.type)) {
+              flightRecorder.record('violation', 'violation_dropped', {
+                type: violation.type,
+                reason: VIOLATION_DROP_REASONS.COOLDOWN,
+              });
+              continue;
+            }
 
             isSuspicious = true;
             onAddViolationRef.current?.(

@@ -4,6 +4,8 @@ import Button from '../ui/Button';
 import { probeCameraPermission } from './useVisionProctoring';
 import { SCREEN_SHARE_HELP, shareEntireScreen } from './screenShare';
 import { requestExamFullscreen } from './fullscreen';
+import flightRecorder from '../../telemetry/flightRecorder';
+import { getDeviceSnapshot } from '../../telemetry/deviceSnapshot';
 
 export const MIN_FACE_FPS = 2;
 
@@ -253,15 +255,26 @@ const PreExamGate = ({
     if (runningRef.current) return;
     runningRef.current = true;
     setFailure(null);
+    flightRecorder.init({ kind: variant === 'device-test' ? 'device_test' : 'exam' });
+    flightRecorder.record('gate', 'gate_start', { variant, steps_count: stepIds.length });
     const results = resultsRef.current;
     try {
       for (let i = fromIndex; i < stepIds.length; i += 1) {
         const id = stepIds[i];
         setStep(id, 'running');
+        flightRecorder.record('gate', 'gate_step_start', { step: id });
 
         if (id === 'camera') {
           const r = await timed('camera', () => (variant === 'permission-only' ? probeCameraPermission() : vision.requestCamera()));
           results.camera = r;
+          flightRecorder.record('gate', 'gate_step_end', {
+            step: id,
+            status: r.ok ? 'ok' : 'error',
+            duration_ms: results.timings.camera,
+            width: r.width || null,
+            height: r.height || null,
+            kind: r.kind || null,
+          });
           if (!r.ok) {
             const help = CAMERA_HELP[r.kind] || CAMERA_HELP.unknown;
             setStep(id, 'error', help.title);
@@ -274,12 +287,22 @@ const PreExamGate = ({
         if (id === 'models') {
           const r = await timed('models', () => vision.loadModels());
           results.models = r;
+          const d = r.delegates || {};
+          flightRecorder.record('gate', 'gate_step_end', {
+            step: id,
+            status: r.ok ? 'ok' : 'error',
+            duration_ms: results.timings.models,
+            load_ms: r.loadMs || null,
+            warmup_ms: r.warmupMs || null,
+            face_delegate: d.face || null,
+            object_delegate: d.objects || null,
+          });
+          flightRecorder.record('device', 'device_snapshot', getDeviceSnapshot(d));
           if (!r.ok) {
             setStep(id, 'error', 'Download failed');
             setFailure({ index: i, title: 'Proctoring models could not be loaded', steps: ['Check your internet connection and retry.', r.error].filter(Boolean) });
             return;
           }
-          const d = r.delegates || {};
           setStep(id, 'ok', `face: ${d.face}${d.objects ? `, objects: ${d.objects}` : ''}`);
         }
 
@@ -287,6 +310,14 @@ const PreExamGate = ({
           const m = await timed('fps', () => vision.measure(5000));
           results.measure = m;
           const pass = m.faceFps >= MIN_FACE_FPS;
+          flightRecorder.record('gate', 'gate_step_end', {
+            step: id,
+            status: pass ? 'ok' : 'warn',
+            duration_ms: results.timings.fps,
+            face_fps: m.faceFps,
+            object_fps: m.objectFps ?? null,
+            face_ms: m.faceMs ? Math.round(m.faceMs) : null,
+          });
           const detail = `${m.faceFps} fps face${m.objectFps != null ? `, ${m.objectFps} fps objects` : ''}`;
           setStep(id, pass ? 'ok' : 'warn', detail);
           if (!pass && variant !== 'device-test') {
@@ -302,6 +333,16 @@ const PreExamGate = ({
           const c = await timed('calibrate', () => vision.calibrate(calibrationMs));
           setCalibrating(false);
           results.calibration = c;
+          flightRecorder.record('gate', 'gate_step_end', {
+            step: id,
+            status: c.ok ? 'ok' : 'error',
+            duration_ms: results.timings.calibrate,
+            samples: c.samples || 0,
+            face_samples: c.faceSamples || 0,
+            baseline_yaw: c.baseline ? Math.round(c.baseline.yaw) : null,
+            baseline_pitch: c.baseline ? Math.round(c.baseline.pitch) : null,
+            reason: c.reason || null,
+          });
           if (!c.ok) {
             const help = CALIBRATION_HELP[c.reason] || CALIBRATION_HELP['no-face'];
             const extra = c.reason === 'off-center' && c.baseline
@@ -332,6 +373,12 @@ const PreExamGate = ({
             return { ok: true };
           });
           results.mic = r;
+          flightRecorder.record('gate', 'gate_step_end', {
+            step: id,
+            status: r.ok ? 'ok' : 'error',
+            duration_ms: results.timings.mic,
+            kind: r.kind || null,
+          });
           if (!r.ok) {
             const help = MIC_HELP[r.kind] || MIC_HELP.unknown;
             setStep(id, 'error', help.title);
@@ -371,6 +418,14 @@ const PreExamGate = ({
             noiseLevel: Math.round(avgRms * 1000) / 1000,
             noisyEnvironment: isLoud,
           };
+
+          flightRecorder.record('gate', 'gate_step_end', {
+            step: id,
+            status: isLoud ? 'warn' : 'ok',
+            avg_rms: Math.round(avgRms * 1000) / 1000,
+            max_speech: maxSpeech,
+            is_loud: isLoud,
+          });
 
           if (isLoud) {
             setStep(id, 'warn', `Noisy environment (${Math.round(avgRms * 100)}% level)`);
@@ -412,6 +467,12 @@ const PreExamGate = ({
             speechDetected,
           };
 
+          flightRecorder.record('gate', 'gate_step_end', {
+            step: id,
+            status: speechDetected ? 'ok' : 'warn',
+            detected: speechDetected,
+          });
+
           if (speechDetected) {
             setStep(id, 'ok', 'Voice recognized ("I am ready")');
           } else {
@@ -424,6 +485,7 @@ const PreExamGate = ({
           const stream = await waitForAction('screen');
           setAction(null);
           onScreenStream?.(stream);
+          flightRecorder.record('gate', 'gate_step_end', { step: id, status: 'ok' });
           setStep(id, 'ok', 'Entire screen shared');
         }
 
@@ -433,6 +495,7 @@ const PreExamGate = ({
             await waitForAction('fullscreen');
             setAction(null);
           }
+          flightRecorder.record('gate', 'gate_step_end', { step: id, status: 'ok' });
           setStep(id, 'ok', 'Fullscreen on');
         }
       }
@@ -442,12 +505,18 @@ const PreExamGate = ({
         fpsSkipped: !stepIds.includes('fps'),
         weakDevice: results.measure ? results.measure.faceFps < MIN_FACE_FPS : false,
       };
+      flightRecorder.record('gate', 'gate_complete', {
+        variant,
+        weak_device: summaryData.weakDevice,
+        fps_skipped: summaryData.fpsSkipped,
+      });
       if (variant === 'device-test') setSummary(summaryData);
       else onComplete?.(summaryData);
     } finally {
       runningRef.current = false;
       setCalibrating(false);
     }
+
   // stepIds is derived from props that don't change while the gate is mounted
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vision, variant, calibrationMs, onComplete]);
