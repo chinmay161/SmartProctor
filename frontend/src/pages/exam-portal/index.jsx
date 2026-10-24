@@ -24,6 +24,7 @@ import {
 } from '../../utils/proctoringSuppression';
 import { SCREEN_SHARE_HELP, shareEntireScreen } from '../../components/proctoring/screenShare';
 import { requestExamFullscreen } from '../../components/proctoring/fullscreen';
+import { isVisionViolationEnabled } from '../../utils/violationSeverity';
 
 // Only camera exams need the gate UI, so it ships in its own chunk.
 const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
@@ -44,14 +45,7 @@ const VISION_MESSAGES = {
   MIC_DISCONNECTED: 'Microphone disconnected',
 };
 
-// Same per-detector switches the server pipeline honours.
-const isVisionViolationEnabled = (type, cfg) => {
-  if (type === 'NO_FACE') return Boolean(cfg?.detectNoFace);
-  if (type === 'MULTIPLE_FACES') return Boolean(cfg?.detectMultipleFaces);
-  if (type === 'PHONE_DETECTED' || type === 'BOOK_DETECTED') return Boolean(cfg?.detectMobilePhone);
-  if (type === 'VOICE_DETECTED' || type === 'MIC_DISCONNECTED') return Boolean(cfg?.audioMonitoring);
-  return true;
-};
+
 
 const START_CLICK_KEY = 'sp:startClickedAt';
 // Set once the exam is on screen; seeing it again on resume (same tab) means a reload.
@@ -182,11 +176,15 @@ const ExamPortal = () => {
   const visionTelemetryRef = useRef(() => null);
   const [screenStream, setScreenStream] = useState(null);
   const [screenShareLost, setScreenShareLost] = useState(null); // help object when sharing stopped
+  const [screenShareBlocked, setScreenShareBlocked] = useState(false);
+  const [micBlocked, setMicBlocked] = useState(false);
+  const [submissionResult, setSubmissionResult] = useState(null);
   const reloadReportedRef = useRef(false);
 
 
   const sourceExam = examDataState;
   const securityConfig = examRules || sourceExam?.wizard_config || {};
+  const screenRecordingRequired = Boolean(securityConfig?.enableScreenRecording);
   const currentQuestion = sourceExam?.questions?.[currentQuestionIndex];
   const totalQuestions = sourceExam?.questions?.length || 0;
   const watermarkEnabled = Boolean(
@@ -492,9 +490,28 @@ const ExamPortal = () => {
     setAnswers(restoredAnswers);
     setSessionId(newSessionId);
     setExamDataState({ ...exam, duration: exam?.duration_minutes || 0, questions });
+    const requiresCamera = typeof exam?.camera_required === 'boolean'
+      ? exam.camera_required
+      : wizardRequiresCamera(cfg);
+    const requiresMic = typeof exam?.mic_required === 'boolean'
+      ? exam.mic_required
+      : Boolean(cfg?.audioMonitoring);
 
-    if (gateResult?.calibration?.baseline && INFERENCE_MODE === 'client') {
-      await vision.start(gateResult.calibration.baseline);
+    if (INFERENCE_MODE === 'client' && (requiresCamera || requiresMic)) {
+      await vision.start(gateResult?.calibration?.baseline || { yaw: 0, pitch: 0 });
+      if (requiresMic) {
+        try {
+          const ae = await vision.ensureAudioEngine();
+          await ae.start();
+          if (ae.resume) await ae.resume();
+          if (typeof ae.isRunning === 'function' && !ae.isRunning()) {
+            setMicBlocked(true);
+          }
+        } catch (err) {
+          console.warn('[exam-portal] Failed to start audio engine:', err);
+          setMicBlocked(true);
+        }
+      }
     }
     setStage('ready');
 
@@ -793,14 +810,17 @@ const ExamPortal = () => {
     if (!screenStream) return undefined;
     const [track] = screenStream.getVideoTracks();
     const onEnded = () => {
+      if (screenRecordingRequired) {
+        setScreenShareBlocked(true);
+      }
       setScreenShareLost({ title: 'Screen sharing stopped', steps: ['This exam requires sharing your entire screen. Click "Share entire screen" to continue.'] });
-      addViolation('Screen sharing stopped', 'SCREEN_SHARE_STOPPED', 1.0);
+      addViolation('Screen sharing stopped', 'SCREEN_SHARE_STOPPED', 1.0, { severity: 'major' });
     };
     track?.addEventListener('ended', onEnded);
     return () => track?.removeEventListener('ended', onEnded);
     // addViolation is recreated every render; the listener only needs the latest stream
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screenStream]);
+  }, [screenStream, screenRecordingRequired]);
 
   useEffect(() => () => {
     screenStream?.getTracks().forEach((t) => t.stop());
@@ -810,9 +830,13 @@ const ExamPortal = () => {
     try {
       const stream = await shareEntireScreen();
       setScreenShareLost(null);
+      setScreenShareBlocked(false);
       setScreenStream(stream);
+      if (browserLockdownEnabled && !document.fullscreenElement) {
+        setIsFullscreen(false);
+      }
     } catch (error) {
-      setScreenShareLost(SCREEN_SHARE_HELP[error.kind] || SCREEN_SHARE_HELP.failed);
+      setScreenShareLost(SCREEN_SHARE_HELP[error?.kind] || SCREEN_SHARE_HELP.failed);
     }
   };
 
@@ -833,7 +857,15 @@ const ExamPortal = () => {
   const addViolation = (message, type = null, confidence = null, extras = {}) => {
     if (examEndedRef.current) return;
     // App-initiated prompts (camera, screen picker, fullscreen) and page unload are not the student's doing.
-    if (shouldSuppressViolation(type)) return;
+    if (shouldSuppressViolation(type)) {
+      if (type === 'VOICE_DETECTED' || type === 'MIC_DISCONNECTED') {
+        vision?.setVoiceDroppedReason?.('suppressed_by_grace_or_unload');
+      }
+      return;
+    }
+    if (type === 'VOICE_DETECTED') {
+      vision?.setVoiceDroppedReason?.(null);
+    }
     triggerViolationLock(message);
     const event_id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
     const newViolation = {
@@ -885,7 +917,12 @@ const ExamPortal = () => {
   };
 
   visionViolationRef.current = (event) => {
-    if (!isVisionViolationEnabled(event.type, securityConfig)) return;
+    if (!isVisionViolationEnabled(event.type, securityConfig)) {
+      if (event.type === 'VOICE_DETECTED' || event.type === 'MIC_DISCONNECTED') {
+        vision?.setVoiceDroppedReason?.('disabled_by_wizard_toggle');
+      }
+      return;
+    }
     addViolation(VISION_MESSAGES[event.type] || event.type, event.type, event.confidence, {
       image: event.image,
       durationMs: event.durationMs,
@@ -972,7 +1009,23 @@ const ExamPortal = () => {
         throw new Error('Attempt details are missing. Please return to dashboard and restart the exam.');
       }
       setShowSubmitModal(false);
-      navigate('/student-dashboard');
+
+      const activeExamId = examId || examDataState?.id || sourceExam?.id;
+      let resultData = null;
+      try {
+        resultData = await callApi(`/results/${encodeURIComponent(activeExamId)}`, 'GET');
+      } catch (err) {
+        resultData = { errorReason: err?.detail || 'Results are not published yet.' };
+      }
+      setSubmissionResult({
+        examId: activeExamId,
+        score: resultData?.score,
+        out_of: resultData?.out_of,
+        status: resultData?.status,
+        is_provisional: resultData?.is_provisional,
+        provisional_message: resultData?.provisional_message,
+        errorReason: resultData?.errorReason,
+      });
     } catch (error) {
       setSubmitError(error?.detail || error?.message || 'Failed to submit exam. Please try again.');
     } finally {
@@ -984,6 +1037,28 @@ const ExamPortal = () => {
     handleConfirmSubmitRef.current = handleConfirmSubmit;
   }, [handleConfirmSubmit]);
 
+
+  const handleRetryMic = async () => {
+    try {
+      const ok = await vision.resumeAudio();
+      if (ok) {
+        setMicBlocked(false);
+      }
+    } catch (err) {
+      console.warn('[exam-portal] Retry mic failed:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (stage !== 'ready' || !micRequired || INFERENCE_MODE !== 'client') return undefined;
+    const interval = setInterval(() => {
+      const tel = vision.getTelemetry();
+      if (tel?.audio && tel.audio.running === false) {
+        setMicBlocked(true);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [stage, micRequired, vision]);
 
   // Click handler only: the gate and this overlay share requestExamFullscreen().
   const enterFullscreen = () => {
@@ -1003,6 +1078,66 @@ const ExamPortal = () => {
   const inferenceVideo = (
     <video ref={vision.videoRef} style={HIDDEN_VIDEO_STYLE} muted playsInline autoPlay aria-hidden="true" />
   );
+
+  if (submissionResult) {
+    const hasScore = submissionResult.score != null;
+    return (
+      <>
+        {inferenceVideo}
+        <div className="min-h-screen bg-background flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-card border border-border rounded-xl p-8 shadow-xl text-center space-y-6">
+            <div className="w-16 h-16 bg-success/15 text-success rounded-full flex items-center justify-center mx-auto">
+              <Icon name="CheckCircle" size={36} />
+            </div>
+            <div>
+              <h2 className="text-2xl font-heading font-semibold text-foreground">Exam Submitted!</h2>
+              <p className="text-sm text-muted-foreground mt-1">Your responses have been recorded successfully.</p>
+            </div>
+
+            {hasScore && (
+              <div className="bg-muted/40 border border-border rounded-lg p-5 space-y-2">
+                <span className="text-xs uppercase tracking-wider text-muted-foreground font-medium">Your Score</span>
+                <div className="text-3xl font-bold font-data text-foreground">
+                  {submissionResult.score} <span className="text-lg font-normal text-muted-foreground">/ {submissionResult.out_of ?? 0}</span>
+                </div>
+                {submissionResult.is_provisional && (
+                  <div className="inline-block mt-2 px-3 py-1 rounded-full text-xs font-medium bg-warning/15 text-warning border border-warning/30">
+                    {submissionResult.provisional_message || 'Provisional — manual grading pending'}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!hasScore && submissionResult.errorReason && (
+              <div className="bg-muted/30 border border-border rounded-lg p-4 text-xs text-muted-foreground">
+                {submissionResult.errorReason}
+              </div>
+            )}
+
+            <div className="space-y-3 pt-2">
+              {hasScore && (
+                <Button
+                  variant="default"
+                  fullWidth
+                  iconName="Eye"
+                  onClick={() => navigate(`/student-dashboard/results/${encodeURIComponent(submissionResult.examId)}`)}
+                >
+                  View Result
+                </Button>
+              )}
+              <Button
+                variant={hasScore ? "outline" : "default"}
+                fullWidth
+                onClick={() => navigate('/student-dashboard')}
+              >
+                Return to Dashboard
+              </Button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -1149,10 +1284,61 @@ const ExamPortal = () => {
         </div>
       )}
 
-      {screenShareLost && (
+      {!screenShareBlocked && screenShareLost && (
         <div role="alert" className="bg-destructive/15 border-b border-destructive/30 px-4 py-3 text-sm text-destructive flex flex-wrap items-center justify-between gap-3">
           <span><strong>{screenShareLost.title}.</strong> {screenShareLost.steps.join(' ')}</span>
           <Button size="sm" variant="outline" iconName="Monitor" onClick={() => void reshareScreen()}>Share entire screen</Button>
+        </div>
+      )}
+
+      {screenRecordingRequired && screenShareBlocked && (
+        <div className="fixed inset-0 z-[65] bg-black/55 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-card border border-border rounded-2xl shadow-2xl p-6 text-center">
+            <div className="w-14 h-14 mx-auto rounded-full bg-destructive/15 flex items-center justify-center mb-4">
+              <Icon name="Monitor" size={26} className="text-destructive" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground mb-2">Screen Sharing Required</h2>
+            <p className="text-sm text-muted-foreground mb-5">
+              Screen sharing stopped. Share your entire screen to continue.
+            </p>
+            {screenShareLost?.title && screenShareLost.title !== 'Screen sharing stopped' && (
+              <p className="text-xs text-destructive mb-4">
+                {screenShareLost.title}
+              </p>
+            )}
+            <Button
+              variant="default"
+              size="lg"
+              iconName="Monitor"
+              onClick={() => void reshareScreen()}
+              className="w-full"
+            >
+              Share entire screen
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {micRequired && micBlocked && (
+        <div className="fixed inset-0 z-[65] bg-black/55 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-card border border-border rounded-2xl shadow-2xl p-6 text-center">
+            <div className="w-14 h-14 mx-auto rounded-full bg-destructive/15 flex items-center justify-center mb-4">
+              <Icon name="MicOff" size={26} className="text-destructive" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground mb-2">Microphone not available</h2>
+            <p className="text-sm text-muted-foreground mb-5">
+              Audio proctoring is required for this exam, but the microphone is not running. Please check your microphone connection and browser permissions, then click Retry.
+            </p>
+            <Button
+              variant="default"
+              size="lg"
+              iconName="RefreshCw"
+              onClick={() => void handleRetryMic()}
+              className="w-full"
+            >
+              Retry
+            </Button>
+          </div>
         </div>
       )}
 

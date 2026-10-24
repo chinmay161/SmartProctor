@@ -88,7 +88,7 @@ const SecurityMonitor = forwardRef(({
     const ensurePlaying = async () => {
       try {
         await videoElement.play();
-      } catch (_) {
+      } catch {
         // Ignore autoplay timing issues; metadata event retries below.
       }
     };
@@ -473,7 +473,7 @@ const SecurityMonitor = forwardRef(({
             >
               <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
               {clientVision
-                ? `On-device AI${visionStatus?.running ? ` · ${visionStatus.faceFps} fps` : ''}`
+                ? `On-device AI${visionStatus?.running ? ` · ${visionStatus.faceFps} fps${import.meta.env.DEV && typeof visionStatus?.faceCount === 'number' ? ` · faces: ${visionStatus.faceCount}` : ''}` : ''}`
                 : 'AI Active'}
             </span>
           )}
@@ -508,6 +508,22 @@ const SecurityMonitor = forwardRef(({
           )}
           {/* Hidden Canvas for capture */}
           <canvas ref={canvasRef} className="hidden" />
+
+          {/* Dev-only HUD overlay (enabled with ?debug=1) */}
+          {import.meta.env.DEV && typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1' && (
+            <div className="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-2">
+              <div className="bg-black/80 text-[10px] text-emerald-400 font-mono px-2 py-1 rounded backdrop-blur-xs self-start border border-emerald-500/30">
+                Faces: {visionStatus?.faceCount ?? 0}
+                {visionStatus?.lastPose ? ` · Yaw: ${visionStatus.lastPose.yaw}° · Pitch: ${visionStatus.lastPose.pitch}°` : ''}
+                {visionStatus?.audio ? ` · Speech: ${visionStatus.audio.speechScore}` : ''}
+              </div>
+              {Array.isArray(visionStatus?.lastDetections) && visionStatus.lastDetections.length > 0 && (
+                <div className="bg-black/80 text-[10px] text-amber-300 font-mono px-2 py-1 rounded backdrop-blur-xs self-end border border-amber-500/30">
+                  {visionStatus.lastDetections.map((d) => `${d.categoryName || d.label}: ${Math.round((d.score || 0) * 100)}%`).join(' | ')}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
