@@ -22,7 +22,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("start_time", sa.DateTime(timezone=True), nullable=True))
         batch_op.add_column(sa.Column("end_time", sa.DateTime(timezone=True), nullable=True))
         batch_op.add_column(sa.Column("status", sa.String(), nullable=False, server_default="SCHEDULED"))
-        batch_op.add_column(sa.Column("results_visible", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+        batch_op.add_column(sa.Column("results_visible", sa.Boolean(), nullable=False, server_default=sa.false()))
 
     op.create_table(
         "exam_questions",
@@ -49,7 +49,7 @@ def upgrade() -> None:
         sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("score", sa.Integer(), nullable=True),
         sa.Column("violation_count", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("is_flagged", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("is_flagged", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("flagged_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("flag_reason", sa.String(), nullable=True),
         sa.CheckConstraint("status IN ('IN_PROGRESS', 'SUBMITTED', 'EVALUATED')", name="ck_exam_attempt_status"),
@@ -83,37 +83,80 @@ def upgrade() -> None:
     with op.batch_alter_table("exam_sessions") as batch_op:
         batch_op.add_column(sa.Column("attempt_id", sa.String(), nullable=True))
 
-    op.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS trg_attempt_auto_submit_insert
-        BEFORE INSERT ON exam_attempts
-        FOR EACH ROW
-        BEGIN
-          SELECT CASE
-            WHEN NEW.auto_submit_time > (SELECT end_time FROM exams WHERE id = NEW.exam_id)
-            THEN RAISE(ABORT, 'auto_submit_time exceeds exam end_time')
-          END;
-        END;
-        """
-    )
-    op.execute(
-        """
-        CREATE TRIGGER IF NOT EXISTS trg_attempt_auto_submit_update
-        BEFORE UPDATE OF auto_submit_time, exam_id ON exam_attempts
-        FOR EACH ROW
-        BEGIN
-          SELECT CASE
-            WHEN NEW.auto_submit_time > (SELECT end_time FROM exams WHERE id = NEW.exam_id)
-            THEN RAISE(ABORT, 'auto_submit_time exceeds exam end_time')
-          END;
-        END;
-        """
-    )
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_attempt_auto_submit_insert
+            BEFORE INSERT ON exam_attempts
+            FOR EACH ROW
+            BEGIN
+              SELECT CASE
+                WHEN NEW.auto_submit_time > (SELECT end_time FROM exams WHERE id = NEW.exam_id)
+                THEN RAISE(ABORT, 'auto_submit_time exceeds exam end_time')
+              END;
+            END;
+            """
+        )
+        op.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS trg_attempt_auto_submit_update
+            BEFORE UPDATE OF auto_submit_time, exam_id ON exam_attempts
+            FOR EACH ROW
+            BEGIN
+              SELECT CASE
+                WHEN NEW.auto_submit_time > (SELECT end_time FROM exams WHERE id = NEW.exam_id)
+                THEN RAISE(ABORT, 'auto_submit_time exceeds exam end_time')
+              END;
+            END;
+            """
+        )
+    elif bind.dialect.name == "postgresql":
+        op.execute(
+            """
+            CREATE OR REPLACE FUNCTION fn_check_attempt_auto_submit()
+            RETURNS TRIGGER AS $$
+            DECLARE
+                v_end_time TIMESTAMP WITH TIME ZONE;
+            BEGIN
+                SELECT end_time INTO v_end_time FROM exams WHERE id = NEW.exam_id;
+                IF v_end_time IS NOT NULL AND NEW.auto_submit_time > v_end_time THEN
+                    RAISE EXCEPTION 'auto_submit_time exceeds exam end_time';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            """
+        )
+        op.execute(
+            """
+            DROP TRIGGER IF EXISTS trg_attempt_auto_submit_insert ON exam_attempts;
+            CREATE TRIGGER trg_attempt_auto_submit_insert
+            BEFORE INSERT ON exam_attempts
+            FOR EACH ROW
+            EXECUTE FUNCTION fn_check_attempt_auto_submit();
+            """
+        )
+        op.execute(
+            """
+            DROP TRIGGER IF EXISTS trg_attempt_auto_submit_update ON exam_attempts;
+            CREATE TRIGGER trg_attempt_auto_submit_update
+            BEFORE UPDATE OF auto_submit_time, exam_id ON exam_attempts
+            FOR EACH ROW
+            EXECUTE FUNCTION fn_check_attempt_auto_submit();
+            """
+        )
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS trg_attempt_auto_submit_update")
-    op.execute("DROP TRIGGER IF EXISTS trg_attempt_auto_submit_insert")
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        op.execute("DROP TRIGGER IF EXISTS trg_attempt_auto_submit_update")
+        op.execute("DROP TRIGGER IF EXISTS trg_attempt_auto_submit_insert")
+    elif bind.dialect.name == "postgresql":
+        op.execute("DROP TRIGGER IF EXISTS trg_attempt_auto_submit_update ON exam_attempts")
+        op.execute("DROP TRIGGER IF EXISTS trg_attempt_auto_submit_insert ON exam_attempts")
+        op.execute("DROP FUNCTION IF EXISTS fn_check_attempt_auto_submit")
 
     with op.batch_alter_table("exam_sessions") as batch_op:
         batch_op.drop_column("attempt_id")

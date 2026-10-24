@@ -1,39 +1,77 @@
 import os
+import urllib.parse
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 
+# Load .env if present (checks app/.env, backend/.env, and current directory)
+_env_path = Path(__file__).resolve().parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path)
+_backend_env = Path(__file__).resolve().parent.parent / ".env"
+if _backend_env.exists():
+    load_dotenv(dotenv_path=_backend_env)
+load_dotenv()
 
-def _resolve_database_url() -> str:
-    configured = os.getenv("DATABASE_URL", "sqlite:///./smartproctor.db")
+
+def _normalize_database_url(configured: str) -> str:
     sqlite_prefix = "sqlite:///"
 
-    if not configured.startswith(sqlite_prefix):
+    if configured.startswith(sqlite_prefix):
+        db_path = configured[len(sqlite_prefix):]
+        if not db_path or db_path == ":memory:":
+            return configured
+
+        candidate = Path(db_path)
+        if candidate.is_absolute():
+            return configured
+
+        # Keep SQLite file location stable regardless of the process launch directory.
+        backend_dir = Path(__file__).resolve().parent.parent
+        resolved = (backend_dir / candidate).resolve()
+        return f"{sqlite_prefix}{resolved.as_posix()}"
+
+    if configured.startswith("sqlite"):
         return configured
 
-    db_path = configured[len(sqlite_prefix):]
-    if not db_path or db_path == ":memory:":
-        return configured
+    normalized = configured
+    if normalized.startswith("postgres://"):
+        normalized = "postgresql+psycopg://" + normalized[len("postgres://"):]
+    elif normalized.startswith("postgresql://"):
+        normalized = "postgresql+psycopg://" + normalized[len("postgresql://"):]
 
-    candidate = Path(db_path)
-    if candidate.is_absolute():
-        return configured
+    if normalized.startswith("postgresql+psycopg://"):
+        parsed = urllib.parse.urlsplit(normalized)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "sslmode" not in qs:
+            new_query = f"{parsed.query}&sslmode=require" if parsed.query else "sslmode=require"
+            normalized = urllib.parse.urlunsplit(
+                (parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment)
+            )
 
-    # Keep SQLite file location stable regardless of the process launch directory.
-    backend_dir = Path(__file__).resolve().parent.parent
-    resolved = (backend_dir / candidate).resolve()
-    return f"{sqlite_prefix}{resolved.as_posix()}"
+    return normalized
+
+
+def _resolve_database_url() -> str:
+    env = os.getenv("ENVIRONMENT", "development").strip().lower()
+    configured = (os.getenv("DATABASE_URL") or "").strip()
+    if not configured:
+        if env == "production":
+            raise RuntimeError("Missing required production environment variables: DATABASE_URL")
+        configured = "sqlite:///./smartproctor.db"
+    return _normalize_database_url(configured)
 
 
 DATABASE_URL = _resolve_database_url()
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}  # required for SQLite
-)
-
 if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False},
+    )
+
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
@@ -41,6 +79,17 @@ if DATABASE_URL.startswith("sqlite"):
         cursor.execute("PRAGMA busy_timeout=5000;")
         cursor.execute("PRAGMA synchronous=NORMAL;")
         cursor.close()
+else:
+    db_pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+    db_max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=db_pool_size,
+        max_overflow=db_max_overflow,
+        connect_args={"prepare_threshold": None},
+    )
 
 SessionLocal = sessionmaker(
     autocommit=False,

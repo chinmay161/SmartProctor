@@ -5,6 +5,7 @@ except ImportError:  # pragma: no cover - fallback for environments without opti
 
 from ..database import SessionLocal
 from .attempt_service import process_expired_attempts
+from .evidence_storage import purge_expired_evidence
 
 
 class AutoSubmitWorker:
@@ -16,8 +17,10 @@ class AutoSubmitWorker:
         if self.started:
             return
         self.run_once()
+        self.run_retention()
         if self.scheduler:
             self.scheduler.add_job(self.run_once, "interval", seconds=30, id="exam_auto_submit", replace_existing=True)
+            self.scheduler.add_job(self.run_retention, "interval", days=1, id="evidence_retention", replace_existing=True)
             self.scheduler.start()
         self.started = True
 
@@ -32,5 +35,12 @@ class AutoSubmitWorker:
         db = SessionLocal()
         try:
             return process_expired_attempts(db)
+        finally:
+            db.close()
+
+    def run_retention(self) -> int:
+        db = SessionLocal()
+        try:
+            return purge_expired_evidence(db)
         finally:
             db.close()

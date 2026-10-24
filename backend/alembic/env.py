@@ -3,7 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.database import Base
+from app.database import Base, DATABASE_URL, engine
 from app.models.audit import RoleAuditLog
 from app.models.enrollment import ExamEnrollment
 from app.models.exam import Exam
@@ -23,6 +23,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+config.set_main_option("sqlalchemy.url", DATABASE_URL)
+
 target_metadata = Base.metadata
 
 
@@ -41,14 +43,17 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = context.config.attributes.get("connection", None)
+    if connectable is None:
+        connectable = engine
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            render_as_batch=DATABASE_URL.startswith("sqlite"),
+        )
 
         with context.begin_transaction():
             context.run_migrations()

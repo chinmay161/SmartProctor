@@ -4,6 +4,7 @@ from ..models.exam_session import ExamSession
 from ..models.exam_attempt import ExamAttempt
 from ..models.violation import Violation
 from ..models.user_profile import UserProfile
+from .evidence_storage import resolve_evidence_field
 import io
 import csv
 
@@ -229,7 +230,7 @@ def get_exam_evidence(db: Session, exam_id: str):
                     "id": str(v.id),
                     "type": v.type or "UNKNOWN",
                     "severity": v.severity,
-                    "evidence_file": v.evidence_files,
+                    "evidence_file": resolve_evidence_field(v.evidence_files),
                     "timestamp": v.timestamp.isoformat() if v.timestamp else None
                 })
         

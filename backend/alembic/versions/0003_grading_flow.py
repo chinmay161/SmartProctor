@@ -27,7 +27,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("manual_score", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("final_score", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("max_score", sa.Integer(), nullable=False, server_default="1"))
-        batch_op.add_column(sa.Column("is_overridden", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+        batch_op.add_column(sa.Column("is_overridden", sa.Boolean(), nullable=False, server_default=sa.false()))
         batch_op.add_column(sa.Column("graded_at", sa.DateTime(timezone=True), nullable=True))
 
     with op.batch_alter_table("exam_attempts") as batch_op:
