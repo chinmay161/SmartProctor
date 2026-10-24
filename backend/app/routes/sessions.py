@@ -3,6 +3,8 @@ from datetime import timezone
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import and_
 
+from typing import Optional
+
 from ..auth.dependencies import canonicalize_role, get_current_user
 from ..auth.roles import deny_access, require_role
 from ..database import SessionLocal
@@ -13,9 +15,11 @@ from ..permissions.attempt_permissions import require_attempt_owner
 from ..schemas.violation import SystemCheckReport, ViolationReportRequest
 from ..services import exam_service as _exam_service
 from ..services.attempt_service import start_exam_attempt, submit_attempt
+from ..services.telemetry_service import record_event
 from ..services.violation_reporting import notify_proctors_from_thread, record_violation
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
+
 
 
 def require_teacher_or_admin(user=Depends(get_current_user)):
@@ -78,6 +82,15 @@ def start_exam_session(exam_id: str, user=Depends(require_role("student"))):
         db.add(session)
         db.commit()
         db.refresh(session)
+        record_event(
+            db,
+            session_id=session.id,
+            exam_id=exam_id,
+            student_id=user["sub"],
+            category="lifecycle",
+            name="session_started",
+            data={"attempt_id": attempt.id},
+        )
         return _serialize_session(session)
     finally:
         db.close()
@@ -112,6 +125,15 @@ def end_exam_session(session_id: str, user=Depends(require_role("student"))):
         session.status = SessionStatus.ENDED
         session.ended_at = session.ended_at or session.started_at
         db.commit()
+        record_event(
+            db,
+            session_id=session.id,
+            exam_id=session.exam_id,
+            student_id=user["sub"],
+            category="lifecycle",
+            name="session_ended",
+            data={"attempt_id": session.attempt_id},
+        )
         return {"message": "Exam session ended"}
     finally:
         db.close()
@@ -125,6 +147,15 @@ def resume_exam_session(session_id: str, user=Depends(require_role("student"))):
         if not session:
             raise HTTPException(404, "Session not found")
         resumed = _exam_service.resume_session(db, session_id)
+        record_event(
+            db,
+            session_id=session.id,
+            exam_id=session.exam_id,
+            student_id=user["sub"],
+            category="lifecycle",
+            name="session_resumed",
+            data={"attempt_id": session.attempt_id},
+        )
         return resumed
     finally:
         db.close()
@@ -297,3 +328,61 @@ def get_session_timeline(session_id: str, user=Depends(require_teacher_or_admin)
         return timeline
     finally:
         db.close()
+
+
+@router.get("/{session_id}/events")
+def get_session_events(
+    session_id: str,
+    category: Optional[str] = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user=Depends(require_teacher_or_admin),
+):
+    """Retrieve flight recorder events for a session.
+    Exam creator, assigned proctor or admin (same permissions as timeline).
+    Numbers and short strings only: NO audio, NO images, NO tokens, NO emails, NO answer text.
+    """
+    from ..models.session_event import SessionEvent
+    from ..permissions.proctor_permissions import require_proctor
+
+    db = SessionLocal()
+    try:
+        session = db.query(ExamSession).filter_by(id=session_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+        if not roles.intersection({"admin", "school_admin"}):
+            require_proctor(db, session.exam_id, user["sub"])
+
+        query = db.query(SessionEvent).filter_by(session_id=session_id)
+        if category:
+            query = query.filter(SessionEvent.category == category.lower().strip())
+
+        events = (
+            query.order_by(SessionEvent.server_ts.asc(), SessionEvent.seq.asc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            {
+                "id": e.id,
+                "trace_id": e.trace_id,
+                "session_id": e.session_id,
+                "exam_id": e.exam_id,
+                "student_id": e.student_id,
+                "seq": e.seq,
+                "client_ts": e.client_ts,
+                "server_ts": e.server_ts.isoformat() if e.server_ts else None,
+                "category": e.category,
+                "name": e.name,
+                "data": e.data,
+                "request_id": e.request_id,
+            }
+            for e in events
+        ]
+    finally:
+        db.close()
+

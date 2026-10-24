@@ -39,9 +39,23 @@ def _record_proctoring_stopped(session_id: str, telemetry, stopped_for_sec: floa
             duration_ms=int(stopped_for_sec * 1000),
             confidence=1.0,
         )
+        try:
+            from ..services.telemetry_service import record_event
+            record_event(
+                db,
+                session_id=session_id,
+                exam_id=session.exam_id,
+                student_id=session.student_id,
+                category="violation",
+                name="watchdog_fired",
+                data={"stopped_for_sec": int(stopped_for_sec), "detail": detail},
+            )
+        except Exception:
+            pass
         return session.exam_id, message
     finally:
         db.close()
+
 
 
 async def _close_ws_with_reason(ws: WebSocket, code: int, reason: str):
@@ -112,15 +126,49 @@ async def student_ws(ws: WebSocket, session_id: str):
                     if now - last_heartbeat < 4.0:
                         continue  # Rate limit
                     last_heartbeat = now
-                    manager.last_seen[session_id] = now
+                    prev_telemetry = manager.vision_telemetry.get(session_id)
                     telemetry = data.get("vision")
                     manager.vision_telemetry[session_id] = telemetry if isinstance(telemetry, dict) else None
+
+                    if camera_required and prev_telemetry is not None and isinstance(telemetry, dict):
+                        prev_healthy = vision_watchdog.is_healthy(prev_telemetry)
+                        curr_healthy = vision_watchdog.is_healthy(telemetry)
+                        if prev_healthy and not curr_healthy:
+                            try:
+                                from ..services.telemetry_service import record_event
+                                record_event(
+                                    db,
+                                    session_id=session_id,
+                                    exam_id=exam_id,
+                                    student_id=user["sub"],
+                                    category="perf",
+                                    name="vision_telemetry_stale",
+                                    data={"running": telemetry.get("running"), "phase": telemetry.get("phase")},
+                                )
+                            except Exception:
+                                pass
+                        elif not prev_healthy and curr_healthy:
+                            try:
+                                from ..services.telemetry_service import record_event
+                                record_event(
+                                    db,
+                                    session_id=session_id,
+                                    exam_id=exam_id,
+                                    student_id=user["sub"],
+                                    category="perf",
+                                    name="vision_telemetry_recovered",
+                                    data={"running": telemetry.get("running"), "phase": telemetry.get("phase")},
+                                )
+                            except Exception:
+                                pass
+
                     if camera_required and vision_watchdog.observe(session_id, telemetry, now):
                         stopped_for = vision_watchdog.outage_seconds(session_id, now)
                         result = await run_in_threadpool(_record_proctoring_stopped, session_id, telemetry, stopped_for)
                         if result:
                             await notify_proctors(*result)
                     # Don't broadcast raw heartbeats anymore, allow STATUS_SYNC to handle presence
+
                     
                 elif msg_type == "VIOLATION":
                     if now - last_violation < 0.5:

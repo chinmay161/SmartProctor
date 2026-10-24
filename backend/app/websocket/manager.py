@@ -78,12 +78,36 @@ class ConnectionManager:
                 await old_ws.close(code=4000)
             except Exception:
                 pass
+            try:
+                from ..services.telemetry_service import record_event
+                record_event(
+                    db=None,
+                    session_id=session_id,
+                    exam_id=exam_id,
+                    category="socket",
+                    name="student_socket_replaced",
+                    data={"close_code": 4000},
+                )
+            except Exception:
+                pass
                 
         self.student_connections[session_id] = ws
         self.session_to_exam[session_id] = exam_id
         self.last_seen[session_id] = time.time()
         self._ensure_broadcaster(exam_id)
         self._ensure_offline_sweeper()
+        try:
+            from ..services.telemetry_service import record_event
+            record_event(
+                db=None,
+                session_id=session_id,
+                exam_id=exam_id,
+                category="socket",
+                name="student_socket_connected",
+                data={"replaced": bool(old_ws and old_ws != ws)},
+            )
+        except Exception:
+            pass
 
     async def connect_proctor(self, exam_id: str, ws: WebSocket):
         await ws.accept()
@@ -98,7 +122,20 @@ class ConnectionManager:
 
     def disconnect_student(self, session_id: str, ws: WebSocket):
         if self.student_connections.get(session_id) == ws:
+            exam_id = self.session_to_exam.get(session_id)
             del self.student_connections[session_id]
+            try:
+                from ..services.telemetry_service import record_event
+                record_event(
+                    db=None,
+                    session_id=session_id,
+                    exam_id=exam_id,
+                    category="socket",
+                    name="student_socket_disconnected",
+                )
+            except Exception:
+                pass
+
 
     def disconnect_proctor(self, exam_id: str, ws: WebSocket):
         if ws in self.proctor_connections.get(exam_id, []):

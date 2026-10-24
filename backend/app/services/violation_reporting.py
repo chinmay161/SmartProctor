@@ -51,7 +51,31 @@ def record_violation(
         "integrity_score": integrity_score,
         "reason": reason,
     }
+
+    # Numbers and short strings only: NO audio, NO images, NO tokens, NO emails, NO answer text.
+    try:
+        from .telemetry_service import record_event
+        record_event(
+            db,
+            session_id=session.id,
+            exam_id=session.exam_id,
+            student_id=session.student_id,
+            category="violation",
+            name="violation_persisted",
+            data={
+                "type": violation_type,
+                "severity": severity,
+                "reason": reason,
+                "duration_ms": duration_ms,
+                "confidence": confidence,
+                "event_id": event_id,
+            },
+        )
+    except Exception:
+        pass
+
     return updated, message
+
 
 
 async def notify_proctors(exam_id: str, message: dict) -> None:

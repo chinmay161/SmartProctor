@@ -447,7 +447,21 @@ def submit_attempt_internal(db: Session, attempt: ExamAttempt, *, now: datetime 
         attempt.flag_reason = reason if attempt.flag_reason is None else attempt.flag_reason
     db.commit()
     db.refresh(attempt)
+    try:
+        from .telemetry_service import record_event
+        evt_name = "auto_submit" if reason == "auto_submit" else "attempt_submitted"
+        record_event(
+            db,
+            exam_id=attempt.exam_id,
+            student_id=attempt.student_id,
+            category="lifecycle",
+            name=evt_name,
+            data={"attempt_id": attempt.id, "reason": reason},
+        )
+    except Exception:
+        pass
     return attempt
+
 
 
 def force_end_exam(db: Session, exam_id: str, owner_id: str) -> tuple[Exam, int]:
