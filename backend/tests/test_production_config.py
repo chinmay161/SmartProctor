@@ -135,3 +135,18 @@ print('DOCS_DISABLED_OK')
     )
     assert proc.returncode == 0
     assert "DOCS_DISABLED_OK" in proc.stdout
+
+
+def test_normalize_database_url_strips_quotes():
+    from sqlalchemy.engine import make_url
+    from app.database import _normalize_database_url
+
+    # Malformed URL with outer quotes and a stray inner quote
+    malformed = '"postgresql://dummy_user:dummy_pass@ep-empty-glade-"b43e9qf7.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"'
+    normalized = _normalize_database_url(malformed)
+
+    u = make_url(normalized)
+    assert u.drivername == "postgresql+psycopg"
+    assert u.host == "ep-empty-glade-b43e9qf7.c-6.us-east-2.aws.neon.tech"
+    assert u.query.get("sslmode") == "require"
+

@@ -17,6 +17,9 @@ load_dotenv()
 
 
 def _normalize_database_url(configured: str) -> str:
+    # Clean up surrounding quotes and accidental stray quotes (e.g. from dashboard copy-paste)
+    configured = (configured or "").strip().strip("'\"").strip().replace('"', '').replace("'", "")
+
     sqlite_prefix = "sqlite:///"
 
     if configured.startswith(sqlite_prefix):
@@ -56,7 +59,8 @@ def _normalize_database_url(configured: str) -> str:
 
 def _resolve_database_url() -> str:
     env = os.getenv("ENVIRONMENT", "development").strip().lower()
-    configured = (os.getenv("DATABASE_URL") or "").strip()
+    raw = os.getenv("DATABASE_URL") or ""
+    configured = raw.strip().strip("'\"").strip().replace('"', '').replace("'", "")
     if not configured:
         if env == "production":
             raise RuntimeError("Missing required production environment variables: DATABASE_URL")
