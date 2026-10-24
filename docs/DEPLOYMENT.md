@@ -198,6 +198,7 @@ Now that you have both live URLs:
 | `S3_REGION` | If S3 | Render Dashboard | S3 region. | `auto` |
 | `EVIDENCE_URL_TTL_SECONDS` | No | `render.yaml` | Signed URL expiration time in seconds. | `3600` |
 | `EVIDENCE_RETENTION_DAYS` | No | `render.yaml` | Auto-cleanup retention period in days. | `30` |
+| `EVENT_RETENTION_DAYS` | No | `render.yaml` | Auto-cleanup retention period for flight recorder events in days. | `30` |
 | `AI_WORKER_BASE_URL` | No | Render Dashboard | Optional external AI worker URL. If unset, `/ai/*` routes return 503 and `/health` never calls it. | (empty) |
 | `SENTRY_DSN` | No | Render Dashboard | Sentry project DSN for backend error tracking. Initialized only if set. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
 | `SENTRY_TRACES_RATE` | No | `render.yaml` | Sample rate for backend performance tracing. | `0.05` |
