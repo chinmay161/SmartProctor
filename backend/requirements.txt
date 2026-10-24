@@ -24,3 +24,5 @@ reportlab==4.4.9
 tzdata==2026.5
 psycopg[binary]==3.3.6
 boto3==1.43.118
+requests==2.32.5
+
