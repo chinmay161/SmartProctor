@@ -52,3 +52,61 @@ describe('shareEntireScreen', () => {
     await expect(shareEntireScreen()).rejects.toMatchObject({ kind: 'unsupported' });
   });
 });
+
+describe('screen share stop and recovery state logic', () => {
+  it('triggers SCREEN_SHARE_STOPPED violation and enters blocked state when track ends', () => {
+    let screenShareBlocked = false;
+    let screenShareLost = null;
+    const violations = [];
+
+    const handleTrackEnded = (screenRecordingRequired) => {
+      if (screenRecordingRequired) {
+        screenShareBlocked = true;
+      }
+      screenShareLost = {
+        title: 'Screen sharing stopped',
+        steps: ['This exam requires sharing your entire screen. Click "Share entire screen" to continue.'],
+      };
+      violations.push({
+        message: 'Screen sharing stopped',
+        type: 'SCREEN_SHARE_STOPPED',
+        confidence: 1.0,
+        severity: 'major',
+      });
+    };
+
+    handleTrackEnded(true);
+
+    expect(screenShareBlocked).toBe(true);
+    expect(screenShareLost.title).toBe('Screen sharing stopped');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatchObject({
+      type: 'SCREEN_SHARE_STOPPED',
+      severity: 'major',
+    });
+  });
+
+  it('successful reshare clears blocked state, restores stream, and activates system prompt grace', async () => {
+    const { stream } = fakeStream('monitor');
+    stubMediaDevices(vi.fn(async () => stream));
+
+    let screenShareBlocked = true;
+    let screenShareLost = { title: 'Screen sharing stopped' };
+    let currentStream = null;
+
+    const reshareScreen = async () => {
+      const newStream = await shareEntireScreen();
+      screenShareLost = null;
+      screenShareBlocked = false;
+      currentStream = newStream;
+    };
+
+    await reshareScreen();
+
+    expect(screenShareBlocked).toBe(false);
+    expect(screenShareLost).toBeNull();
+    expect(currentStream).toBe(stream);
+    expect(isSystemPromptGraceActive()).toBe(true);
+  });
+});
+

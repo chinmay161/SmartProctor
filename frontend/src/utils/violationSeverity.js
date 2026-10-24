@@ -15,9 +15,11 @@ export const VISION_VIOLATION_SEVERITY = Object.freeze({
   VOICE_DETECTED: 'minor',
   // Not a vision type, but reported by the client-side proctoring flow on resume.
   PAGE_RELOAD: 'minor',
+  SCREEN_SHARE_STOPPED: 'major',
 });
 
 export const VIOLATION_DISPLAY_INFO = Object.freeze({
+  SCREEN_SHARE_STOPPED: { label: 'Screen sharing stopped', icon: 'MonitorOff' },
   VOICE_DETECTED: { label: 'Voice detected', icon: 'Mic' },
   MIC_DISCONNECTED: { label: 'Microphone disconnected', icon: 'MicOff' },
   NO_FACE: { label: 'No face detected', icon: 'UserX' },
@@ -51,4 +53,12 @@ const legacySeverityFromMessage = (message) => {
 
 export const severityForViolation = (type, message) =>
   VISION_VIOLATION_SEVERITY[type] || legacySeverityFromMessage(message);
+
+export const isVisionViolationEnabled = (type, cfg) => {
+  if (type === 'NO_FACE') return Boolean(cfg?.detectNoFace);
+  if (type === 'MULTIPLE_FACES') return Boolean(cfg?.detectMultipleFaces);
+  if (type === 'PHONE_DETECTED' || type === 'BOOK_DETECTED') return Boolean(cfg?.detectMobilePhone);
+  if (type === 'VOICE_DETECTED' || type === 'MIC_DISCONNECTED') return Boolean(cfg?.audioMonitoring);
+  return true;
+};
 
