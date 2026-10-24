@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import object_session
 
 from ..auth.dependencies import get_current_user
-from ..auth.roles import require_role
+from ..auth.roles import deny_access, require_role
 from ..database import SessionLocal
 from ..models.exam import Exam
 from ..models.exam import ExamStatus
@@ -484,7 +484,7 @@ def list_exams(user=Depends(get_current_user)):
         if "student" in roles:
             exams = list_available_exams_for_student(db, user["sub"])
             return [_serialize_exam(exam, student_id=user["sub"]) for exam in exams]
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+        deny_access(user, ["teacher", "student"])
     finally:
         db.close()
 
@@ -503,7 +503,7 @@ def list_available_exams(user=Depends(require_role("student"))):
 def get_exam(exam_id: str, user=Depends(get_current_user)):
     roles = set(user.get("roles") or [])
     if "teacher" not in roles and "student" not in roles:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+        deny_access(user, ["teacher", "student"])
 
     db = SessionLocal()
     try:

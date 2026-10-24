@@ -2,7 +2,8 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..auth.dependencies import get_current_user
+from ..auth.dependencies import canonicalize_role, get_current_user
+from ..auth.roles import deny_access
 from ..database import SessionLocal
 from ..models.question import Question
 from ..schemas.question import QuestionCreateRequest, QuestionImportRequest
@@ -11,15 +12,17 @@ router = APIRouter(prefix="/api/questions", tags=["Questions"])
 
 
 def _require_question_access(user):
-    roles = set(user.get("roles") or [])
-    if not roles.intersection({"teacher", "student", "admin"}):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    required = ["teacher", "student", "admin"]
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    if not roles.intersection(required):
+        deny_access(user, required)
 
 
 def _require_question_write_access(user):
-    roles = set(user.get("roles") or [])
-    if not roles.intersection({"teacher", "admin"}):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    required = ["teacher", "admin"]
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    if not roles.intersection(required):
+        deny_access(user, required)
 
 
 def _serialize_question(question: Question) -> dict:

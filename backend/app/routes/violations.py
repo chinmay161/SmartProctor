@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..auth.dependencies import canonicalize_role, get_current_user
-from ..auth.roles import require_role
+from ..auth.roles import deny_access, require_role
 from ..database import SessionLocal
 from ..models.exam_attempt import ExamAttempt
 from ..models.exam_session import ExamSession
@@ -100,7 +100,7 @@ def list_violations(session_id: str, user=Depends(get_current_user)):
         is_owner = (session.student_id == user.get("sub"))
 
         if not (is_staff or is_owner):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+            deny_access(user, ["teacher", "admin", "school_admin", "proctor"])
 
         violations = (
             db.query(Violation)

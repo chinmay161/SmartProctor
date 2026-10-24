@@ -4,7 +4,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import and_
 
 from ..auth.dependencies import canonicalize_role, get_current_user
-from ..auth.roles import require_role
+from ..auth.roles import deny_access, require_role
 from ..database import SessionLocal
 from ..models.exam import Exam
 from ..models.exam_attempt import ExamAttempt
@@ -19,9 +19,10 @@ router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 
 def require_teacher_or_admin(user=Depends(get_current_user)):
+    required = ["teacher", "admin", "school_admin"]
     roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
-    if not roles.intersection({"teacher", "admin", "school_admin"}):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if not roles.intersection(required):
+        deny_access(user, required)
     return user
 
 
