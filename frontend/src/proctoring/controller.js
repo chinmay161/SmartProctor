@@ -75,9 +75,35 @@ export function createVisionController({
   if (!video) throw new Error('createVisionController requires a <video> element in the DOM');
   const cfg = { ...CONTROLLER_DEFAULTS, ...options };
 
+  let micRequiredState = Boolean(micRequired);
+  let lastVoiceDroppedReason = null;
+  let lastPose = null;
+  let lastDetections = [];
   let stream = null;
   let tasks = null;
-  let audioEngine = null;
+  const handleAudioSample = (sample) => {
+    if (loopMode === 'monitor') {
+      const events = engine.pushAudio(sample);
+      if (import.meta.env.DEV) {
+        console.debug('[audio] sample:', {
+          ts: Math.round(sample.ts),
+          speechScore: sample.speechScore,
+          rms: sample.rms,
+          events: events.map((e) => e.type),
+          audioContextState: audioEngine?.getAudioContextState?.(),
+          trackReadyState: audioEngine?.getTrackReadyState?.(),
+        });
+      }
+      handleEvents(events);
+    } else {
+      lastVoiceDroppedReason = 'not_monitoring';
+    }
+  };
+
+  let audioEngine = options.audioEngine || null;
+  if (audioEngine?.onSample) {
+    audioEngine.onSample(handleAudioSample);
+  }
   let engine = createTemporalEngine(engineConfig);
   const blinkDetector = createBlinkDetector();
 
@@ -98,6 +124,11 @@ export function createVisionController({
   const objectTimes = [];
   let lastInferencePerf = null;
   let lastInferenceAt = null;
+  let lastFaceCount = 0;
+  let objectsLastRun = null;
+  let topObjects = [];
+  let objectInferenceCount = 0;
+  let recentPhoneDetections = [];
   let noBlinkShadowCount = 0;
   let lastFrameDiff = null;
   let collector = null; // per-sample callback for measure/calibrate
@@ -198,11 +229,7 @@ export function createVisionController({
     if (audioEngine) return audioEngine;
     const { createAudioEngine } = await import('./audioEngine.js');
     audioEngine = createAudioEngine({
-      onSample: (sample) => {
-        if (loopMode === 'monitor') {
-          handleEvents(engine.pushAudio(sample));
-        }
-      },
+      onSample: handleAudioSample,
       onTrackEvent: (kind) => {
         if (loopMode === 'monitor') {
           handleEvents(engine.micEvent(kind, performance.now()));
@@ -378,6 +405,7 @@ export function createVisionController({
 
     const landmarks = result.faceLandmarks || [];
     const faceCount = landmarks.length;
+    lastFaceCount = faceCount;
     let pose = null;
     let blinkScore = null;
     if (faceCount > 0) {
@@ -385,6 +413,7 @@ export function createVisionController({
       pose = poseFromMatrix(result.facialTransformationMatrixes?.[i]);
       blinkScore = blinkScoreFromBlendshapes(result.faceBlendshapes?.[i]?.categories);
     }
+    lastPose = pose ? { yaw: Math.round(pose.yaw), pitch: Math.round(pose.pitch), roll: Math.round(pose.roll) } : null;
     const blink = faceCount > 0 ? blinkDetector.update(blinkScore) : blinkDetector.update(null);
     return {
       ts: now,
@@ -410,6 +439,24 @@ export function createVisionController({
       objectMs = ewma(objectMs, result.ms);
       objectMainMs = ewma(objectMainMs, result.mainThreadMs);
       objectTimes.push(now);
+
+      objectsLastRun = Date.now();
+      objectInferenceCount += 1;
+      const rawDetections = result.detections || [];
+      lastDetections = rawDetections.slice(0, 5);
+      topObjects = [...rawDetections]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map((d) => ({ label: d.categoryName, score: Math.round(d.score * 100) / 100 }));
+
+      const nowWall = Date.now();
+      const phoneDetections = rawDetections.filter((d) => d.categoryName === 'cell phone');
+      if (phoneDetections.length > 0) {
+        const maxPhone = Math.max(...phoneDetections.map((d) => d.score));
+        recentPhoneDetections.push({ ts: nowWall, score: maxPhone });
+      }
+      recentPhoneDetections = recentPhoneDetections.filter((d) => nowWall - d.ts <= 10000);
+
       const sample = { ts: now, detections: result.detections, inferenceMs: result.ms };
       collector?.('objects', sample);
       if (mode === 'monitor') handleEvents(engine.pushObjects(sample));
@@ -474,7 +521,7 @@ export function createVisionController({
     const now = performance.now();
     const monitoring = loopMode === 'monitor';
 
-    if (monitoring && document.hidden) {
+    if (monitoring && typeof document !== 'undefined' && document.hidden) {
       // Hidden tabs throttle timers; TAB_SWITCH already covers this. Pause rather
       // than report the throttling as a disconnected camera.
       setPhase('paused');
@@ -609,8 +656,15 @@ export function createVisionController({
     lastAdaptAt = performance.now();
     setPhase('running');
     startLoop('monitor');
-    if (micRequired) {
-      void ensureAudioEngine().then((ae) => ae.start());
+    if (micRequiredState) {
+      void ensureAudioEngine().then(async (ae) => {
+        try {
+          await ae.start();
+          if (ae.resume) await ae.resume();
+        } catch (err) {
+          console.warn('[controller] Audio engine start error in start():', err);
+        }
+      });
     }
   }
 
@@ -628,11 +682,30 @@ export function createVisionController({
     const inferenceAgeMs = lastInferencePerf === null ? null : Math.round(now - lastInferencePerf);
     const audioTelemetry = audioEngine
       ? audioEngine.getTelemetry()
-      : { running: false, speechScore: 0, rms: 0, lastAudioAt: null };
+      : { running: false, speechScore: 0, rms: 0, lastAudioAt: null, samplesCount: 0, lastTopCategory: null };
+
+    const nowWall = Date.now();
+    recentPhoneDetections = recentPhoneDetections.filter((d) => nowWall - d.ts <= 10000);
+    const maxPhoneScore = recentPhoneDetections.length > 0
+      ? Math.round(Math.max(...recentPhoneDetections.map((d) => d.score)) * 100) / 100
+      : 0;
+
+    const voiceEpisodeOpen = engine ? Boolean(engine.getEpisodes?.()?.VOICE_DETECTED?.active) : false;
+    const effectiveDroppedReason = lastVoiceDroppedReason
+      || engine?.getLastVoiceDroppedReason?.()
+      || (!audioTelemetry.running && micRequiredState ? 'audio_not_running' : null);
+
+    const fullAudioTelemetry = {
+      ...audioTelemetry,
+      voiceEpisodeOpen,
+      droppedReason: effectiveDroppedReason,
+    };
+
     return {
       mode: 'client',
       phase,
       running: loopMode === 'monitor' && phase === 'running' && inferenceAgeMs !== null && inferenceAgeMs < cfg.staleAfterMs,
+      faceCount: lastFaceCount,
       faceFps: Math.round((faceTimes.length / windowSec) * 10) / 10,
       objectFps: tasks?.objects ? Math.round((objectTimes.length / windowSec) * 10) / 10 : null,
       targetFaceFps: Math.round(faceFps * 10) / 10,
@@ -648,14 +721,21 @@ export function createVisionController({
       camera: cameraStatus.state,
       cameraPermission: cameraStatus.permission,
       noBlinkShadowCount,
-      audio: audioTelemetry,
+      audio: fullAudioTelemetry,
+      speechScore: audioTelemetry?.speechScore ?? 0,
+      objectsLastRun,
+      topObjects,
+      maxPhoneScore,
+      objectInferenceCount,
+      lastDetections,
+      lastPose,
     };
   }
 
   function dispose() {
     disposed = true;
     stopLoop();
-    audioEngine?.dispose();
+    audioEngine?.dispose?.();
     audioEngine = null;
     if (rvfcHandle !== null && typeof video.cancelVideoFrameCallback === 'function') {
       video.cancelVideoFrameCallback(rvfcHandle);
@@ -677,6 +757,25 @@ export function createVisionController({
     requestMic,
     ensureAudioEngine,
     getAudioEngine: () => audioEngine,
+    setMicRequired: (val) => {
+      micRequiredState = Boolean(val);
+      if (micRequiredState && phase === 'running') {
+        void ensureAudioEngine().then(async (ae) => {
+          try {
+            await ae.start();
+            if (ae.resume) await ae.resume();
+          } catch (err) {
+            console.warn('[controller] Audio engine start error in setMicRequired():', err);
+          }
+        });
+      }
+    },
+    setVoiceDroppedReason: (reason) => {
+      lastVoiceDroppedReason = reason;
+      if (engine?.setVoiceDroppedReason) {
+        engine.setVoiceDroppedReason(reason);
+      }
+    },
     loadModels,
     measure,
     calibrate,

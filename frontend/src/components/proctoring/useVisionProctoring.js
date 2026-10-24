@@ -79,6 +79,10 @@ export function useVisionProctoring({ detectObjects = true, micRequired = false,
     onShadowRef.current = onShadowViolation;
   }, [onViolation, onShadowViolation]);
 
+  useEffect(() => {
+    controllerRef.current?.setMicRequired?.(micRequired);
+  }, [micRequired]);
+
   const ensureController = useCallback(async () => {
     if (controllerRef.current) return controllerRef.current;
     if (!loadingRef.current) {
@@ -153,6 +157,18 @@ export function useVisionProctoring({ detectObjects = true, micRequired = false,
   const getTelemetry = useCallback(() => controllerRef.current?.getTelemetry() ?? null, []);
   const captureEvidence = useCallback(() => controllerRef.current?.captureEvidence() ?? null, []);
 
+  const resumeAudio = useCallback(async () => {
+    const controller = await ensureController();
+    const ae = await controller.ensureAudioEngine();
+    await ae.start();
+    if (ae.resume) await ae.resume();
+    return Boolean(typeof ae.isRunning === 'function' ? ae.isRunning() : ae.isReady?.());
+  }, [ensureController]);
+
+  const setVoiceDroppedReason = useCallback((reason) => {
+    controllerRef.current?.setVoiceDroppedReason?.(reason);
+  }, []);
+
   const dispose = useCallback(() => {
     controllerRef.current?.dispose();
     controllerRef.current = null;
@@ -172,6 +188,8 @@ export function useVisionProctoring({ detectObjects = true, micRequired = false,
     requestCamera,
     requestMic,
     ensureAudioEngine,
+    resumeAudio,
+    setVoiceDroppedReason,
     loadModels,
     measure,
     calibrate,
@@ -180,6 +198,6 @@ export function useVisionProctoring({ detectObjects = true, micRequired = false,
     getTelemetry,
     captureEvidence,
     dispose,
-  }), [phase, stream, cameraStatus, requestCamera, requestMic, ensureAudioEngine, loadModels, measure, calibrate, start, stop, getTelemetry, captureEvidence, dispose]);
+  }), [phase, stream, cameraStatus, requestCamera, requestMic, ensureAudioEngine, resumeAudio, setVoiceDroppedReason, loadModels, measure, calibrate, start, stop, getTelemetry, captureEvidence, dispose]);
 }
 

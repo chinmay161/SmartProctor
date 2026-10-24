@@ -87,6 +87,10 @@ const MIC_HELP = {
     title: 'This browser cannot access a microphone',
     steps: ['Use a recent version of Chrome, Edge, Firefox or Safari, and open the exam over https.'],
   },
+  'load-failed': {
+    title: 'The audio proctoring model could not be loaded',
+    steps: ['Check your internet connection, reconnect your microphone, and retry.'],
+  },
   unknown: {
     title: 'The microphone could not be started',
     steps: ['Reconnect your microphone or restart the browser, then retry.'],
@@ -315,10 +319,17 @@ const PreExamGate = ({
             const ae = await vision?.ensureAudioEngine?.();
             if (!ae) return { ok: false, kind: 'unknown', error: 'audioEngine unavailable' };
             const req = await vision.requestMic();
-            if (req.ok) {
+            if (!req.ok) return req;
+            try {
               await ae.start?.();
+              if (typeof ae.isReady === 'function' && !ae.isReady()) {
+                throw new Error('Audio engine failed to initialize');
+              }
+            } catch (err) {
+              console.error('[PreExamGate] Audio engine failed to start:', err);
+              return { ok: false, kind: 'load-failed', error: err?.message || String(err) };
             }
-            return req;
+            return { ok: true };
           });
           results.mic = r;
           if (!r.ok) {
