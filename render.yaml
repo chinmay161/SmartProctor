@@ -54,3 +54,10 @@ services:
         sync: false
       - key: AI_WORKER_TIMEOUT_SECONDS
         value: "10"
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_TRACES_RATE
+        sync: false
+      - key: LOG_HASH_SALT
+        sync: false
+

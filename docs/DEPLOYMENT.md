@@ -199,6 +199,9 @@ Now that you have both live URLs:
 | `EVIDENCE_URL_TTL_SECONDS` | No | `render.yaml` | Signed URL expiration time in seconds. | `3600` |
 | `EVIDENCE_RETENTION_DAYS` | No | `render.yaml` | Auto-cleanup retention period in days. | `30` |
 | `AI_WORKER_BASE_URL` | No | Render Dashboard | Optional external AI worker URL. If unset, `/ai/*` routes return 503 and `/health` never calls it. | (empty) |
+| `SENTRY_DSN` | No | Render Dashboard | Sentry project DSN for backend error tracking. Initialized only if set. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
+| `SENTRY_TRACES_RATE` | No | `render.yaml` | Sample rate for backend performance tracing. | `0.05` |
+| `LOG_HASH_SALT` | No | Render Dashboard | Salt for HMAC-SHA256 anonymized user logging (`user_hash`). | `smartproctor-log-salt` |
 
 ### Frontend Variables (Vercel)
 
@@ -209,8 +212,37 @@ Now that you have both live URLs:
 | `VITE_AUTH0_CLIENT_ID` | Yes | Vercel Project Settings | Auth0 SPA Client ID. | `...` |
 | `VITE_AUTH0_AUDIENCE` | Yes | Vercel Project Settings | Auth0 API identifier. | `https://api.smartproctor.com` |
 | `VITE_INFERENCE_MODE` | No | Vercel Project Settings | AI inference mode (`client` on-device MediaPipe or `server`). | `client` |
+| `VITE_SENTRY_DSN` | No | Vercel Project Settings | Sentry project DSN for frontend error tracking. Initialized only if set. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
+| `VITE_SENTRY_TRACES_RATE` | No | Vercel Project Settings | Sample rate for frontend tracing. | `0.05` |
+| `SENTRY_AUTH_TOKEN` | Build Only | Vercel Env (Build) | Sentry authentication token for build-time sourcemap upload. | `sntrys_...` |
+| `SENTRY_ORG` | Build Only | Vercel Env (Build) | Sentry organization slug for sourcemap release. | `my-org` |
+| `SENTRY_PROJECT` | Build Only | Vercel Env (Build) | Sentry project slug for frontend sourcemaps. | `smartproctor-frontend` |
+
+### Error Tracking & Sentry Verification
+
+#### 1. Backend Verification (`POST /admin/diagnostics/trace-test`)
+An admin-only diagnostic endpoint is provided to confirm backend exceptions and request correlation IDs reach Sentry:
+```bash
+curl -X POST https://smartproctor-backend.onrender.com/admin/diagnostics/trace-test \
+  -H "Authorization: Bearer <ADMIN_JWT_TOKEN>"
+```
+Expected behavior:
+- Unauthenticated requests receive HTTP `401 Unauthorized`.
+- Non-admin requests receive HTTP `403 Forbidden`.
+- Authenticated admin requests trigger a deliberate `RuntimeError("Deliberate diagnostic exception for Sentry trace testing")`, resulting in HTTP `500`. Sentry captures the error event with tag `request_id` and sanitized headers (no Bearer tokens or cookies).
+
+#### 2. Frontend Verification (Dev Trigger)
+When developing locally (`npm run dev`), open the browser DevTools console on any page and execute:
+```javascript
+window.__triggerSentryTestError();
+```
+Expected behavior:
+- Throws a deliberate `Error('Deliberate test error for Sentry frontend verification')`.
+- Captured by Sentry and tagged with user role (once logged in) and `session_id` (during exams).
+- Sensitive tokens in URLs and payload data are scrubbed before transmission.
 
 ---
+
 
 ## 8. Deployment Order
 
