@@ -39,6 +39,8 @@ const TeacherMonitoringPage = () => {
   const [timelineModalOpen, setTimelineModalOpen] = useState(false);
   const [timelineData, setTimelineData] = useState([]);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const [activeTimelineSessionId, setActiveTimelineSessionId] = useState(null);
+  const [timelineCategoryFilter, setTimelineCategoryFilter] = useState('all');
   
   const wsRefs = useRef({});
   const intervalRef = useRef(null);
@@ -323,23 +325,84 @@ const TeacherMonitoringPage = () => {
   };
 
   const openTimeline = async (sessionId) => {
+    setActiveTimelineSessionId(sessionId);
     setTimelineModalOpen(true);
     setLoadingTimeline(true);
     setTimelineData([]);
+    setTimelineCategoryFilter('all');
     try {
-      const data = await authAwareCall({
-        path: `/sessions/${sessionId}/timeline`,
-        method: 'GET',
-        auth0Authenticated: isAuthenticated,
-        getAccessTokenSilently,
-        auth0Audience
+      const [timelineRes, eventsRes] = await Promise.allSettled([
+        authAwareCall({
+          path: `/sessions/${sessionId}/timeline`,
+          method: 'GET',
+          auth0Authenticated: isAuthenticated,
+          getAccessTokenSilently,
+          auth0Audience
+        }),
+        authAwareCall({
+          path: `/sessions/${sessionId}/events?limit=500`,
+          method: 'GET',
+          auth0Authenticated: isAuthenticated,
+          getAccessTokenSilently,
+          auth0Audience
+        })
+      ]);
+
+      const baseTimeline = timelineRes.status === 'fulfilled' && Array.isArray(timelineRes.value) ? timelineRes.value : [];
+      const sessionEvents = eventsRes.status === 'fulfilled' && eventsRes.value && Array.isArray(eventsRes.value.events)
+        ? eventsRes.value.events
+        : [];
+
+      // Map session_events (flight recorder) into timeline format
+      const flightEvents = sessionEvents.map(evt => ({
+        timestamp: evt.server_ts || (evt.client_ts ? new Date(evt.client_ts).toISOString() : new Date().toISOString()),
+        event: evt.name,
+        category: evt.category || 'lifecycle',
+        data: evt.data || {},
+        source: 'flight_recorder',
+        seq: evt.seq,
+        trace_id: evt.trace_id,
+        rawEvent: evt
+      }));
+
+      // Enrich base timeline events with a category if missing
+      const enrichedBase = baseTimeline.map(item => ({
+        ...item,
+        category: item.source === 'violation' ? 'violation' : (item.category || 'audit')
+      }));
+
+      // Merge and sort chronologically
+      const merged = [...enrichedBase, ...flightEvents].sort((a, b) => {
+        const timeA = new Date(a.timestamp || 0).getTime();
+        const timeB = new Date(b.timestamp || 0).getTime();
+        return timeA - timeB;
       });
-      setTimelineData(data || []);
+
+      setTimelineData(merged);
     } catch(err) {
       showToast('Failed to load timeline', 'error');
     } finally {
       setLoadingTimeline(false);
     }
+  };
+
+  const handleDownloadTimelineJson = () => {
+    if (!timelineData || timelineData.length === 0) return;
+    const exportPayload = {
+      sessionId: activeTimelineSessionId,
+      exportedAt: new Date().toISOString(),
+      eventsCount: timelineData.length,
+      events: timelineData
+    };
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `session-${activeTimelineSessionId || 'events'}-flight-log.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
 
@@ -678,12 +741,42 @@ const TeacherMonitoringPage = () => {
           <div className="bg-card w-full max-w-3xl rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-4 border-b border-border flex justify-between items-center bg-muted/30">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Icon name="Activity" className="text-primary" /> Session Timeline
+                <Icon name="Activity" className="text-primary" /> Session Timeline &amp; Flight Recorder
               </h2>
-              <Button variant="ghost" size="icon" onClick={() => setTimelineModalOpen(false)}>
-                <Icon name="X" size={20} />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadTimelineJson}
+                  disabled={loadingTimeline || timelineData.length === 0}
+                  className="flex items-center gap-1.5 text-xs"
+                >
+                  <Icon name="Download" size={14} /> Download JSON
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => setTimelineModalOpen(false)}>
+                  <Icon name="X" size={20} />
+                </Button>
+              </div>
             </div>
+
+            {/* Category Filter Chips */}
+            <div className="px-4 py-2 border-b border-border bg-muted/20 flex items-center gap-1.5 overflow-x-auto text-xs">
+              <span className="text-muted-foreground mr-1 text-[11px] font-medium uppercase">Filter:</span>
+              {['all', 'gate', 'device', 'lifecycle', 'socket', 'violation', 'error', 'perf', 'audit'].map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setTimelineCategoryFilter(cat)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize transition-colors ${
+                    timelineCategoryFilter === cat
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
             <div className="p-4 py-6 overflow-y-auto flex-1 bg-muted/10 relative">
               {loadingTimeline ? (
                 <div className="flex justify-center py-10">
@@ -697,54 +790,126 @@ const TeacherMonitoringPage = () => {
                 <div className="relative pl-6">
                   <div className="absolute top-0 bottom-0 left-[11px] w-0.5 bg-border/50"></div>
                   <div className="space-y-6">
-                    {timelineData.map((evt, idx) => {
-                      const isViolation = evt.event === 'VIOLATION_RECORD';
-                      const isScoreDrop = evt.event === 'INTEGRITY_SCORE_CHANGE';
-                      const timeStr = new Date(evt.timestamp).toLocaleTimeString();
-                      
-                      return (
-                        <div key={idx} className="relative">
-                          <div className={`absolute -left-6 w-3 h-3 rounded-full mt-1.5 border-2 border-background ${isViolation ? 'bg-destructive' : isScoreDrop ? 'bg-warning' : 'bg-primary'}`}></div>
-                          <div className="bg-card border border-border/60 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow">
-                            <div className="flex justify-between items-start mb-1">
-                              <span className={`text-sm font-semibold capitalize ${isViolation ? 'text-destructive' : isScoreDrop ? 'text-warning' : 'text-foreground'}`}>
-                                {isViolation ? `Violation: ${formatViolationType(evt.data.type)}` : evt.event.replace(/_/g, ' ')}
-                              </span>
-                              <span className="text-xs text-muted-foreground font-mono">{timeStr}</span>
-                            </div>
-                            
-                            {isViolation && (
-                              <div className="mt-2 text-sm text-foreground/80 space-y-1">
-                                {evt.data.reason && <p><span className="font-semibold text-muted-foreground text-xs">Reason:</span> {evt.data.reason}</p>}
-                                <div className="flex gap-4 mt-1">
-                                  {evt.data.severity && <span><span className="font-semibold text-muted-foreground text-xs">Severity:</span> <span className={`capitalize ${evt.data.severity === 'severe' ? 'text-destructive' : 'text-warning'}`}>{evt.data.severity}</span></span>}
-                                  {evt.data.duration_ms && <span><span className="font-semibold text-muted-foreground text-xs">Duration:</span> {(evt.data.duration_ms / 1000).toFixed(1)}s</span>}
-                                </div>
-                                {evt.data.evidence && Array.isArray(evt.data.evidence) && evt.data.evidence.length > 0 && (
-                                  <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-                                    {evt.data.evidence.map((img, i) => (
-                                      <img key={i} src={(img.startsWith('http://') || img.startsWith('https://')) ? img : `${backendOrigin}${img}`} alt="Evidence" className="h-16 w-16 object-cover rounded border border-border" />
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            
-                            {isScoreDrop && (
-                              <p className="text-sm text-foreground/80 mt-1">
-                                Score reduced by <span className="font-bold text-destructive">{evt.data.deduction}</span>. New Score: {evt.data.new_score}
-                              </p>
-                            )}
+                    {timelineData
+                      .filter(evt => {
+                        if (timelineCategoryFilter === 'all') return true;
+                        const cat = (evt.category || '').toLowerCase();
+                        return cat === timelineCategoryFilter.toLowerCase();
+                      })
+                      .map((evt, idx) => {
+                        const isViolation = evt.event === 'VIOLATION_RECORD';
+                        const isScoreDrop = evt.event === 'INTEGRITY_SCORE_CHANGE';
+                        const isFlightRecorder = evt.source === 'flight_recorder';
+                        const timeStr = evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : '';
+                        
+                        let dotColor = 'bg-primary';
+                        if (isViolation || evt.category === 'violation' || evt.category === 'error') {
+                          dotColor = 'bg-destructive';
+                        } else if (isScoreDrop || evt.name === 'violation_dropped') {
+                          dotColor = 'bg-warning';
+                        } else if (evt.category === 'device' || evt.category === 'gate') {
+                          dotColor = 'bg-purple-500';
+                        } else if (evt.category === 'socket') {
+                          dotColor = 'bg-amber-500';
+                        } else if (evt.category === 'perf') {
+                          dotColor = 'bg-teal-500';
+                        }
 
-                            {!isViolation && !isScoreDrop && (
-                              <p className="text-xs font-mono text-muted-foreground mt-2 bg-muted p-2 rounded max-h-24 overflow-y-auto">
-                                {JSON.stringify(evt.data)}
-                              </p>
-                            )}
+                        return (
+                          <div key={idx} className="relative">
+                            <div className={`absolute -left-6 w-3 h-3 rounded-full mt-1.5 border-2 border-background ${dotColor}`}></div>
+                            <div className="bg-card border border-border/60 rounded-lg p-3 shadow-sm hover:shadow-md transition-shadow">
+                              <div className="flex justify-between items-start mb-1 gap-2">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`text-sm font-semibold capitalize ${
+                                    isViolation || evt.category === 'violation' || evt.category === 'error'
+                                      ? 'text-destructive'
+                                      : isScoreDrop || evt.name === 'violation_dropped'
+                                      ? 'text-warning'
+                                      : 'text-foreground'
+                                  }`}>
+                                    {isViolation
+                                      ? `Violation: ${formatViolationType(evt.data?.type)}`
+                                      : String(evt.event || evt.name || '').replace(/_/g, ' ')}
+                                  </span>
+                                  {evt.category && (
+                                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-muted/80 text-muted-foreground border border-border/50">
+                                      {evt.category}
+                                    </span>
+                                  )}
+                                  {isFlightRecorder && (
+                                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-primary/10 text-primary">
+                                      flight-rec
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">{timeStr}</span>
+                              </div>
+                              
+                              {/* Violations from existing backend violation record */}
+                              {isViolation && (
+                                <div className="mt-2 text-sm text-foreground/80 space-y-1">
+                                  {evt.data.reason && <p><span className="font-semibold text-muted-foreground text-xs">Reason:</span> {evt.data.reason}</p>}
+                                  <div className="flex gap-4 mt-1">
+                                    {evt.data.severity && <span><span className="font-semibold text-muted-foreground text-xs">Severity:</span> <span className={`capitalize ${evt.data.severity === 'severe' ? 'text-destructive' : 'text-warning'}`}>{evt.data.severity}</span></span>}
+                                    {evt.data.duration_ms && <span><span className="font-semibold text-muted-foreground text-xs">Duration:</span> {(evt.data.duration_ms / 1000).toFixed(1)}s</span>}
+                                  </div>
+                                  {evt.data.evidence && Array.isArray(evt.data.evidence) && evt.data.evidence.length > 0 && (
+                                    <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                                      {evt.data.evidence.map((img, i) => (
+                                        <img key={i} src={(img.startsWith('http://') || img.startsWith('https://')) ? img : `${backendOrigin}${img}`} alt="Evidence" className="h-16 w-16 object-cover rounded border border-border" />
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {isScoreDrop && (
+                                <p className="text-sm text-foreground/80 mt-1">
+                                  Score reduced by <span className="font-bold text-destructive">{evt.data.deduction}</span>. New Score: {evt.data.new_score}
+                                </p>
+                              )}
+
+                              {/* Flight Recorder violation_dropped event */}
+                              {isFlightRecorder && evt.name === 'violation_dropped' && (
+                                <div className="mt-2 text-xs text-foreground/80 space-y-1 bg-warning/5 border border-warning/20 p-2 rounded">
+                                  <div>
+                                    <span className="font-semibold text-warning">Drop Reason: </span>
+                                    <code className="text-warning font-mono bg-warning/10 px-1 py-0.5 rounded font-bold">{evt.data?.reason}</code>
+                                  </div>
+                                  {evt.data?.type && (
+                                    <div><span className="text-muted-foreground font-semibold">Violation Type:</span> {evt.data.type}</div>
+                                  )}
+                                  {evt.data?.rule && (
+                                    <div><span className="text-muted-foreground font-semibold">Rule:</span> {evt.data.rule}</div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Flight Recorder violation_reported event */}
+                              {isFlightRecorder && evt.name === 'violation_reported' && (
+                                <div className="mt-2 text-xs text-foreground/80 space-y-1 bg-destructive/5 border border-destructive/20 p-2 rounded">
+                                  <div>
+                                    <span className="font-semibold text-destructive">Type: </span>
+                                    <span className="font-bold text-destructive">{evt.data?.type}</span>
+                                    {evt.data?.severity && <span className="ml-2 capitalize">({evt.data.severity})</span>}
+                                  </div>
+                                  {evt.data?.confidence !== undefined && (
+                                    <div><span className="text-muted-foreground font-semibold">Confidence:</span> {typeof evt.data.confidence === 'number' ? (evt.data.confidence * 100).toFixed(0) + '%' : evt.data.confidence}</div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Generic data display for other flight events / audit logs */}
+                              {!isViolation && !isScoreDrop && !(isFlightRecorder && (evt.name === 'violation_dropped' || evt.name === 'violation_reported')) && evt.data && Object.keys(evt.data).length > 0 && (
+                                <p className="text-xs font-mono text-muted-foreground mt-2 bg-muted/60 p-2 rounded max-h-24 overflow-y-auto">
+                                  {JSON.stringify(evt.data)}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
                   </div>
                 </div>
               )}
