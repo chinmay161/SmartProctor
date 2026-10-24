@@ -74,6 +74,15 @@ const handleAuthFailure = () => {
  * Never rejects because of a token fetch failure.
  */
 apiClient.interceptors.request.use(async (config) => {
+  if (!config.headers) {
+    config.headers = {};
+  }
+  if (!config.headers['X-Request-ID']) {
+    const genId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `req-${Math.random().toString(36).slice(2, 11)}`;
+    config.headers['X-Request-ID'] = genId;
+  }
   if (!config.headers?.Authorization) {
     const token = await getAccessToken();
     if (token) {
@@ -129,16 +138,49 @@ apiClient.interceptors.response.use(
  * @returns {Promise}
  */
 export const apiRequest = async (method, path, data = null, config = {}) => {
+  const customHeaders = { ...(config.headers || {}) };
+  if (!customHeaders['X-Request-ID']) {
+    const genId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `req-${Math.random().toString(36).slice(2, 11)}`;
+    customHeaders['X-Request-ID'] = genId;
+  }
+  const requestId = customHeaders['X-Request-ID'];
+
   try {
     const response = await apiClient({
       method,
       url: path,
       data,
       ...config,
+      headers: customHeaders,
     });
     return response.data;
   } catch (error) {
-    throw error.response?.data || error.message;
+    const resRequestId = error.response?.headers?.['x-request-id'] ||
+      error.config?.headers?.['X-Request-ID'] ||
+      requestId;
+
+    if (error.response?.data) {
+      const payload = error.response.data;
+      if (typeof payload === 'object' && payload !== null) {
+        payload.requestId = resRequestId;
+        if (typeof payload.detail === 'string' && !payload.detail.includes('request id:')) {
+          payload.detail = `${payload.detail} (request id: ${resRequestId})`;
+        }
+        if (typeof payload.message === 'string' && !payload.message.includes('request id:')) {
+          payload.message = `${payload.message} (request id: ${resRequestId})`;
+        }
+        throw payload;
+      }
+      const rawText = String(payload);
+      throw rawText.includes('request id:') ? rawText : `${rawText} (request id: ${resRequestId})`;
+    }
+
+    const baseMsg = error.message || 'API request failed';
+    const err = new Error(baseMsg.includes('request id:') ? baseMsg : `${baseMsg} (request id: ${resRequestId})`);
+    err.requestId = resRequestId;
+    throw err;
   }
 };
 
@@ -181,11 +223,28 @@ export const apiPatch = (path, data = null, config = {}) => {
  * Upload file with multipart/form-data
  */
 export const apiUpload = (path, formData, onProgress = null) => {
+  const requestId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : `req-${Math.random().toString(36).slice(2, 11)}`;
   return apiClient.post(path, formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
+      'X-Request-ID': requestId,
     },
     onUploadProgress: onProgress ? (e) => onProgress(Math.round((e.loaded * 100) / e.total)) : undefined,
+  }).catch((error) => {
+    const resRequestId = error.response?.headers?.['x-request-id'] || requestId;
+    if (error.response?.data && typeof error.response.data === 'object') {
+      error.response.data.requestId = resRequestId;
+      if (typeof error.response.data.detail === 'string' && !error.response.data.detail.includes('request id:')) {
+        error.response.data.detail = `${error.response.data.detail} (request id: ${resRequestId})`;
+      }
+      if (typeof error.response.data.message === 'string' && !error.response.data.message.includes('request id:')) {
+        error.response.data.message = `${error.response.data.message} (request id: ${resRequestId})`;
+      }
+    }
+    error.requestId = resRequestId;
+    throw error;
   });
 };
 

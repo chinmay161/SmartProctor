@@ -250,9 +250,13 @@ def get_current_user(
     token_roles.extend(_normalize_roles(payload.get("role", [])))
     token_supported_role = _first_supported_role(token_roles)
 
+    from ..monitoring import current_user_sub_ctx, current_user_role_ctx
+    current_user_sub_ctx.set(sub)
+
     if token_supported_role:
         _upsert_local_profile_role(sub, email, token_supported_role)
         roles = list(dict.fromkeys(token_roles))
+        current_user_role_ctx.set(token_supported_role)
         return {
             "sub": sub,
             "email": email,
@@ -263,6 +267,7 @@ def get_current_user(
     # 2. Local database row
     local_role = _load_local_role(sub, email)
     if local_role:
+        current_user_role_ctx.set(local_role)
         return {
             "sub": sub,
             "email": email,
@@ -273,9 +278,11 @@ def get_current_user(
     # 3. Default student fallback
     default_role = _ensure_default_student_role(sub, email) or "student"
     _upsert_local_profile_role(sub, email, default_role)
+    current_user_role_ctx.set(default_role)
     return {
         "sub": sub,
         "email": email,
         "roles": [default_role],
         "role_source": "default",
     }
+

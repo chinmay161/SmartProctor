@@ -4,6 +4,15 @@ import { Auth0Provider } from '@auth0/auth0-react'
 import './index.css'
 import App from './App.jsx'
 import './styles/tailwind.css';
+import { initFrontendSentry } from './utils/sentryScrubber'
+
+initFrontendSentry();
+
+if (import.meta.env.DEV) {
+  window.__triggerSentryTestError = () => {
+    throw new Error('Deliberate test error for Sentry frontend verification');
+  };
+}
 
 const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN
 const auth0ClientId = import.meta.env.VITE_AUTH0_CLIENT_ID

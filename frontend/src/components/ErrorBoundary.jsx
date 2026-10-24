@@ -1,4 +1,5 @@
 import React from "react";
+import * as Sentry from "@sentry/react";
 import Icon from "./AppIcon";
 
 class ErrorBoundary extends React.Component {
@@ -14,8 +15,14 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     error.__ErrorBoundary = true;
     window.__COMPONENT_ERROR__?.(error, errorInfo);
+    try {
+      Sentry.captureException(error, { extra: errorInfo });
+    } catch {
+      // Safe no-op if Sentry is not initialized
+    }
     // console.log("Error caught by ErrorBoundary:", error, errorInfo);
   }
+
 
   render() {
     if (this.state?.hasError) {

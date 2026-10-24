@@ -33,6 +33,10 @@ export const authAwareCall = async ({
 }) => {
   const pathsToTry = [path, ...(Array.isArray(fallbackPaths) ? fallbackPaths : [])];
 
+  const requestId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    ? crypto.randomUUID()
+    : `req-${Math.random().toString(36).slice(2, 11)}`;
+
   let auth0Token = null;
   if (auth0Authenticated && typeof getAccessTokenSilently === 'function') {
     try {
@@ -41,17 +45,20 @@ export const authAwareCall = async ({
           audience: auth0Audience,
         },
       });
-    } catch (error) {
+    } catch {
       auth0Token = null;
     }
   }
 
+
   let lastError = null;
   for (let i = 0; i < pathsToTry.length; i += 1) {
     const candidatePath = pathsToTry[i];
-    const config = auth0Token
-      ? { headers: { Authorization: `Bearer ${auth0Token}` } }
-      : {};
+    const headers = {
+      'X-Request-ID': requestId,
+      ...(auth0Token ? { Authorization: `Bearer ${auth0Token}` } : {}),
+    };
+    const config = { headers };
 
     try {
       return await callHttpClient(method, candidatePath, body, config);
@@ -67,7 +74,24 @@ export const authAwareCall = async ({
     }
   }
 
+  if (lastError) {
+    if (typeof lastError === 'string') {
+      if (!lastError.includes('request id:')) {
+        lastError = `${lastError} (request id: ${requestId})`;
+      }
+    } else if (typeof lastError === 'object' && lastError !== null) {
+      lastError.requestId = lastError.requestId || requestId;
+      if (typeof lastError.detail === 'string' && !lastError.detail.includes('request id:')) {
+        lastError.detail = `${lastError.detail} (request id: ${requestId})`;
+      }
+      if (typeof lastError.message === 'string' && !lastError.message.includes('request id:')) {
+        lastError.message = `${lastError.message} (request id: ${requestId})`;
+      }
+    }
+  }
+
   throw lastError;
 };
 
 export default authAwareCall;
+

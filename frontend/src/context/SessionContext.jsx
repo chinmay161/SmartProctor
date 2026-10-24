@@ -3,6 +3,7 @@ import { useAuth0 } from '@auth0/auth0-react';
 import { extractRolesFromAuth0User } from '../utils/roleUtils';
 import { apiRequest } from '../services/api';
 import { setAccessTokenProvider, setLoginRedirectHandler } from '../services/httpClient';
+import { setSentryRole } from '../utils/sentryScrubber';
 
 // Keys written by the removed custom-session token storage. Exact names only:
 // other code (e.g. ThemeContext's 'smartproctor-theme') shares the prefix.
@@ -98,6 +99,7 @@ export const SessionProvider = ({ children }) => {
     if (claimRoles.length > 0) {
       resolvedSubRef.current = userSub;
       setRoles(claimRoles);
+      setSentryRole(claimRoles[0]);
       setHasResolvedRoles(true);
       return;
     }
@@ -123,6 +125,7 @@ export const SessionProvider = ({ children }) => {
 
         setProfile(remoteProfile);
         setRoles(resolved);
+        setSentryRole(resolved[0] || remoteProfile?.role || 'student');
       } catch {
         if (active) {
           setProfile(null);

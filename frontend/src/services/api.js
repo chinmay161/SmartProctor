@@ -12,6 +12,11 @@ export async function apiRequest(path, method = "GET", body = null, token) {
   const hasBody = body !== null && body !== undefined;
   const url = buildUrl(path);
 
+  const requestId = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    ? crypto.randomUUID()
+    : `req-${Math.random().toString(36).slice(2, 11)}`;
+  headers["X-Request-ID"] = requestId;
+
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -27,9 +32,12 @@ export async function apiRequest(path, method = "GET", body = null, token) {
       headers,
       body: hasBody ? JSON.stringify(body) : undefined,
     });
-  } catch (error) {
-    throw new Error(`Failed to reach API at ${url}. Check backend URL/CORS/protocol settings.`);
+  } catch {
+    const networkError = new Error(`Failed to reach API at ${url}. Check backend URL/CORS/protocol settings. (request id: ${requestId})`);
+    networkError.requestId = requestId;
+    throw networkError;
   }
+
 
   let payload = null;
   const contentType = res.headers.get("content-type") || "";
@@ -41,11 +49,21 @@ export async function apiRequest(path, method = "GET", body = null, token) {
   }
 
   if (!res.ok) {
-    throw new Error(payload?.detail || payload?.message || `API request failed (${res.status})`);
+    const resRequestId = res.headers.get("x-request-id") || requestId;
+    const baseMessage = payload?.detail || payload?.message || `API request failed (${res.status})`;
+    const errorMessage = baseMessage.includes("request id:")
+      ? baseMessage
+      : `${baseMessage} (request id: ${resRequestId})`;
+    const apiError = new Error(errorMessage);
+    apiError.requestId = resRequestId;
+    apiError.status = res.status;
+    apiError.payload = payload;
+    throw apiError;
   }
 
   return payload;
 }
+
 
 export const examApi = {
   listTeacherExams: (token) => apiRequest("/exams/", "GET", null, token),

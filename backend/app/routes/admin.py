@@ -304,3 +304,10 @@ def list_audit_logs(
         "page": page,
         "page_size": page_size,
     }
+
+
+@router.post("/diagnostics/trace-test")
+def trace_test(admin=Depends(require_role("admin"))):
+    """Deliberate exception for verifying Sentry error tracking."""
+    raise RuntimeError("Deliberate diagnostic exception for Sentry trace testing")
+
