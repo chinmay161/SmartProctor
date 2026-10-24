@@ -78,6 +78,27 @@ For automated role assignment (`teacher`, `student`, `admin`):
 - Grant scopes: `read:users`, `update:users`, `read:roles`, `assign:roles`.
 - Copy `AUTH0_MGMT_CLIENT_ID` and `AUTH0_MGMT_CLIENT_SECRET`.
 
+### D. Auth0 Post-Login Action ("Add roles to tokens")
+Auth0 access tokens do not include RBAC roles in their JWT claims by default. To ensure tokens carry role claims directly to the backend API without requiring Management API round-trips:
+1. In Auth0 Dashboard, navigate to **Actions** → **Library** → **Build Custom**.
+2. Name the action: `Add roles to tokens`.
+3. Trigger: **Login / Post Login**.
+4. Paste the following Action code:
+   ```javascript
+   exports.onExecutePostLogin = async (event, api) => {
+     const namespace = 'https://smartproctor.io';
+     if (event.authorization) {
+       api.accessToken.setCustomClaim(`${namespace}/roles`, event.authorization.roles);
+       api.idToken.setCustomClaim(`${namespace}/roles`, event.authorization.roles);
+     }
+   };
+   ```
+5. Click **Deploy**.
+6. Go to **Actions** → **Flows** → **Login** and drag the `Add roles to tokens` action into the flow between **Start** and **Complete**. Click **Apply**.
+
+> [!IMPORTANT]
+> **Re-authentication after role changes**: Access tokens are cryptographically signed and immutable once issued. When a user's role is changed or assigned in Auth0, the user must log out and log in again (or refresh their session) to receive an updated access token containing the new roles.
+
 ---
 
 ## 4. Backend Deployment to Render (Blueprint)
