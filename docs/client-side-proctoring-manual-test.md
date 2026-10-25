@@ -142,6 +142,36 @@ backend.
 |---|---|---|
 | H1 | Stop the backend mid-exam for 40 s, then restart it | While backend is down: student portal displays non-blocking banner ("Reconnecting… your answers are kept and will sync once the connection is restored."); teacher dashboard displays "Live updates reconnecting…" indicator; student answers still save locally / queue. Once backend restarts: student socket recovers by itself with exponential backoff and sends immediate vision heartbeat; zero false violations created (30 s grace prevents `PROCTORING_STOPPED`); student banner disappears; teacher dashboard recovers, refetches sessions list over REST to catch up on missed events, and resumes live updates. |
 
+### I. Teacher Review Labels
+
+| # | Action | Expected |
+|---|---|---|
+| I1 | View violation in Evidence Gallery or Violation Report as exam creator, assigned proctor, or admin | Violation shows current review status badge (`Not Reviewed` / `NONE` by default). Note input field is displayed. Action buttons **Confirm**, **False alarm**, and **Unsure** are visible. |
+| I2 | Enter note (e.g. "Glare on eyeglasses"), click **False alarm** | `PATCH /violations/{id}/review` succeeds with 200. Review status changes to `FALSE_POSITIVE` badge, and note is preserved. Session event `violation_reviewed` is recorded in telemetry. |
+| I3 | Check student attempt integrity score and violation count | The attempt's `integrity_score` and `violation_count` are **unchanged** (reviews are separate from student disputes). |
+| I4 | Export violation report via **Download CSV** or **Download JSON** | Output contains `review_status` and `review_note` columns/fields with the updated review values. |
+| I5 | Attempt to review as a student or unrelated teacher | Server returns **HTTP 403 Forbidden**. Only the exam creator, assigned proctor, or an admin can submit review labels. |
+
+### J. Report a Problem
+
+| # | Action | Expected |
+|---|---|---|
+| J1 | Click **Report a problem** from the exam portal header during an active exam | An **in-page modal** opens without exiting fullscreen, without firing `window.blur`, and without triggering any violation. The exam timer keeps running uninterrupted. |
+| J2 | Select category (e.g. `camera`), type a description, and submit | The frontend calls `await flightRecorder.flush()`, then posts to `POST /feedback/problem` with stripped `page_path` (no query params or tokens). Modal displays success message and closes. |
+| J3 | Click **Report a problem** from "Test my device" modal or Student Dashboard | Modal opens cleanly and submits problem report with category, text, and user token authentication. |
+| J4 | Submit more than 5 reports within 10 minutes from the same account | The 6th submission is rejected with **HTTP 429 Too Many Requests** ("Rate limit exceeded"). |
+| J5 | Admin navigates to Admin Panel → **Problem Reports** tab | Reports table lists category, text, time, page path, student ID, and status (`OPEN`/`RESOLVED`). Admin can click **View Events** to inspect the flight recorder trace events, and click **Resolve** to update status to `RESOLVED`. |
+
+### K. Pilot / Tuning Mode
+
+| # | Action | Expected |
+|---|---|---|
+| K1 | Teacher creates an exam with **Pilot / tuning mode** checked in the Security Settings wizard step | Exam is created with `wizard_config.pilotMode: true`. When queried, `GET /exams/{id}` exposes `pilot_mode: true`. |
+| K2 | Student starts the pilot-enabled exam | A collapsible **Pilot Tuning Mode** scenario checklist panel appears at the bottom-left of the exam screen showing 8 scripted scenarios: 1) look away left 5 s, 2) look down 5 s, 3) hold a phone up 5 s, 4) talk 5 s, 5) cover the camera 5 s, 6) second person in frame 5 s, 7) leave the frame 5 s, 8) switch tab once. |
+| K3 | Click **Start** on a scenario (e.g. "look away left 5 s") | Flight recorder records `scenario_start` event with category `scenario` and data `{ scenario: "look away left 5 s" }`. Scenario shows active state. Violation detection operates normally without suppression. |
+| K4 | Complete the test and click **Done** | Flight recorder records `scenario_end` event with `{ scenario: "look away left 5 s" }`. Checklist counter increments (e.g. 1/8). |
+| K5 | Student starts an exam with **Pilot / tuning mode** unchecked | The Pilot Tuning Mode scenario checklist panel is completely hidden. |
+
 ## What to send back
 
 - The recording sheet.
