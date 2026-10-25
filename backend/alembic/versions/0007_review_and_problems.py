@@ -1,6 +1,6 @@
 """add review labels to violations and create problem_reports table
 
-Revision ID: 0007_add_review_labels_and_problem_reports
+Revision ID: 0007_review_and_problems
 Revises: 0006_add_session_events
 Create Date: 2026-10-25 17:30:00
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "0007_add_review_labels_and_problem_reports"
+revision: str = "0007_review_and_problems"
 down_revision: Union[str, Sequence[str], None] = "0006_add_session_events"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -21,6 +21,13 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
+
+    # Ensure alembic_version column is wide enough in PostgreSQL for future revisions
+    if "alembic_version" in tables and bind.dialect.name == "postgresql":
+        try:
+            op.execute("ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64)")
+        except Exception:
+            pass
 
     # 1. Add review columns to violations if not present
     if "violations" in tables:
