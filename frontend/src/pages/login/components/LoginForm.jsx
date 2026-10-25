@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AuthTransitionSkeleton } from '../../../components/ui/Skeleton';
+import { isNativeApp, openUrl } from '../../../utils/platform';
 
 /* ─────────────── helpers ─────────────── */
 
@@ -62,6 +63,22 @@ const LoginForm = () => {
   const [transitionMessage, setTransitionMessage] = useState('Authenticating and loading workspace...');
   const [shake, setShake] = useState(false);
   const { loginWithRedirect, isLoading: auth0Loading } = useAuth0();
+  const navigate = useNavigate();
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef(null);
+
+  const handleVersionTap = () => {
+    tapCountRef.current += 1;
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = setTimeout(() => {
+      tapCountRef.current = 0;
+    }, 2500);
+
+    if (tapCountRef.current >= 5) {
+      tapCountRef.current = 0;
+      navigate('/app-spike');
+    }
+  };
 
   const triggerShake = () => {
     setShake(true);
@@ -89,6 +106,7 @@ const LoginForm = () => {
       setTransitionMessage('Redirecting to secure sign-in...');
       setIsRedirecting(true);
       await loginWithRedirect({
+        ...(isNativeApp() ? { openUrl } : {}),
         authorizationParams: { login_hint: formData.email.trim(), screen_hint: 'login' },
       });
     } catch {
@@ -103,7 +121,10 @@ const LoginForm = () => {
       setIsLoading(true);
       setTransitionMessage('Redirecting to Google sign-in...');
       setIsRedirecting(true);
-      await loginWithRedirect({ authorizationParams: { connection: 'google-oauth2' } });
+      await loginWithRedirect({
+        ...(isNativeApp() ? { openUrl } : {}),
+        authorizationParams: { connection: 'google-oauth2' },
+      });
     } catch {
       setIsRedirecting(false);
       setIsLoading(false);
@@ -340,6 +361,24 @@ const LoginForm = () => {
             {badge}
           </span>
         ))}
+      </div>
+
+      {/* Version text - tap 5 times to launch on-device benchmark */}
+      <div style={{ textAlign: 'center', marginTop: '12px' }}>
+        <span
+          onClick={handleVersionTap}
+          style={{
+            fontFamily: 'var(--auth-font-body)',
+            fontSize: '0.7rem',
+            color: 'var(--auth-text-secondary)',
+            opacity: 0.65,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+          title="v1.0.0 (tap 5 times for diagnostic benchmark)"
+        >
+          v1.0.0
+        </span>
       </div>
     </div>
   );

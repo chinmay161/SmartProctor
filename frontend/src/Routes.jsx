@@ -19,13 +19,25 @@ import ExamPortal from './pages/exam-portal';
 import TeacherMonitoringPage from './pages/exam-monitoring';
 import HeadPoseDiagnosticPage from './pages/headpose-diagnostic';
 import AIDiagnosticsDashboard from './pages/ai-diagnostics';
+import AppSpikeBenchmark from './pages/app-spike';
+
+import NativeAuthHandler from './components/auth/NativeAuthHandler';
+
+const isAppSpike = import.meta.env.VITE_APP_SPIKE === 'true';
 
 const Routes = () => {
   return (
     <BrowserRouter>
+      <NativeAuthHandler />
       <ErrorBoundary>
         <ScrollToTop />
         <RouterRoutes>
+          {isAppSpike && (
+            <Route
+              path="/app-spike"
+              element={<AppSpikeBenchmark />}
+            />
+          )}
           {/* Public Routes */}
           <Route 
             path="/" 

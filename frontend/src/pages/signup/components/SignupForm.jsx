@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { Link } from 'react-router-dom';
+import { isNativeApp, openUrl } from '../../../utils/platform';
 
 /* ─────────────── helpers ─────────────── */
 
@@ -131,7 +132,11 @@ const SignupForm = () => {
     if (!validateForm()) { triggerShake(); return; }
     try {
       setIsLoading(true);
-      await loginWithRedirect({ screen_hint: 'signup', appState: { returnTo: '/student-dashboard' } });
+      await loginWithRedirect({
+        appState: { returnTo: '/student-dashboard' },
+        authorizationParams: { screen_hint: 'signup' },
+        ...(isNativeApp() ? { openUrl } : {}),
+      });
     } catch {
       setErrors({ submit: 'Unable to open signup. Please try again.' });
       setIsLoading(false);
@@ -141,7 +146,11 @@ const SignupForm = () => {
   const handleGoogleSignup = async () => {
     try {
       setIsLoading(true);
-      await loginWithRedirect({ connection: 'google-oauth2', screen_hint: 'signup', appState: { returnTo: '/student-dashboard' } });
+      await loginWithRedirect({
+        appState: { returnTo: '/student-dashboard' },
+        authorizationParams: { connection: 'google-oauth2', screen_hint: 'signup' },
+        ...(isNativeApp() ? { openUrl } : {}),
+      });
     } catch {
       setIsLoading(false);
       setErrors({ submit: 'Failed to sign up with Google. Please try again.' });

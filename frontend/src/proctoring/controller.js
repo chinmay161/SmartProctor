@@ -27,7 +27,7 @@ export const CONTROLLER_DEFAULTS = Object.freeze({
   diffWidth: 32,
   diffHeight: 24,
   calibration: { minFaceRatio: 0.6, minSamples: 5, maxAbsYaw: 25, maxAbsPitch: 25 },
-  cameraConstraints: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+  cameraConstraints: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 }, facingMode: { ideal: 'user' } },
   cameraRetryMs: 3000, // while the camera is lost, try to re-open it this often
 });
 

@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/react';
+import { getPlatformSessionMetadata } from '../telemetry/platformInfo';
 
 const SENSITIVE_QUERY_REGEX = /(?:^|[?&])(?:token|access_token|code)=/i;
 const SENSITIVE_HEADERS = ['authorization', 'cookie', 'x-api', 'x-api-key'];
@@ -119,6 +120,7 @@ export function initFrontendSentry() {
     });
   }
 
+  setNativeSentryTags();
   return true;
 }
 
@@ -147,4 +149,27 @@ export function setSentrySessionId(sessionId) {
       // Safe no-op if Sentry is not active
     }
   }
+}
+
+/**
+ * Sets native Sentry tags ('platform', 'app_version', 'webview_version')
+ * ONLY when running natively.
+ */
+export function setNativeSentryTags(metadataOverride = null) {
+  try {
+    const meta = metadataOverride || getPlatformSessionMetadata();
+    if (meta && meta.platform && meta.platform !== 'web') {
+      Sentry.setTag('platform', String(meta.platform));
+      if (meta.app_version) {
+        Sentry.setTag('app_version', String(meta.app_version));
+      }
+      if (meta.webview_version) {
+        Sentry.setTag('webview_version', String(meta.webview_version));
+      }
+      return true;
+    }
+  } catch {
+    // Safe no-op if Sentry is not active
+  }
+  return false;
 }

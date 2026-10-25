@@ -29,7 +29,7 @@ import { SCREEN_SHARE_HELP, shareEntireScreen } from '../../components/proctorin
 import { requestExamFullscreen } from '../../components/proctoring/fullscreen';
 import { isVisionViolationEnabled } from '../../utils/violationSeverity';
 import { ReconnectingSocket } from '../../services/reconnectingSocket';
-import { setSentrySessionId } from '../../utils/sentryScrubber';
+import { setSentrySessionId, setNativeSentryTags } from '../../utils/sentryScrubber';
 import flightRecorder from '../../telemetry/flightRecorder';
 import { VIOLATION_DROP_REASONS } from '../../telemetry/violationDropReasons';
 import ReportProblemModal from '../../components/feedback/ReportProblemModal';
@@ -510,6 +510,7 @@ const ExamPortal = () => {
     setAnswers(restoredAnswers);
     setSessionId(newSessionId);
     setSentrySessionId(newSessionId);
+    setNativeSentryTags();
     flightRecorder.setSessionId(newSessionId);
     flightRecorder.setExamId(activeExamId);
     flightRecorder.record('lifecycle', isResume ? 'resume' : 'exam_start', {
