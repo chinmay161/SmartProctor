@@ -1,6 +1,8 @@
 # Numbers and short strings only: NO audio, NO images, NO tokens, NO emails, NO answer text.
 import json
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -25,6 +27,8 @@ router = APIRouter(prefix="/telemetry", tags=["Telemetry"])
 MAX_EVENTS_PER_BATCH = 100
 MAX_EVENT_DATA_BYTES = 8 * 1024  # 8 KB
 MAX_REQUEST_BYTES = 200 * 1024   # 200 KB
+MAX_EVENTS_PER_TRACE = int(os.getenv("MAX_EVENTS_PER_TRACE", "5000"))
+MAX_EVENTS_PER_STUDENT_PER_DAY = int(os.getenv("MAX_EVENTS_PER_STUDENT_PER_DAY", "20000"))
 
 
 class EventItem(BaseModel):
@@ -88,6 +92,29 @@ async def post_telemetry_events(
         stored_count = 0
         skipped_count = 0
 
+        # Enforce at most 5000 stored events per trace_id and 20000 per student per day
+        # Cap checks cost at most two COUNT queries per batch (not per event).
+        # Skip daily-cap query when the batch is empty.
+        trace_count = 0
+        student_day_count = 0
+        if received_count > 0:
+            trace_count = (
+                db.query(SessionEvent)
+                .filter(SessionEvent.trace_id == payload.trace_id)
+                .count()
+            )
+            if trace_count < MAX_EVENTS_PER_TRACE:
+                now_utc = datetime.now(timezone.utc)
+                day_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+                student_day_count = (
+                    db.query(SessionEvent)
+                    .filter(
+                        SessionEvent.student_id == user_sub,
+                        SessionEvent.server_ts >= day_start,
+                    )
+                    .count()
+                )
+
         events_to_add = []
         for raw_event in payload.events:
             try:
@@ -119,6 +146,15 @@ async def post_telemetry_events(
                     sanitized_data = sanitize_event_data(raw_data)
                 else:
                     sanitized_data = None
+
+                # Volume cap check: extra events are skipped and counted in skipped
+                if (trace_count + stored_count) >= MAX_EVENTS_PER_TRACE:
+                    skipped_count += 1
+                    continue
+
+                if (student_day_count + stored_count) >= MAX_EVENTS_PER_STUDENT_PER_DAY:
+                    skipped_count += 1
+                    continue
 
                 client_ts = raw_event.get("client_ts")
                 if client_ts is not None:
