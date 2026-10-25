@@ -36,6 +36,12 @@ class Violation(Base):
     dispute_reason = Column(String, nullable=True)
     integrity_deduction = Column(Integer, nullable=True)
 
+    # Teacher Review Labels (NONE | CONFIRMED | FALSE_POSITIVE | UNSURE)
+    review_status = Column(String, default="NONE", nullable=False)
+    reviewed_by = Column(String, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_note = Column(String(300), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def __init__(self, *args, **kwargs):
