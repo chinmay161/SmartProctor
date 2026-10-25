@@ -32,6 +32,8 @@ import { ReconnectingSocket } from '../../services/reconnectingSocket';
 import { setSentrySessionId } from '../../utils/sentryScrubber';
 import flightRecorder from '../../telemetry/flightRecorder';
 import { VIOLATION_DROP_REASONS } from '../../telemetry/violationDropReasons';
+import ReportProblemModal from '../../components/feedback/ReportProblemModal';
+import PilotScenarioPanel from './components/PilotScenarioPanel';
 
 // Only camera exams need the gate UI, so it ships in its own chunk.
 const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
@@ -154,6 +156,7 @@ const ExamPortal = () => {
   const [markedForReview, setMarkedForReview] = useState(new Set());
   const [showPalette, setShowPalette] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showReportProblem, setShowReportProblem] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [violations, setViolations] = useState([]);
@@ -1370,6 +1373,15 @@ const ExamPortal = () => {
               durationMinutes={durationMinutesForTimer}
               onTimeUp={handleSubmit}
             />
+            <Button
+              variant="outline"
+              size="sm"
+              iconName="AlertCircle"
+              onClick={() => setShowReportProblem(true)}
+              className="text-xs"
+            >
+              Report a problem
+            </Button>
             {browserLockdownEnabled && !isFullscreen && (
               <Button
                 variant="outline"
@@ -1689,6 +1701,18 @@ const ExamPortal = () => {
           submitError={submitError}
           onConfirm={handleConfirmSubmit}
           onCancel={() => setShowSubmitModal(false)}
+        />
+      )}
+
+      {Boolean(sourceExam?.pilot_mode || securityConfig?.pilotMode || securityConfig?.pilot_mode) && (
+        <PilotScenarioPanel />
+      )}
+
+      {showReportProblem && (
+        <ReportProblemModal
+          examId={examId || sourceExam?.id}
+          sessionId={sessionId}
+          onClose={() => setShowReportProblem(false)}
         />
       )}
     </div>

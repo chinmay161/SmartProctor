@@ -58,6 +58,12 @@ const SecuritySettings = ({ formData, onChange, errors }) => {
             checked={formData?.enableProctoredWatermark}
             onChange={(e) => handleInputChange('enableProctoredWatermark', e?.target?.checked)}
           />
+          <Checkbox
+            label="Pilot / tuning mode"
+            description="Enable scripted proctoring scenarios checklist for model calibration"
+            checked={Boolean(formData?.pilotMode)}
+            onChange={(e) => handleInputChange('pilotMode', e?.target?.checked)}
+          />
         </CheckboxGroup>
 
         <div className="bg-muted/30 border border-border rounded-lg p-4 md:p-6">
