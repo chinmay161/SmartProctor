@@ -415,6 +415,9 @@ def ensure_schema_compatibility() -> None:
             )
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_trace_id_seq ON session_events (trace_id, seq)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_session_id_server_ts ON session_events (session_id, server_ts)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_student_id_server_ts ON session_events (student_id, server_ts)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_trace_id ON session_events (trace_id)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_session_id ON session_events (session_id)"))
+        else:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_student_id_server_ts ON session_events (student_id, server_ts)"))
 
