@@ -140,6 +140,7 @@ def _serialize_exam(
         wizard_config=wizard_config,
         camera_required=exam_requires_camera(wizard_config, rules),
         mic_required=exam_requires_mic(wizard_config, rules),
+        pilot_mode=bool(wizard_config.get("pilotMode") or wizard_config.get("pilot_mode")) if isinstance(wizard_config, dict) else False,
         start_time=_as_utc_timestamp(exam.start_time),
         end_time=_as_utc_timestamp(exam.end_time),
         status=exam.status,
@@ -279,6 +280,7 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
                 "minor_count": 0,
                 "major_count": 0,
                 "severe_count": 0,
+                "violations": [],
             }
 
         row = row_map[student_id]
@@ -293,6 +295,20 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
         elif sev == "severe":
             row["severe_count"] += unit_count
 
+        v_status = getattr(violation, "review_status", None) or "NONE"
+        v_note = getattr(violation, "review_note", None) or ""
+        row["violations"].append({
+            "id": str(violation.id),
+            "type": violation.type or "unknown",
+            "severity": sev,
+            "timestamp": violation.timestamp.isoformat() if violation.timestamp else None,
+            "review_status": v_status,
+            "review_note": v_note,
+            "reviewed_by": getattr(violation, "reviewed_by", None),
+            "reviewed_at": violation.reviewed_at.isoformat() if getattr(violation, "reviewed_at", None) else None,
+            "evidence_files": getattr(violation, "evidence_files", None),
+        })
+
         event_ts = violation.timestamp
         if row["first_violation_at"] is None or (event_ts and event_ts < row["first_violation_at"]):
             row["first_violation_at"] = event_ts
@@ -301,6 +317,13 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
 
     rows = []
     for student_id, row in row_map.items():
+        v_list = row.get("violations", [])
+        statuses = [v["review_status"] for v in v_list if v["review_status"] != "NONE"]
+        distinct_statuses = list(dict.fromkeys(statuses))
+        summary_status = ", ".join(distinct_statuses) if distinct_statuses else "NONE"
+        notes = [v["review_note"] for v in v_list if v.get("review_note")]
+        summary_note = "; ".join(notes) if notes else None
+
         rows.append(
             {
                 "student_id": student_id,
@@ -312,6 +335,9 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
                 "minor_count": row["minor_count"],
                 "major_count": row["major_count"],
                 "severe_count": row["severe_count"],
+                "review_status": summary_status,
+                "review_note": summary_note,
+                "violations": v_list,
             }
         )
     rows.sort(key=lambda item: (-item["violation_count"], item["student_id"]))
@@ -595,6 +621,8 @@ def get_violation_report(
                     "minor_count",
                     "major_count",
                     "severe_count",
+                    "review_status",
+                    "review_note",
                 ]
             )
             for row in report_payload.rows:
@@ -609,6 +637,8 @@ def get_violation_report(
                         row.minor_count,
                         row.major_count,
                         row.severe_count,
+                        row.review_status,
+                        row.review_note or "",
                     ]
                 )
 

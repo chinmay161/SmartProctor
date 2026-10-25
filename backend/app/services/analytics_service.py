@@ -231,7 +231,11 @@ def get_exam_evidence(db: Session, exam_id: str):
                     "type": v.type or "UNKNOWN",
                     "severity": v.severity,
                     "evidence_file": resolve_evidence_field(v.evidence_files),
-                    "timestamp": v.timestamp.isoformat() if v.timestamp else None
+                    "timestamp": v.timestamp.isoformat() if v.timestamp else None,
+                    "review_status": getattr(v, "review_status", None) or "NONE",
+                    "review_note": getattr(v, "review_note", None) or "",
+                    "reviewed_by": getattr(v, "reviewed_by", None),
+                    "reviewed_at": v.reviewed_at.isoformat() if getattr(v, "reviewed_at", None) else None,
                 })
         
         if student_violations:

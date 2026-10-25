@@ -1,14 +1,19 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from ..auth.dependencies import canonicalize_role, get_current_user
 from ..auth.roles import deny_access, require_role
 from ..database import SessionLocal
+from ..models.exam import Exam
 from ..models.exam_attempt import ExamAttempt
 from ..models.exam_session import ExamSession
 from ..models.violation import Violation
+from ..permissions.proctor_permissions import require_proctor
 from ..schemas.violation import ViolationIngestRequest, ViolationIngestResponse
 from ..services.attempt_service import ingest_violation
 from ..services.evidence_storage import get_evidence_storage, resolve_evidence_field
+from ..services.telemetry_service import record_event
 
 router = APIRouter(prefix="/violations", tags=["Violations"])
 
@@ -129,6 +134,10 @@ def list_violations(session_id: str, user=Depends(get_current_user)):
                 "dispute_status": v.dispute_status,
                 "dispute_reason": v.dispute_reason,
                 "integrity_deduction": v.integrity_deduction,
+                "review_status": getattr(v, "review_status", None) or "NONE",
+                "reviewed_by": getattr(v, "reviewed_by", None),
+                "reviewed_at": v.reviewed_at.isoformat() if getattr(v, "reviewed_at", None) else None,
+                "review_note": getattr(v, "review_note", None),
                 "created_at": v.created_at.isoformat() if v.created_at else None,
             })
         return results
@@ -192,5 +201,87 @@ def resolve_dispute(violation_id: str, payload: dict, user=Depends(require_role(
         
         db.commit()
         return {"status": "resolved", "violation_id": violation_id, "new_status": status}
+    finally:
+        db.close()
+
+
+class ViolationReviewRequest(BaseModel):
+    review_status: str
+    review_note: str | None = Field(default=None, max_length=300)
+
+
+@router.patch("/{violation_id}/review")
+def review_violation(
+    violation_id: str,
+    payload: ViolationReviewRequest,
+    user=Depends(get_current_user),
+):
+    db = SessionLocal()
+    try:
+        violation = db.query(Violation).filter_by(id=violation_id).first()
+        if not violation:
+            raise HTTPException(status_code=404, detail="Violation not found")
+
+        # Determine exam_id
+        exam_id = None
+        if violation.attempt_id:
+            attempt = db.query(ExamAttempt).filter_by(id=violation.attempt_id).first()
+            if attempt:
+                exam_id = attempt.exam_id
+        if not exam_id and violation.session_id:
+            session = db.query(ExamSession).filter_by(id=violation.session_id).first()
+            if session:
+                exam_id = session.exam_id
+
+        roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+        is_admin = bool(roles.intersection({"admin", "school_admin"}))
+        if not is_admin:
+            if "teacher" not in roles and "proctor" not in roles:
+                raise HTTPException(status_code=403, detail="Forbidden: Teachers, proctors, or admins only")
+            if not exam_id:
+                raise HTTPException(status_code=403, detail="Forbidden: Cannot verify proctor assignment for this violation")
+            require_proctor(db, exam_id, user["sub"])
+
+        status_upper = payload.review_status.strip().upper()
+        allowed_statuses = {"NONE", "CONFIRMED", "FALSE_POSITIVE", "UNSURE"}
+        if status_upper not in allowed_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid review_status. Must be one of {allowed_statuses}")
+
+        if payload.review_note and len(payload.review_note) > 300:
+            raise HTTPException(status_code=400, detail="review_note must not exceed 300 characters")
+
+        violation.review_status = status_upper
+        violation.review_note = payload.review_note.strip() if payload.review_note else None
+        violation.reviewed_by = user.get("sub") or user.get("email")
+        violation.reviewed_at = datetime.now(timezone.utc)
+
+        # SEPARATE from disputes: must NOT change integrity_score or violation_count
+        db.commit()
+        db.refresh(violation)
+
+        # Record a session event "violation_reviewed"
+        record_event(
+            trace_id=None,
+            session_id=violation.session_id,
+            exam_id=exam_id,
+            student_id=violation.student_id,
+            category="violation",
+            name="violation_reviewed",
+            data={
+                "violation_id": str(violation.id),
+                "review_status": violation.review_status,
+                "review_note": violation.review_note,
+                "reviewed_by": violation.reviewed_by,
+            },
+        )
+
+        return {
+            "status": "reviewed",
+            "violation_id": str(violation.id),
+            "review_status": violation.review_status,
+            "review_note": violation.review_note,
+            "reviewed_by": violation.reviewed_by,
+            "reviewed_at": violation.reviewed_at.isoformat() if violation.reviewed_at else None,
+        }
     finally:
         db.close()

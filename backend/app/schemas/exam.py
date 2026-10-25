@@ -60,6 +60,7 @@ class ExamResponse(BaseModel):
     wizard_config: dict[str, Any] | None = None
     camera_required: bool = False
     mic_required: bool = False
+    pilot_mode: bool = False
     start_time: datetime | None = None
     end_time: datetime | None = None
     status: ExamStatusLiteral = "DRAFT"
@@ -116,6 +117,9 @@ class ViolationReportStudentRow(BaseModel):
     minor_count: int = 0
     major_count: int = 0
     severe_count: int = 0
+    review_status: str = "NONE"
+    review_note: str | None = None
+    violations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CompletedExamViolationReportResponse(BaseModel):
