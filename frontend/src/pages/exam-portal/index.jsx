@@ -435,7 +435,12 @@ const ExamPortal = () => {
 
     let session;
     try {
-      session = await callApi(`/sessions/${encodeURIComponent(activeExamId)}/start`, 'POST');
+      const currentTraceId = flightRecorder.getTraceId();
+      session = await callApi(
+        `/sessions/${encodeURIComponent(activeExamId)}/start`,
+        'POST',
+        { trace_id: currentTraceId }
+      );
     } catch (error) {
       setExamBlocked(error?.detail || error?.message || 'Unable to start the exam. Please return to your dashboard.');
       return;

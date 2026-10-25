@@ -82,7 +82,8 @@ export const examApi = {
 };
 
 export const sessionApi = {
-  startExamSession: (examId, token) => apiRequest(`/sessions/${examId}/start`, "POST", null, token),
+  startExamSession: (examId, token, payload = null) =>
+    apiRequest(`/sessions/${examId}/start`, "POST", payload, token),
 };
 
 export const attemptApi = {

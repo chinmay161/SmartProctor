@@ -1,7 +1,8 @@
 from datetime import timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import and_
+from pydantic import BaseModel
+from sqlalchemy import and_, or_
 
 from typing import Optional
 
@@ -42,8 +43,20 @@ def _serialize_session(session: ExamSession) -> dict:
     }
 
 
+class StartSessionPayload(BaseModel):
+    trace_id: Optional[str] = None
+
+
 @router.post("/{exam_id}/start")
-def start_exam_session(exam_id: str, user=Depends(require_role("student"))):
+def start_exam_session(
+    exam_id: str,
+    payload: Optional[StartSessionPayload] = Body(default=None),
+    user=Depends(require_role("student")),
+):
+    from ..models.session_event import SessionEvent
+
+    trace_id = payload.trace_id.strip() if payload and payload.trace_id else None
+
     db = SessionLocal()
     try:
         exam = db.query(Exam).filter_by(id=exam_id).first()
@@ -66,8 +79,20 @@ def start_exam_session(exam_id: str, user=Depends(require_role("student"))):
         if existing_live:
             if not existing_live.attempt_id:
                 existing_live.attempt_id = attempt.id
-                db.commit()
-                db.refresh(existing_live)
+            if trace_id:
+                db.query(SessionEvent).filter(
+                    SessionEvent.trace_id == trace_id,
+                    SessionEvent.student_id == user["sub"],
+                    SessionEvent.session_id.is_(None),
+                ).update(
+                    {
+                        SessionEvent.session_id: existing_live.id,
+                        SessionEvent.exam_id: exam_id,
+                    },
+                    synchronize_session=False,
+                )
+            db.commit()
+            db.refresh(existing_live)
             return _serialize_session(existing_live)
 
         session = ExamSession(
@@ -82,8 +107,25 @@ def start_exam_session(exam_id: str, user=Depends(require_role("student"))):
         db.add(session)
         db.commit()
         db.refresh(session)
+
+        # Backfill gate/device events matching trace_id and student_id
+        if trace_id:
+            db.query(SessionEvent).filter(
+                SessionEvent.trace_id == trace_id,
+                SessionEvent.student_id == user["sub"],
+                SessionEvent.session_id.is_(None),
+            ).update(
+                {
+                    SessionEvent.session_id: session.id,
+                    SessionEvent.exam_id: exam_id,
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+
         record_event(
             db,
+            trace_id=trace_id,
             session_id=session.id,
             exam_id=exam_id,
             student_id=user["sub"],
@@ -355,7 +397,30 @@ def get_session_events(
         if not roles.intersection({"admin", "school_admin"}):
             require_proctor(db, session.exam_id, user["sub"])
 
-        query = db.query(SessionEvent).filter_by(session_id=session_id)
+        # Find any trace_ids associated with this session's events to also surface
+        # pre-session gate/device events for this student
+        session_traces = [
+            t[0]
+            for t in db.query(SessionEvent.trace_id)
+            .filter(SessionEvent.session_id == session_id)
+            .distinct()
+            .all()
+            if t[0]
+        ]
+
+        if session_traces:
+            query = db.query(SessionEvent).filter(
+                or_(
+                    SessionEvent.session_id == session_id,
+                    and_(
+                        SessionEvent.trace_id.in_(session_traces),
+                        SessionEvent.student_id == session.student_id,
+                    ),
+                )
+            )
+        else:
+            query = db.query(SessionEvent).filter_by(session_id=session_id)
+
         if category:
             query = query.filter(SessionEvent.category == category.lower().strip())
 
