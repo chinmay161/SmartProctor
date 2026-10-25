@@ -60,6 +60,7 @@ class ExamResponse(BaseModel):
     wizard_config: dict[str, Any] | None = None
     camera_required: bool = False
     mic_required: bool = False
+    is_mcq_only: bool = False
     pilot_mode: bool = False
     start_time: datetime | None = None
     end_time: datetime | None = None
