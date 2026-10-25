@@ -156,6 +156,7 @@ const PreExamGate = ({
   requireScreenShare = false,
   requireFullscreen = false,
   onScreenStream,
+  onRequestReportProblem,
 }) => {
   const visionSteps = !cameraRequired
     ? []
@@ -533,9 +534,22 @@ const PreExamGate = ({
   return (
     <div className="fixed inset-0 z-[130] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
       <div className="w-full max-w-2xl bg-card border border-border rounded-2xl shadow-2xl p-6 md:p-8">
-        <div className="flex items-center gap-3 mb-1">
-          <Icon name="ShieldCheck" size={24} className="text-primary" />
-          <h2 className="text-lg md:text-xl font-semibold text-foreground">{title}</h2>
+        <div className="flex items-center justify-between gap-3 mb-1">
+          <div className="flex items-center gap-3">
+            <Icon name="ShieldCheck" size={24} className="text-primary" />
+            <h2 className="text-lg md:text-xl font-semibold text-foreground">{title}</h2>
+          </div>
+          {onRequestReportProblem && (
+            <Button
+              variant="outline"
+              size="xs"
+              iconName="AlertCircle"
+              onClick={onRequestReportProblem}
+              className="text-xs"
+            >
+              Report a problem
+            </Button>
+          )}
         </div>
         <p className="text-sm text-muted-foreground mb-6">
           {variant === 'device-test'
@@ -655,6 +669,11 @@ const PreExamGate = ({
             </ul>
             <div className="flex flex-wrap gap-2">
               <Button iconName="RotateCw" onClick={() => void run(failure.index)}>Retry</Button>
+              {onRequestReportProblem && (
+                <Button variant="outline" iconName="AlertCircle" onClick={onRequestReportProblem}>
+                  Report a problem
+                </Button>
+              )}
               {onCancel && <Button variant="outline" onClick={onCancel}>{cancelLabel}</Button>}
             </div>
           </div>

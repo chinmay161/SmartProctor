@@ -8,6 +8,7 @@ import { formatIstDateTime } from '../../../utils/dateTime';
 import { ExamListSkeleton, HistoryTableSkeleton } from '../../../components/ui/Skeleton';
 
 const DeviceTestModal = lazy(() => import('../../../components/proctoring/DeviceTestModal'));
+import ReportProblemModal from '../../../components/feedback/ReportProblemModal';
 
 /* ─── Inline SVG icons (no extra dep) ─── */
 const Icon = ({ d, d2, size = 20, cls = '' }) => (
@@ -385,6 +386,7 @@ const StudentDashboardExample = () => {
   const [nowTs, setNowTs] = useState(Date.now());
   const [activeTab, setActiveTab] = useState('exams'); // 'exams' | 'history' | 'account'
   const [showDeviceTest, setShowDeviceTest] = useState(false);
+  const [showReportProblem, setShowReportProblem] = useState(false);
 
   const completedExams = useMemo(() => {
     const seen = new Set();
@@ -683,11 +685,32 @@ const StudentDashboardExample = () => {
                 <Icon d={ICONS.eye} size={15} />
                 Test my device
               </button>
+              <button
+                type="button"
+                onClick={() => setShowReportProblem(true)}
+                title="Report a technical issue"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  padding: '7px 12px', borderRadius: '8px',
+                  background: 'var(--color-card)', border: '1px solid var(--color-border)',
+                  color: 'var(--color-foreground)', cursor: 'pointer',
+                  fontFamily: 'var(--font-body)', fontSize: '0.8rem', fontWeight: 500,
+                }}
+              >
+                <Icon d={ICONS.warn} size={15} />
+                Report a problem
+              </button>
             </div>
 
             {showDeviceTest && (
               <Suspense fallback={null}>
                 <DeviceTestModal onClose={() => setShowDeviceTest(false)} />
+              </Suspense>
+            )}
+
+            {showReportProblem && (
+              <Suspense fallback={null}>
+                <ReportProblemModal onClose={() => setShowReportProblem(false)} />
               </Suspense>
             )}
 

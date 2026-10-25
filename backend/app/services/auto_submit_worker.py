@@ -6,7 +6,7 @@ except ImportError:  # pragma: no cover - fallback for environments without opti
 from ..database import SessionLocal
 from .attempt_service import process_expired_attempts
 from .evidence_storage import purge_expired_evidence
-from .telemetry_service import purge_expired_events
+from .telemetry_service import purge_expired_events, purge_expired_problem_reports
 
 
 class AutoSubmitWorker:
@@ -51,7 +51,10 @@ class AutoSubmitWorker:
     def run_event_retention(self) -> int:
         db = SessionLocal()
         try:
-            return purge_expired_events(db)
+            ev_count = purge_expired_events(db)
+            pr_count = purge_expired_problem_reports(db)
+            return ev_count + pr_count
         finally:
             db.close()
+
 

@@ -8,6 +8,7 @@ import UserManagementTable from './components/UserManagementTable';
 import SystemSettingsPanel from './components/SystemSettingsPanel';
 import ReportsSection from './components/ReportsSection';
 import SecurityMonitoring from './components/SecurityMonitoring';
+import ProblemReportsTab from './components/ProblemReportsTab';
 import { apiRequest } from '../../services/api';
 import { dashboardForRoles, extractRolesFromAuth0User } from '../../utils/roleUtils';
 
@@ -38,10 +39,11 @@ const ICONS = {
 };
 
 const TABS = [
-  { id: 'user-management', label: 'Users',    icon: ICONS.users    },
-  { id: 'system-settings', label: 'Settings', icon: ICONS.settings  },
-  { id: 'reports',         label: 'Reports',  icon: ICONS.reports   },
-  { id: 'security',        label: 'Security', icon: ICONS.shield    },
+  { id: 'user-management', label: 'Users',           icon: ICONS.users    },
+  { id: 'problem-reports', label: 'Problem Reports', icon: ICONS.warn     },
+  { id: 'system-settings', label: 'Settings',        icon: ICONS.settings },
+  { id: 'reports',         label: 'Reports',         icon: ICONS.reports  },
+  { id: 'security',        label: 'Security',        icon: ICONS.shield   },
 ];
 
 const QUICK_ACTIONS = [
@@ -152,6 +154,7 @@ const AdminPanel = () => {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'user-management': return <UserManagementTable />;
+      case 'problem-reports': return <ProblemReportsTab />;
       case 'system-settings': return <SystemSettingsPanel />;
       case 'reports':         return <ReportsSection />;
       case 'security':        return <SecurityMonitoring />;

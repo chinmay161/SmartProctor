@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import PreExamGate from './PreExamGate';
 import { HIDDEN_VIDEO_STYLE, INFERENCE_MODE, useVisionProctoring } from './useVisionProctoring';
+import ReportProblemModal from '../feedback/ReportProblemModal';
 
 /**
  * Dashboard "Test my device": the same camera / model / fps / calibration check the
@@ -9,6 +10,7 @@ import { HIDDEN_VIDEO_STYLE, INFERENCE_MODE, useVisionProctoring } from './useVi
  */
 const DeviceTestModal = ({ onClose }) => {
   const vision = useVisionProctoring({ detectObjects: true, micRequired: true });
+  const [showReportProblem, setShowReportProblem] = useState(false);
 
   const close = () => {
     vision.dispose();
@@ -26,9 +28,14 @@ const DeviceTestModal = ({ onClose }) => {
         onComplete={close}
         onCancel={close}
         cancelLabel="Close"
+        onRequestReportProblem={() => setShowReportProblem(true)}
       />
+      {showReportProblem && (
+        <ReportProblemModal onClose={() => setShowReportProblem(false)} />
+      )}
     </>
   );
 };
 
 export default DeviceTestModal;
+

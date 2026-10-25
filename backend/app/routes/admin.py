@@ -311,3 +311,84 @@ def trace_test(admin=Depends(require_role("admin"))):
     """Deliberate exception for verifying Sentry error tracking."""
     raise RuntimeError("Deliberate diagnostic exception for Sentry trace testing")
 
+
+class ProblemReportStatusUpdate(BaseModel):
+    status: str
+
+
+@router.get("/problem-reports")
+def list_problem_reports(
+    status: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    admin=Depends(require_role("admin")),
+):
+    from ..models.problem_report import ProblemReport
+
+    db = SessionLocal()
+    try:
+        query = db.query(ProblemReport)
+        if status and status.upper() != "ALL":
+            query = query.filter(ProblemReport.status == status.upper())
+
+        total = query.count()
+        reports = (
+            query.order_by(ProblemReport.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return {
+            "items": [
+                {
+                    "id": r.id,
+                    "student_id": r.student_id,
+                    "trace_id": r.trace_id,
+                    "session_id": r.session_id,
+                    "exam_id": r.exam_id,
+                    "category": r.category,
+                    "text": r.text,
+                    "page_path": r.page_path,
+                    "app_version": r.app_version,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "status": r.status,
+                }
+                for r in reports
+            ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    finally:
+        db.close()
+
+
+@router.patch("/problem-reports/{report_id}")
+def update_problem_report_status(
+    report_id: str,
+    payload: ProblemReportStatusUpdate,
+    admin=Depends(require_role("admin")),
+):
+    from ..models.problem_report import ProblemReport
+
+    db = SessionLocal()
+    try:
+        report = db.query(ProblemReport).filter_by(id=report_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Problem report not found")
+
+        new_status = payload.status.strip().upper()
+        if new_status not in {"OPEN", "RESOLVED"}:
+            raise HTTPException(status_code=400, detail="status must be OPEN or RESOLVED")
+
+        report.status = new_status
+        db.commit()
+        db.refresh(report)
+        return {
+            "id": report.id,
+            "status": report.status,
+            "message": f"Problem report marked as {report.status}",
+        }
+    finally:
+        db.close()
+
