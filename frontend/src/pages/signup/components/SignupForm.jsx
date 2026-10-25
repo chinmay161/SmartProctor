@@ -18,7 +18,7 @@ const EyeIcon = ({ open }) =>
   );
 
 const GoogleIcon = () => (
-  <svg style={{ width: '18px', height: '18px' }} viewBox="0 0 24 24" fill="none">
+  <svg style={{ width: '17px', height: '17px' }} viewBox="0 0 24 24" fill="none">
     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
@@ -45,34 +45,34 @@ const calcStrength = (password) => {
 
 const inputBase = {
   fontFamily: 'var(--auth-font-body)',
-  fontSize: '0.88rem',
+  fontSize: '0.86rem',
   color: 'var(--auth-text-primary)',
   background: 'var(--auth-surface-2)',
   border: '1px solid var(--auth-border)',
   borderRadius: '8px',
-  padding: '10px 14px',
+  padding: '8px 12px',
   width: '100%',
   outline: 'none',
   transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
 };
 
 const AuthField = ({ label, id, error, children }) => (
-  <div className="auth-input-wrap" style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+  <div className="auth-input-wrap" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
     <label
       htmlFor={id}
       style={{
         fontFamily: 'var(--auth-font-body)',
-        fontSize: '0.78rem',
+        fontSize: '0.76rem',
         fontWeight: 500,
         color: error ? 'var(--auth-error)' : 'var(--auth-text-secondary)',
-        letterSpacing: '0.02em',
+        letterSpacing: '0.01em',
       }}
     >
       {label}
     </label>
     {children}
     {error && (
-      <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.72rem', color: 'var(--auth-error)', marginTop: '1px' }}>
+      <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.7rem', color: 'var(--auth-error)', marginTop: '1px' }}>
         {error}
       </p>
     )}
@@ -116,12 +116,12 @@ const SignupForm = () => {
     if (!formData.lastName?.trim())  errs.lastName  = 'Last name is required';
     if (!formData.email?.trim())     errs.email     = 'Email address is required';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) errs.email = 'Please enter a valid email address';
-    if (!formData.institution?.trim()) errs.institution = 'Institution name is required';
+    if (!formData.institution?.trim()) errs.institution = 'Institution is required';
     if (!formData.password)           errs.password = 'Password is required';
     else if (formData.password.length < 8) errs.password = 'At least 8 characters required';
     else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/.test(formData.password))
-      errs.password = 'Must include uppercase, lowercase, number & special character';
-    if (!formData.confirmPassword)    errs.confirmPassword = 'Please confirm your password';
+      errs.password = 'Must include upper, lower, number & symbol';
+    if (!formData.confirmPassword)    errs.confirmPassword = 'Confirm your password';
     else if (formData.password !== formData.confirmPassword) errs.confirmPassword = 'Passwords do not match';
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -153,23 +153,23 @@ const SignupForm = () => {
   return (
     <div
       className={shake ? 'auth-shake' : ''}
-      style={{ width: '100%', maxWidth: '480px', display: 'flex', flexDirection: 'column', gap: '16px' }}
+      style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '11px' }}
     >
       {/* Heading */}
-      <div className="auth-fade-up" style={{ textAlign: 'center', marginBottom: '6px' }}>
+      <div className="auth-fade-up" style={{ textAlign: 'center' }}>
         <h1
           style={{
             fontFamily: 'var(--auth-font-display)',
-            fontSize: 'clamp(1.6rem, 2.8vw, 2.2rem)',
+            fontSize: '1.6rem',
             color: 'var(--auth-text-primary)',
             fontWeight: 400,
             lineHeight: 1.15,
-            marginBottom: '6px',
+            marginBottom: '3px',
           }}
         >
           Create Account
         </h1>
-        <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.88rem', color: 'var(--auth-text-secondary)' }}>
+        <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.82rem', color: 'var(--auth-text-secondary)' }}>
           Join SmartProctor for secure exam proctoring
         </p>
       </div>
@@ -183,13 +183,13 @@ const SignupForm = () => {
         className="auth-fade-up-1"
         style={{
           width: '100%',
-          padding: '11px',
-          borderRadius: '9px',
+          padding: '9px 12px',
+          borderRadius: '8px',
           background: 'var(--auth-surface-2)',
           border: '1px solid var(--auth-border)',
           color: 'var(--auth-text-primary)',
           fontFamily: 'var(--auth-font-body)',
-          fontSize: '0.88rem',
+          fontSize: '0.85rem',
           fontWeight: 500,
           cursor: isLoading ? 'not-allowed' : 'pointer',
           opacity: isLoading ? 0.6 : 1,
@@ -197,9 +197,9 @@ const SignupForm = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '10px',
+          gap: '9px',
         }}
-        onMouseEnter={e => { if (!isLoading) { e.currentTarget.style.borderColor = 'var(--auth-accent)'; e.currentTarget.style.transform = 'scale(1.009)'; } }}
+        onMouseEnter={e => { if (!isLoading) { e.currentTarget.style.borderColor = 'var(--auth-accent)'; e.currentTarget.style.transform = 'scale(1.006)'; } }}
         onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--auth-border)'; e.currentTarget.style.transform = 'scale(1)'; }}
       >
         <GoogleIcon />
@@ -207,9 +207,9 @@ const SignupForm = () => {
       </button>
 
       {/* Divider */}
-      <div className="auth-fade-up-1" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div className="auth-fade-up-1" style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '1px 0' }}>
         <div style={{ flex: 1, height: '1px', background: 'var(--auth-border)' }} />
-        <span style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.72rem', color: 'var(--auth-text-secondary)' }}>OR CONTINUE WITH EMAIL</span>
+        <span style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.68rem', color: 'var(--auth-text-secondary)', letterSpacing: '0.04em' }}>OR CONTINUE WITH EMAIL</span>
         <div style={{ flex: 1, height: '1px', background: 'var(--auth-border)' }} />
       </div>
 
@@ -217,12 +217,12 @@ const SignupForm = () => {
       {errors.submit && (
         <div
           style={{
-            padding: '10px 14px',
-            borderRadius: '8px',
+            padding: '8px 12px',
+            borderRadius: '7px',
             background: 'rgba(239,68,68,0.08)',
             border: '1px solid rgba(239,68,68,0.3)',
             fontFamily: 'var(--auth-font-body)',
-            fontSize: '0.83rem',
+            fontSize: '0.8rem',
             color: 'var(--auth-error)',
           }}
         >
@@ -230,8 +230,8 @@ const SignupForm = () => {
         </div>
       )}
 
-      {/* First + Last Name */}
-      <div className="auth-fade-up-2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+      {/* Row 1: First + Last Name */}
+      <div className="auth-fade-up-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <AuthField label="First Name" id="signup-first-name" error={errors.firstName}>
           <input
             id="signup-first-name"
@@ -258,8 +258,8 @@ const SignupForm = () => {
         </AuthField>
       </div>
 
-      {/* Email */}
-      <div className="auth-fade-up-3">
+      {/* Row 2: Email + Institution */}
+      <div className="auth-fade-up-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <AuthField label="Email Address" id="signup-email" error={errors.email}>
           <input
             id="signup-email"
@@ -272,10 +272,6 @@ const SignupForm = () => {
             style={{ ...inputBase, borderColor: errors.email ? 'var(--auth-error)' : undefined }}
           />
         </AuthField>
-      </div>
-
-      {/* Institution */}
-      <div className="auth-fade-up-3">
         <AuthField label="Institution / Organization" id="signup-institution" error={errors.institution}>
           <input
             id="signup-institution"
@@ -290,108 +286,95 @@ const SignupForm = () => {
         </AuthField>
       </div>
 
-      {/* Password + strength */}
-      <div className="auth-fade-up-4">
-        <AuthField label="Password" id="signup-password" error={errors.password}>
-          <div style={{ position: 'relative' }}>
-            <input
-              id="signup-password"
-              type={showPassword ? 'text' : 'password'}
-              placeholder="At least 8 chars · mixed case · special char"
-              value={formData.password}
-              onChange={e => handleInputChange('password', e.target.value)}
-              disabled={isLoading}
-              className="auth-input"
-              style={{
-                ...inputBase,
-                paddingRight: '42px',
-                borderColor: errors.password ? 'var(--auth-error)' : undefined,
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(v => !v)}
-              style={{
-                position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', color: 'var(--auth-text-secondary)',
-                cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center',
-              }}
-            >
-              <EyeIcon open={showPassword} />
-            </button>
-          </div>
-        </AuthField>
-
-        {/* Strength bar */}
-        {formData.password && (
-          <div style={{ marginTop: '8px' }}>
-            <div
-              style={{
-                width: '100%',
-                height: '4px',
-                borderRadius: '2px',
-                background: 'var(--auth-border)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                className="auth-strength-bar"
-                style={{ width: strengthBarWidth, background: strength.color }}
+      {/* Row 3: Password + Confirm Password */}
+      <div className="auth-fade-up-4 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div>
+          <AuthField label="Password" id="signup-password" error={errors.password}>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="signup-password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="At least 8 chars · mixed"
+                value={formData.password}
+                onChange={e => handleInputChange('password', e.target.value)}
+                disabled={isLoading}
+                className="auth-input"
+                style={{
+                  ...inputBase,
+                  paddingRight: '38px',
+                  borderColor: errors.password ? 'var(--auth-error)' : undefined,
+                }}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(v => !v)}
+                style={{
+                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', color: 'var(--auth-text-secondary)',
+                  cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center',
+                }}
+              >
+                <EyeIcon open={showPassword} />
+              </button>
             </div>
-            <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.72rem', color: strength.color, marginTop: '4px', fontWeight: 500 }}>
-              {strength.label}
-            </p>
-          </div>
-        )}
-      </div>
+          </AuthField>
 
-      {/* Confirm Password */}
-      <div className="auth-fade-up-4">
-        <AuthField label="Confirm Password" id="signup-confirm-password" error={errors.confirmPassword}>
-          <div style={{ position: 'relative' }}>
-            <input
-              id="signup-confirm-password"
-              type={showConfirmPassword ? 'text' : 'password'}
-              placeholder="Re-enter your password"
-              value={formData.confirmPassword}
-              onChange={e => handleInputChange('confirmPassword', e.target.value)}
-              disabled={isLoading}
-              className="auth-input"
-              style={{
-                ...inputBase,
-                paddingRight: '42px',
-                borderColor: errors.confirmPassword ? 'var(--auth-error)' : undefined,
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShowConfirmPassword(v => !v)}
-              style={{
-                position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', color: 'var(--auth-text-secondary)',
-                cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center',
-              }}
-            >
-              <EyeIcon open={showConfirmPassword} />
-            </button>
-          </div>
-        </AuthField>
-      </div>
+          {/* Strength bar directly below password input */}
+          {formData.password && (
+            <div style={{ marginTop: '5px' }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: '3px',
+                  borderRadius: '2px',
+                  background: 'var(--auth-border)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  className="auth-strength-bar"
+                  style={{ width: strengthBarWidth, background: strength.color }}
+                />
+              </div>
+              <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.68rem', color: strength.color, marginTop: '2px', fontWeight: 500 }}>
+                {strength.label}
+              </p>
+            </div>
+          )}
+        </div>
 
-      {/* Auth note */}
-      <p
-        className="auth-fade-up-5"
-        style={{
-          fontFamily: 'var(--auth-font-body)',
-          fontSize: '0.75rem',
-          color: 'var(--auth-text-secondary)',
-          textAlign: 'center',
-          lineHeight: 1.5,
-        }}
-      >
-        🔐 Account secured via Auth0 — industry-standard authentication
-      </p>
+        <div>
+          <AuthField label="Confirm Password" id="signup-confirm-password" error={errors.confirmPassword}>
+            <div style={{ position: 'relative' }}>
+              <input
+                id="signup-confirm-password"
+                type={showConfirmPassword ? 'text' : 'password'}
+                placeholder="Re-enter password"
+                value={formData.confirmPassword}
+                onChange={e => handleInputChange('confirmPassword', e.target.value)}
+                disabled={isLoading}
+                className="auth-input"
+                style={{
+                  ...inputBase,
+                  paddingRight: '38px',
+                  borderColor: errors.confirmPassword ? 'var(--auth-error)' : undefined,
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(v => !v)}
+                style={{
+                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', color: 'var(--auth-text-secondary)',
+                  cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center',
+                }}
+              >
+                <EyeIcon open={showConfirmPassword} />
+              </button>
+            </div>
+          </AuthField>
+        </div>
+      </div>
 
       {/* Create Account CTA */}
       <button
@@ -399,15 +382,15 @@ const SignupForm = () => {
         type="button"
         onClick={handleSubmit}
         disabled={isLoading}
-        className={`auth-cta-btn auth-fade-up-5`}
+        className="auth-cta-btn auth-fade-up-5"
         style={{
           width: '100%',
-          padding: '12px',
-          borderRadius: '9px',
+          padding: '10px',
+          borderRadius: '8px',
           background: isLoading ? 'var(--auth-accent-hover)' : 'var(--auth-accent)',
           color: '#fff',
           fontFamily: 'var(--auth-font-body)',
-          fontSize: '0.95rem',
+          fontSize: '0.92rem',
           fontWeight: 600,
           border: 'none',
           cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -418,10 +401,11 @@ const SignupForm = () => {
           alignItems: 'center',
           justifyContent: 'center',
           gap: '8px',
+          marginTop: '2px',
         }}
       >
         {isLoading ? (
-          <svg style={{ width: '16px', height: '16px' }} className="animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <svg style={{ width: '15px', height: '15px' }} className="animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
           </svg>
         ) : 'Create Account'}
@@ -429,42 +413,14 @@ const SignupForm = () => {
 
       {/* Already have account */}
       <p
-        className="auth-fade-up-6"
-        style={{ textAlign: 'center', fontFamily: 'var(--auth-font-body)', fontSize: '0.85rem', color: 'var(--auth-text-secondary)' }}
+        className="auth-fade-up-5"
+        style={{ textAlign: 'center', fontFamily: 'var(--auth-font-body)', fontSize: '0.82rem', color: 'var(--auth-text-secondary)' }}
       >
         Already have an account?{' '}
         <Link to="/login" style={{ color: 'var(--auth-accent)', fontWeight: 600, textDecoration: 'none' }}>
           Sign In
         </Link>
       </p>
-
-      {/* Trust badges */}
-      <div
-        className="auth-fade-up-6"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '14px',
-          paddingTop: '12px',
-          borderTop: '1px solid var(--auth-border)',
-          flexWrap: 'wrap',
-        }}
-      >
-        {['🔒 SSL Secured', 'FERPA Compliant', 'SOC 2 Certified', 'WCAG 2.1 AA'].map(badge => (
-          <span
-            key={badge}
-            style={{
-              fontFamily: 'var(--auth-font-body)',
-              fontSize: '0.7rem',
-              color: 'var(--auth-text-secondary)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {badge}
-          </span>
-        ))}
-      </div>
     </div>
   );
 };

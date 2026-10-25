@@ -314,33 +314,6 @@ const LoginForm = () => {
           Create Account
         </Link>
       </p>
-
-      {/* Trust badges */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '16px',
-          paddingTop: '12px',
-          borderTop: '1px solid var(--auth-border)',
-          flexWrap: 'wrap',
-        }}
-      >
-        {['🔒 SSL Secured', 'FERPA Compliant', 'SOC 2 Certified'].map(badge => (
-          <span
-            key={badge}
-            style={{
-              fontFamily: 'var(--auth-font-body)',
-              fontSize: '0.72rem',
-              color: 'var(--auth-text-secondary)',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {badge}
-          </span>
-        ))}
-      </div>
     </div>
   );
 };

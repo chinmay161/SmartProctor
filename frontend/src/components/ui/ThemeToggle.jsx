@@ -1,10 +1,10 @@
 import React from 'react';
 import { useTheme } from '../../context/ThemeContext';
+import Icon from '../AppIcon';
 
 /**
- * Floating dark/light mode toggle pill.
- * Uses global --sp-* design tokens so it works on any page in the app.
- * Persists preference via ThemeContext -> localStorage.
+ * Modern dark/light mode toggle pill with Lucide icons and Tailwind styling.
+ * Supports floating mode (fixed top-right) or embedded inline in navigation bars.
  */
 const ThemeToggle = ({ floating = true }) => {
   const { resolvedTheme, setTheme } = useTheme();
@@ -12,50 +12,25 @@ const ThemeToggle = ({ floating = true }) => {
 
   return (
     <button
+      type="button"
       id="theme-toggle-btn"
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
+      aria-label={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
       title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-      style={{
-        position: floating ? 'fixed' : 'relative',
-        top: floating ? '14px' : 'auto',
-        right: floating ? '14px' : 'auto',
-        zIndex: floating ? 9999 : 'auto',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '7px',
-        padding: '7px 14px',
-        borderRadius: '999px',
-        background: 'var(--color-card)',
-        border: '1px solid var(--color-border)',
-        color: 'var(--color-muted-foreground)',
-        fontFamily: 'var(--font-body)',
-        fontSize: '0.78rem',
-        fontWeight: 500,
-        cursor: 'pointer',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-        boxShadow: 'var(--shadow-md)',
-        transition: 'border-color 0.2s, box-shadow 0.2s, color 0.2s, background 0.3s, transform 0.15s',
-        userSelect: 'none',
-        minWidth: '82px',
-        justifyContent: 'center',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'var(--color-primary)';
-        e.currentTarget.style.boxShadow = `0 0 18px var(--sp-accent-glow), var(--shadow-md)`;
-        e.currentTarget.style.transform = 'scale(1.04)';
-        e.currentTarget.style.color = 'var(--color-foreground)';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border)';
-        e.currentTarget.style.boxShadow = 'var(--shadow-md)';
-        e.currentTarget.style.transform = 'scale(1)';
-        e.currentTarget.style.color = 'var(--color-muted-foreground)';
-      }}
+      className={`
+        ${floating ? 'fixed top-3.5 right-3.5 z-[999]' : 'relative'}
+        inline-flex items-center justify-center gap-2 px-3 py-1.5
+        rounded-full border border-border bg-card/90 text-muted-foreground
+        hover:text-foreground hover:border-primary/50 hover:bg-card
+        backdrop-blur-md shadow-sm hover:shadow transition-all duration-200
+        text-xs font-medium cursor-pointer select-none focus:outline-none focus:ring-2 focus:ring-primary/40
+      `}
     >
-      <span style={{ fontSize: '13px', lineHeight: 1 }}>
-        {isDark ? '🌙' : '☀️'}
-      </span>
+      <Icon
+        name={isDark ? 'Moon' : 'Sun'}
+        size={14}
+        className={isDark ? 'text-blue-400' : 'text-amber-500'}
+      />
       <span>{isDark ? 'Dark' : 'Light'}</span>
     </button>
   );

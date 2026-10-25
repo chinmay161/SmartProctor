@@ -3,22 +3,22 @@ import { useAuth0 } from '@auth0/auth0-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLogout } from '../../context/SessionContext';
 import RoleBasedHeader from '../../components/ui/RoleBasedHeader';
-import SecurityBadgeDisplay from '../../components/ui/SecurityBadgeDisplay';
+import AppFooter from '../../components/ui/AppFooter';
+
 import Icon from '../../components/AppIcon';
 import Button from '../../components/ui/Button';
 import ActiveExamCard from './components/ActiveExamCard';
 import ScheduledExamCard from './components/ScheduledExamCard';
 import CompletedExamCard from './components/CompletedExamCard';
-import StatisticsPanel from './components/StatisticsPanel';
+
 import QuickActionsPanel from './components/QuickActionsPanel';
-import { apiRequest } from '../../services/api';
-import { apiDelete, apiGet, apiPost, apiPut } from '../../services/httpClient';
+import { authAwareCall } from '../../services/authAwareCall';
 import { SkeletonExamCard } from '../../components/ui/Skeleton';
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'scheduled');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'active');
   const { logout } = useLogout();
   const { isAuthenticated: auth0Authenticated, getAccessTokenSilently } = useAuth0();
   const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
@@ -28,7 +28,7 @@ const TeacherDashboard = () => {
   const [templateExams, setTemplateExams] = useState([]);
   const [scheduledExams, setScheduledExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
-  const [statistics, setStatistics] = useState({});
+
 
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -39,29 +39,22 @@ const TeacherDashboard = () => {
   const [releaseTarget, setReleaseTarget] = useState(null);
   const [releasingResults, setReleasingResults] = useState(false);
 
-  const callApi = async (path, method = 'GET', body = null) => {
-    if (auth0Authenticated) {
-      const token = await getAccessTokenSilently({
-        authorizationParams: {
-          audience: auth0Audience,
-        },
-      });
-      return apiRequest(path, method, body, token);
-    }
-
-    if (method === 'GET') return apiGet(path);
-    if (method === 'POST') return apiPost(path, body);
-    if (method === 'PUT') return apiPut(path, body);
-    if (method === 'DELETE') return apiDelete(path);
-    return apiRequest(path, method, body);
-  };
+  const callApi = (path, method = 'GET', body = null) =>
+    authAwareCall({
+      path,
+      method,
+      body,
+      auth0Authenticated,
+      getAccessTokenSilently,
+      auth0Audience,
+    });
 
   const tabs = [
-    { id: 'templates', label: 'Exam Templates', icon: 'Copy', count: templateExams.length },
-    { id: 'drafts', label: 'Draft Exams', icon: 'FileText', count: draftExams.length },
-    { id: 'active', label: 'Active Exams', icon: 'PlayCircle', count: activeExams.length },
-    { id: 'scheduled', label: 'Scheduled Exams', icon: 'Calendar', count: scheduledExams.length },
-    { id: 'completed', label: 'Completed Exams', icon: 'CheckCircle', count: completedExams.length },
+    { id: 'active', label: 'Active', icon: 'PlayCircle', count: activeExams.length },
+    { id: 'scheduled', label: 'Scheduled', icon: 'Calendar', count: scheduledExams.length },
+    { id: 'completed', label: 'Completed', icon: 'CheckCircle', count: completedExams.length },
+    { id: 'drafts', label: 'Drafts', icon: 'FileText', count: draftExams.length },
+    { id: 'templates', label: 'Templates', icon: 'Copy', count: templateExams.length },
   ];
 
   const fetchExams = async () => {
@@ -98,7 +91,7 @@ const TeacherDashboard = () => {
       await fetchExams();
 
       if (!mounted) return;
-      setStatistics({});
+
     };
 
     fetchDashboard();
@@ -177,10 +170,10 @@ const TeacherDashboard = () => {
   };
 
   return (
-    <>
+    <div className="min-h-screen flex flex-col justify-between bg-background">
       <RoleBasedHeader userRole="teacher" onLogout={logout} />
 
-      <main className="pt-20 pb-8">
+      <main className="flex-1 pt-20 pb-8">
         <div className="max-w-[1920px] mx-auto px-4 md:px-6 lg:px-8">
           <div className="mb-6 md:mb-8">
             <h1 className="text-2xl md:text-3xl lg:text-4xl font-heading font-semibold text-foreground mb-2">
@@ -205,22 +198,22 @@ const TeacherDashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 lg:gap-8">
             <div className="lg:col-span-8 xl:col-span-9 space-y-4 md:space-y-6">
               <div className="bg-card border border-border rounded-lg shadow-md overflow-hidden">
-                <div className="border-b border-border overflow-x-auto">
-                  <div className="flex items-center min-w-max">
+                <div className="border-b border-border">
+                  <div className="grid grid-cols-5 w-full" role="tablist" aria-label="Exam status tabs">
                     {tabs?.map((tab) => (
                       <button
                         key={tab?.id}
                         onClick={() => selectTab(tab?.id)}
-                        className={`flex items-center space-x-2 px-4 md:px-6 py-3 md:py-4 text-sm md:text-base font-medium transition-smooth border-b-2 shrink-0 ${
+                        className={`flex items-center justify-center space-x-1 sm:space-x-1.5 md:space-x-2 px-1 sm:px-2 md:px-3 py-3 md:py-3.5 text-xs sm:text-sm font-medium transition-smooth border-b-2 text-center min-w-0 ${
                           activeTab === tab?.id
-                            ? 'border-primary text-primary bg-primary/5'
+                            ? 'border-primary text-primary bg-primary/5 font-semibold'
                             : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
                         }`}
                       >
-                        <Icon name={tab?.icon} size={18} />
-                        <span>{tab?.label}</span>
+                        <Icon name={tab?.icon} size={16} className="shrink-0" />
+                        <span className="truncate">{tab?.label}</span>
                         <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                          className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[11px] sm:text-xs font-semibold shrink-0 ${
                             activeTab === tab?.id
                               ? 'bg-primary text-primary-foreground'
                               : 'bg-muted text-muted-foreground'
@@ -234,85 +227,6 @@ const TeacherDashboard = () => {
                 </div>
 
                 <div className="p-4 md:p-6">
-                  {activeTab === 'templates' && (
-                    <div className="space-y-4 md:space-y-6">
-                      <div className="flex items-center justify-end">
-                        <Button onClick={openCreateWizard} iconName="Plus" size="sm">
-                          Create Template
-                        </Button>
-                      </div>
-
-                      {loadingScheduled ? (
-                        <div className="space-y-4">
-                          <SkeletonExamCard />
-                          <SkeletonExamCard delay="0.08s" />
-                        </div>
-                      ) : templateExams.length === 0 ? (
-                        <div className="text-center py-12 md:py-16">
-                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Icon name="Copy" size={32} className="text-muted-foreground" />
-                          </div>
-                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
-                            No Exam Templates
-                          </h3>
-                          <p className="text-sm md:text-base text-muted-foreground">
-                            Save a reusable template to speed up future exam creation
-                          </p>
-                        </div>
-                      ) : (
-                        templateExams.map((exam) => (
-                          <ScheduledExamCard
-                            key={exam?.id}
-                            exam={exam}
-                            onEdit={openEditWizard}
-                            onUseTemplate={openUseTemplateWizard}
-                            onDelete={confirmDelete}
-                            variant="template"
-                          />
-                        ))
-                      )}
-                    </div>
-                  )}
-
-                  {activeTab === 'drafts' && (
-                    <div className="space-y-4 md:space-y-6">
-                      <div className="flex items-center justify-end">
-                        <Button onClick={openCreateWizard} iconName="Plus" size="sm">
-                          Create Exam
-                        </Button>
-                      </div>
-
-                      {loadingScheduled ? (
-                        <div className="space-y-4">
-                          <SkeletonExamCard />
-                          <SkeletonExamCard delay="0.08s" />
-                        </div>
-                      ) : draftExams.length === 0 ? (
-                        <div className="text-center py-12 md:py-16">
-                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Icon name="FileText" size={32} className="text-muted-foreground" />
-                          </div>
-                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
-                            No Draft Exams
-                          </h3>
-                          <p className="text-sm md:text-base text-muted-foreground">
-                            Saved drafts will appear here for quick editing
-                          </p>
-                        </div>
-                      ) : (
-                        draftExams.map((exam) => (
-                          <ScheduledExamCard
-                            key={exam?.id}
-                            exam={exam}
-                            onEdit={openEditWizard}
-                            onDelete={confirmDelete}
-                            variant="draft"
-                          />
-                        ))
-                      )}
-                    </div>
-                  )}
-
                   {activeTab === 'active' && (
                     <div className="space-y-4 md:space-y-6">
                       {activeExams.length === 0 ? (
@@ -397,13 +311,92 @@ const TeacherDashboard = () => {
                       )}
                     </div>
                   )}
+
+                  {activeTab === 'drafts' && (
+                    <div className="space-y-4 md:space-y-6">
+                      <div className="flex items-center justify-end">
+                        <Button onClick={openCreateWizard} iconName="Plus" size="sm">
+                          Create Exam
+                        </Button>
+                      </div>
+
+                      {loadingScheduled ? (
+                        <div className="space-y-4">
+                          <SkeletonExamCard />
+                          <SkeletonExamCard delay="0.08s" />
+                        </div>
+                      ) : draftExams.length === 0 ? (
+                        <div className="text-center py-12 md:py-16">
+                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Icon name="FileText" size={32} className="text-muted-foreground" />
+                          </div>
+                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
+                            No Draft Exams
+                          </h3>
+                          <p className="text-sm md:text-base text-muted-foreground">
+                            Saved drafts will appear here for quick editing
+                          </p>
+                        </div>
+                      ) : (
+                        draftExams.map((exam) => (
+                          <ScheduledExamCard
+                            key={exam?.id}
+                            exam={exam}
+                            onEdit={openEditWizard}
+                            onDelete={confirmDelete}
+                            variant="draft"
+                          />
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'templates' && (
+                    <div className="space-y-4 md:space-y-6">
+                      <div className="flex items-center justify-end">
+                        <Button onClick={openCreateWizard} iconName="Plus" size="sm">
+                          Create Template
+                        </Button>
+                      </div>
+
+                      {loadingScheduled ? (
+                        <div className="space-y-4">
+                          <SkeletonExamCard />
+                          <SkeletonExamCard delay="0.08s" />
+                        </div>
+                      ) : templateExams.length === 0 ? (
+                        <div className="text-center py-12 md:py-16">
+                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Icon name="Copy" size={32} className="text-muted-foreground" />
+                          </div>
+                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
+                            No Exam Templates
+                          </h3>
+                          <p className="text-sm md:text-base text-muted-foreground">
+                            Save a reusable template to speed up future exam creation
+                          </p>
+                        </div>
+                      ) : (
+                        templateExams.map((exam) => (
+                          <ScheduledExamCard
+                            key={exam?.id}
+                            exam={exam}
+                            onEdit={openEditWizard}
+                            onUseTemplate={openUseTemplateWizard}
+                            onDelete={confirmDelete}
+                            variant="template"
+                          />
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="lg:col-span-4 xl:col-span-3 space-y-4 md:space-y-6">
               <QuickActionsPanel onCreateExam={openCreateWizard} onOpenTemplates={openTemplatesTab} />
-              <StatisticsPanel statistics={statistics || {}} />
+
             </div>
           </div>
         </div>
@@ -458,8 +451,9 @@ const TeacherDashboard = () => {
         </div>
       )}
 
-      <SecurityBadgeDisplay variant="footer" />
-    </>
+
+      <AppFooter />
+    </div>
   );
 };
 

@@ -50,7 +50,7 @@ const ActiveExamCard = ({ exam }) => {
 
   return (
     <div className="sp-card sp-fade-up" style={{ padding: '18px 20px', position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: 'linear-gradient(90deg, #10B981, #3B82F6)' }} />
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: 'var(--sp-accent)' }} />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>

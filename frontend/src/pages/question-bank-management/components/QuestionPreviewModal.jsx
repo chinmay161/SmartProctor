@@ -2,6 +2,15 @@ import React from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
+const formatAvgTime = (seconds, usageCount = 0) => {
+  if (usageCount === 0 && (!seconds || seconds === 0)) return '—';
+  if (!seconds || seconds <= 0) return '0s';
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+};
+
 const QuestionPreviewModal = ({ question, onClose }) => {
   if (!question) return null;
 
@@ -121,15 +130,19 @@ const QuestionPreviewModal = ({ question, onClose }) => {
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Times Used</p>
-              <p className="text-sm font-medium text-foreground font-data">{question?.usageCount}</p>
+              <p className="text-sm font-medium text-foreground font-data">{question?.usageCount || 0}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Avg Score</p>
-              <p className="text-sm font-medium text-foreground font-data">{question?.avgScore}%</p>
+              <p className="text-sm font-medium text-foreground font-data">
+                {question?.usageCount === 0 && (!question?.avgScore || question?.avgScore === 0) ? '—' : `${question?.avgScore || 0}%`}
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground mb-1">Avg Time</p>
-              <p className="text-sm font-medium text-foreground font-data">{question?.avgTime}s</p>
+              <p className="text-sm font-medium text-foreground font-data">
+                {formatAvgTime(question?.avgTime, question?.usageCount)}
+              </p>
             </div>
           </div>
 

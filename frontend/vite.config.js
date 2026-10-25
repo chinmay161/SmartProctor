@@ -6,7 +6,6 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Versioned, self-hosted WASM path (see scripts/copy-mediapipe-wasm.mjs).
@@ -46,6 +45,11 @@ function cleanSourcemapsPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
   plugins: [
     react(),
     ...(hasSentryConfig
@@ -64,11 +68,33 @@ export default defineConfig({
   ],
   build: {
     sourcemap: 'hidden',
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'vendor-react';
+            }
+            if (id.includes('recharts')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('@sentry')) {
+              return 'vendor-sentry';
+            }
+            if (id.includes('@auth0')) {
+              return 'vendor-auth0';
+            }
+            if (id.includes('lucide-react') || id.includes('@radix-ui') || id.includes('radix-ui')) {
+              return 'vendor-ui';
+            }
+          }
+        },
+      },
+    },
   },
   define: {
     'import.meta.env.VITE_MEDIAPIPE_VERSION': JSON.stringify(mediapipeVersion),
     'import.meta.env.VITE_MEDIAPIPE_AUDIO_VERSION': JSON.stringify(mediapipeAudioVersion),
   },
 })
-
-

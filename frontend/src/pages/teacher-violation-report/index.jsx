@@ -5,6 +5,7 @@ import { authAwareCall } from '../../services/authAwareCall';
 import { apiRequest as httpApiRequest } from '../../services/httpClient';
 import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
+import AppFooter from '../../components/ui/AppFooter';
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 const API_BASE = RAW_API_BASE.replace(/\/+$/, '');
@@ -100,7 +101,8 @@ const TeacherViolationReportPage = () => {
   };
 
   return (
-    <main className="pt-20 pb-8">
+    <div className="min-h-screen flex flex-col justify-between">
+      <main className="pt-20 pb-8 flex-1">
       <div className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 space-y-6">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -196,7 +198,9 @@ const TeacherViolationReportPage = () => {
           </div>
         )}
       </div>
-    </main>
+      </main>
+      <AppFooter />
+    </div>
   );
 };
 

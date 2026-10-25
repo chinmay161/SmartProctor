@@ -1,7 +1,10 @@
 import React, { useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import LoginForm from './components/LoginForm';
-import FeatureHighlights from './components/FeatureHighlights';
 import ThemeToggle from '../../components/ui/ThemeToggle';
+import SmartProctorLogo from '../../components/ui/SmartProctorLogo';
+import AppFooter from '../../components/ui/AppFooter';
+import NeonGridBackground from '../../components/ui/NeonGridBackground';
 
 const Login = () => {
   useEffect(() => {
@@ -16,77 +19,63 @@ const Login = () => {
   }, []);
 
   return (
-    <>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
       <ThemeToggle />
+      <NeonGridBackground />
 
       <div
         style={{
-          minHeight: '100vh',
-          background: 'var(--auth-bg)',
+          flex: 1,
+          background: 'transparent',
           display: 'flex',
-          transition: 'background 0.3s, color 0.3s',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 'clamp(1.5rem, 4vw, 3rem)',
+          position: 'relative',
+          zIndex: 1,
         }}
       >
-        {/* Left brand panel */}
-        <FeatureHighlights />
-
-        {/* Right form panel */}
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 'clamp(1.5rem, 4vw, 3rem)',
-            minHeight: '100vh',
-          }}
-        >
-          <div style={{ width: '100%', maxWidth: '460px' }}>
-            {/* Mobile-only logo */}
-            <div
-              className="lg:hidden auth-fade-up"
+        <div style={{ width: '100%', maxWidth: '440px' }}>
+          {/* Brand Logo & Home Link */}
+          <div
+            className="auth-fade-up"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '2rem',
+            }}
+          >
+            <Link
+              to="/"
               style={{
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'center',
                 gap: '12px',
-                marginBottom: '2rem',
+                textDecoration: 'none',
               }}
+              title="Return to home page"
             >
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '9px',
-                  background: 'rgba(59,130,246,0.15)',
-                  border: '1px solid rgba(59,130,246,0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="var(--auth-accent)" strokeWidth="2" style={{ width: '20px', height: '20px' }}>
-                  <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                  <path d="M6 12v5c3 3 9 3 12 0v-5" />
-                </svg>
-              </div>
+              <SmartProctorLogo size={42} />
               <span
                 style={{
                   fontFamily: 'var(--auth-font-display)',
-                  fontSize: '1.4rem',
+                  fontSize: '1.6rem',
                   color: 'var(--auth-text-primary)',
-                  fontWeight: 600,
+                  fontWeight: 700,
+                  letterSpacing: '-0.025em',
                 }}
               >
-                SmartProctor
+                Smart<span style={{ color: 'var(--auth-accent)' }}>Proctor</span>
               </span>
-            </div>
-
-            <LoginForm />
+            </Link>
           </div>
+
+          <LoginForm />
         </div>
       </div>
-    </>
+      <AppFooter />
+    </div>
   );
 };
 

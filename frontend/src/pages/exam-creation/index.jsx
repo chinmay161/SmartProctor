@@ -5,7 +5,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLogout } from '../../context/SessionContext';
 import RoleBasedHeader from '../../components/ui/RoleBasedHeader';
-import SecurityBadgeDisplay from '../../components/ui/SecurityBadgeDisplay';
+import AppFooter from '../../components/ui/AppFooter';
+
 import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
 import ProgressStepper from './components/ProgressStepper';
@@ -591,9 +592,9 @@ const ExamCreation = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen flex flex-col justify-between bg-background">
       <RoleBasedHeader userRole="teacher" onLogout={handleLogout} />
-      <main className="pt-24 pb-12 px-4 md:px-6 lg:px-8">
+      <main className="pt-24 pb-12 px-4 md:px-6 lg:px-8 flex-1">
         <div className="max-w-7xl mx-auto">
           <div className="mb-8">
             <button
@@ -665,7 +666,8 @@ const ExamCreation = () => {
           )}
         </div>
       </main>
-      <SecurityBadgeDisplay variant="footer" />
+      <AppFooter />
+
     </div>
   );
 };

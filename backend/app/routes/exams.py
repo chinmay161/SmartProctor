@@ -5,7 +5,7 @@ from io import StringIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import object_session
 
 from ..auth.dependencies import get_current_user
@@ -19,6 +19,7 @@ from ..models.exam_attempt import AttemptStatus, ExamAttempt
 from ..models.exam_session import ExamSession
 from ..models.violation import Violation
 from ..permissions.exam_permissions import require_exam_owner
+from ..services.email_service import send_exam_completion_digest
 from ..schemas.exam import (
     CompletedExamAnalyticsResponse,
     CompletedExamViolationReportResponse,
@@ -436,7 +437,7 @@ def end_exam_endpoint(exam_id: str, user=Depends(require_role("teacher"))):
 
 
 @router.patch("/{exam_id}/publish-results")
-def publish_results(exam_id: str, user=Depends(require_role("teacher"))):
+def publish_results(exam_id: str, background_tasks: BackgroundTasks, user=Depends(require_role("teacher"))):
     db = SessionLocal()
     try:
         exam = require_exam_owner(db, exam_id, user["sub"])
@@ -445,6 +446,26 @@ def publish_results(exam_id: str, user=Depends(require_role("teacher"))):
         if exam.results_visible:
             return {"exam_id": exam.id, "results_visible": True, "already_released": True}
         exam.results_visible = True
+        teacher_email = user.get("email")
+        if teacher_email:
+            try:
+                teacher_name = user.get("name") or "Educator"
+                attempts = db.query(ExamAttempt).filter(ExamAttempt.exam_id == exam.id).all()
+                scores = [a.score for a in attempts if a.score is not None]
+                avg_score = (sum(scores) / len(scores)) if scores else None
+                v_count = db.query(Violation).filter(Violation.exam_id == exam.id).count()
+                background_tasks.add_task(
+                    send_exam_completion_digest,
+                    teacher_email=teacher_email,
+                    teacher_name=teacher_name,
+                    exam_title=exam.title,
+                    total_submissions=len(attempts),
+                    average_score=avg_score,
+                    total_violations=v_count,
+                    exam_id=exam.id,
+                )
+            except Exception:
+                pass
         db.commit()
         return {"exam_id": exam.id, "results_visible": True, "already_released": False}
     finally:

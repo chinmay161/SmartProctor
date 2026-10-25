@@ -1,0 +1,57 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="spShieldGrad" x1="15" y1="10" x2="85" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="50%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#06B6D4" />
+    </linearGradient>
+    <radialGradient id="spIrisGlow" cx="50" cy="50" r="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.9" />
+      <stop offset="60%" stop-color="#4F46E5" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#0B0F19" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="spPupilGrad" x1="42" y1="42" x2="58" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background shield fill -->
+  <path
+    d="M50 12 L82 24 C82 54 67 76 50 88 C33 76 18 54 18 24 Z"
+    stroke="url(#spShieldGrad)"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="#0B0F19"
+  />
+
+  <!-- Neural Mesh Struts -->
+  <path
+    d="M50 12 L50 36 M18 24 L34 40 M82 24 L66 40 M50 88 L50 64"
+    stroke="#06B6D4"
+    stroke-opacity="0.4"
+    stroke-width="2.5"
+    stroke-dasharray="2 2"
+  />
+
+  <!-- Biometric Eye Gaze Contour -->
+  <path
+    d="M28 50 C36 38 64 38 72 50 C64 62 36 62 28 50 Z"
+    stroke="#22D3EE"
+    stroke-width="4"
+    fill="url(#spIrisGlow)"
+  />
+
+  <!-- Iris Inner Ring -->
+  <circle cx="50" cy="50" r="11" stroke="#38BDF8" stroke-width="3" fill="none" />
+
+  <!-- Precision Focal Point / Pupil -->
+  <circle cx="50" cy="50" r="5" fill="url(#spPupilGrad)" />
+  <circle cx="48.5" cy="48.5" r="1.5" fill="#FFFFFF" />
+
+  <!-- Subtle Corner Landmark Dots -->
+  <circle cx="34" cy="40" r="2.5" fill="#22D3EE" />
+  <circle cx="66" cy="40" r="2.5" fill="#22D3EE" />
+  <circle cx="50" cy="36" r="2.5" fill="#4F46E5" />
+</svg>

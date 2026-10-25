@@ -1,116 +1,110 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes as RouterRoutes, Route } from "react-router-dom";
 import ScrollToTop from './components/ScrollToTop';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ProtectedRoute, PublicRoute } from './components/ProtectedRoute';
-import NotFound from './pages/NotFound';
-import AdminPanel from './pages/admin-panel';
-import Login from './pages/login';
-import Signup from './pages/signup';
-import QuestionBankManagement from './pages/question-bank-management';
-import ExamCreation from './pages/exam-creation';
-import StudentDashboard from './pages/student-dashboard';
-import StudentResultReviewPage from './pages/student-result-review';
-import TeacherDashboard from './pages/teacher-dashboard';
-import TeacherExamAnalyticsPage from './pages/teacher-exam-analytics';
-import TeacherAttemptReviewPage from './pages/teacher-attempt-review';
-import TeacherViolationReportPage from './pages/teacher-violation-report';
-import ExamPortal from './pages/exam-portal';
-import TeacherMonitoringPage from './pages/exam-monitoring';
-import HeadPoseDiagnosticPage from './pages/headpose-diagnostic';
-import AIDiagnosticsDashboard from './pages/ai-diagnostics';
+import { DashboardSkeleton } from './components/ui/Skeleton';
+
+// Lazy-loaded route components for chunk splitting
+const LandingPage = lazy(() => import('./pages/landing'));
+const Login = lazy(() => import('./pages/login'));
+const Signup = lazy(() => import('./pages/signup'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+const AdminPanel = lazy(() => import('./pages/admin-panel'));
+const QuestionBankManagement = lazy(() => import('./pages/question-bank-management'));
+const ExamCreation = lazy(() => import('./pages/exam-creation'));
+const StudentDashboard = lazy(() => import('./pages/student-dashboard'));
+const StudentResultReviewPage = lazy(() => import('./pages/student-result-review'));
+const TeacherDashboard = lazy(() => import('./pages/teacher-dashboard'));
+const TeacherExamAnalyticsPage = lazy(() => import('./pages/teacher-exam-analytics'));
+const TeacherAttemptReviewPage = lazy(() => import('./pages/teacher-attempt-review'));
+const TeacherViolationReportPage = lazy(() => import('./pages/teacher-violation-report'));
+const ExamPortal = lazy(() => import('./pages/exam-portal'));
+const TeacherMonitoringPage = lazy(() => import('./pages/exam-monitoring'));
+const HeadPoseDiagnosticPage = lazy(() => import('./pages/headpose-diagnostic'));
 
 const Routes = () => {
   return (
     <BrowserRouter>
       <ErrorBoundary>
         <ScrollToTop />
-        <RouterRoutes>
-          {/* Public Routes */}
-          <Route 
-            path="/" 
-            element={<PublicRoute component={Login} redirectPath="/student-dashboard" />} 
-          />
-          <Route 
-            path="/login" 
-            element={<PublicRoute component={Login} redirectPath="/student-dashboard" />} 
-          />
-          <Route 
-            path="/signup" 
-            element={<PublicRoute component={Signup} redirectPath="/student-dashboard" />} 
-          />
-          {/* Diagnostic Observability Platform Routes */}
-          <Route 
-            path="/debug" 
-            element={<AIDiagnosticsDashboard />} 
-          />
-          <Route 
-            path="/debug/ai-diagnostics" 
-            element={<AIDiagnosticsDashboard />} 
-          />
-          <Route 
-            path="/debug/dashboard" 
-            element={<AIDiagnosticsDashboard />} 
-          />
-          <Route 
-            path="/debug/headpose" 
-            element={<HeadPoseDiagnosticPage />} 
-          />
+        <Suspense fallback={<DashboardSkeleton />}>
+          <RouterRoutes>
+            {/* Public Routes */}
+            <Route
+              path="/"
+              element={<PublicRoute component={LandingPage} />}
+            />
+            <Route 
+              path="/login" 
+              element={<PublicRoute component={Login} redirectPath="/student-dashboard" />} 
+            />
+            <Route 
+              path="/signup" 
+              element={<PublicRoute component={Signup} redirectPath="/student-dashboard" />} 
+            />
 
-          {/* Protected Routes - Student */}
-          <Route
-            path="/student-dashboard"
-            element={<ProtectedRoute component={StudentDashboard} requiredRoles={['student']} />}
-          />
-          <Route
-            path="/student-dashboard/results/:examId"
-            element={<ProtectedRoute component={StudentResultReviewPage} requiredRoles={['student']} />}
-          />
-          <Route
-            path="/exam-portal"
-            element={<ProtectedRoute component={ExamPortal} requiredRoles={['student']} />}
-          />
+            {/* Diagnostic Observability Platform Routes */}
+            <Route 
+              path="/debug/headpose" 
+              element={<HeadPoseDiagnosticPage />} 
+            />
 
-          {/* Protected Routes - Teacher/Instructor */}
-          <Route
-            path="/teacher-dashboard"
-            element={<ProtectedRoute component={TeacherDashboard} requiredRoles={['teacher']} />}
-          />
-          <Route
-            path="/teacher-dashboard/completed/:examId/analytics"
-            element={<ProtectedRoute component={TeacherExamAnalyticsPage} requiredRoles={['teacher']} />}
-          />
-          <Route
-            path="/teacher-dashboard/completed/:examId/attempts/:attemptId/review"
-            element={<ProtectedRoute component={TeacherAttemptReviewPage} requiredRoles={['teacher']} />}
-          />
-          <Route
-            path="/teacher-dashboard/completed/:examId/violation-report"
-            element={<ProtectedRoute component={TeacherViolationReportPage} requiredRoles={['teacher']} />}
-          />
-          <Route
-            path="/exam-monitoring/:examId"
-            element={<ProtectedRoute component={TeacherMonitoringPage} requiredRoles={['teacher']} />}
-          />
+            {/* Protected Routes - Student */}
+            <Route
+              path="/student-dashboard"
+              element={<ProtectedRoute component={StudentDashboard} requiredRoles={['student']} />}
+            />
+            <Route
+              path="/student-dashboard/results/:examId"
+              element={<ProtectedRoute component={StudentResultReviewPage} requiredRoles={['student']} />}
+            />
+            <Route
+              path="/exam-portal"
+              element={<ProtectedRoute component={ExamPortal} requiredRoles={['student']} />}
+            />
 
-          <Route
-            path="/exam-creation"
-            element={<ProtectedRoute component={ExamCreation} requiredRoles={['teacher']} />}
-          />
-          <Route
-            path="/question-bank-management"
-            element={<ProtectedRoute component={QuestionBankManagement} requiredRoles={['teacher']} />}
-          />
+            {/* Protected Routes - Teacher/Instructor */}
+            <Route
+              path="/teacher-dashboard"
+              element={<ProtectedRoute component={TeacherDashboard} requiredRoles={['teacher']} />}
+            />
+            <Route
+              path="/teacher-dashboard/completed/:examId/analytics"
+              element={<ProtectedRoute component={TeacherExamAnalyticsPage} requiredRoles={['teacher']} />}
+            />
+            <Route
+              path="/teacher-dashboard/completed/:examId/attempts/:attemptId/review"
+              element={<ProtectedRoute component={TeacherAttemptReviewPage} requiredRoles={['teacher']} />}
+            />
+            <Route
+              path="/teacher-dashboard/completed/:examId/violation-report"
+              element={<ProtectedRoute component={TeacherViolationReportPage} requiredRoles={['teacher']} />}
+            />
+            <Route
+              path="/exam-monitoring/:examId"
+              element={<ProtectedRoute component={TeacherMonitoringPage} requiredRoles={['teacher']} />}
+            />
 
-          {/* Protected Routes - Admin */}
-          <Route
-            path="/admin-panel"
-            element={<ProtectedRoute component={AdminPanel} requiredRoles={['admin']} />}
-          />
+            <Route
+              path="/exam-creation"
+              element={<ProtectedRoute component={ExamCreation} requiredRoles={['teacher']} />}
+            />
+            <Route
+              path="/question-bank-management"
+              element={<ProtectedRoute component={QuestionBankManagement} requiredRoles={['teacher']} />}
+            />
 
-          {/* 404 - Not Found */}
-          <Route path="*" element={<NotFound />} />
-        </RouterRoutes>
+            {/* Protected Routes - Admin */}
+            <Route
+              path="/admin-panel"
+              element={<ProtectedRoute component={AdminPanel} requiredRoles={['admin']} />}
+            />
+
+            {/* 404 - Not Found */}
+            <Route path="*" element={<NotFound />} />
+          </RouterRoutes>
+        </Suspense>
       </ErrorBoundary>
     </BrowserRouter>
   );

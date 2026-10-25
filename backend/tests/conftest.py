@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
-# Point the app at a throwaway SQLite file before any app module creates its engine.
+# Point the app at a throwaway SQLite file and disable external network dependencies in tests
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="smartproctor-tests-")
 os.environ["DATABASE_URL"] = f"sqlite:///{Path(_TEST_DB_DIR, 'test.db').as_posix()}"
+os.environ["EVIDENCE_STORAGE"] = "local"
+os.environ["SENTRY_DSN"] = ""
 
 backend_dir = Path(__file__).resolve().parent.parent
 if str(backend_dir) not in sys.path:

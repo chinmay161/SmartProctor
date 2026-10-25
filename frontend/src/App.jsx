@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import Routes from './Routes';
-import { ThemeProvider } from "./context/ThemeContext";
-import { SessionProvider } from "./context/SessionContext";
+import { ThemeProvider } from './context/ThemeContext';
+import { SessionProvider } from './context/SessionContext';
+import { ToastProvider } from './context/ToastContext';
 
 function App() {
   useEffect(() => {
@@ -12,7 +13,9 @@ function App() {
   return (
     <SessionProvider>
       <ThemeProvider>
-        <Routes />
+        <ToastProvider>
+          <Routes />
+        </ToastProvider>
       </ThemeProvider>
     </SessionProvider>
   );

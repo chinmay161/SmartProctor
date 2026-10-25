@@ -1,4 +1,5 @@
 import React from 'react';
+import SmartProctorLogo from '../../../components/ui/SmartProctorLogo';
 
 const features = [
   {
@@ -84,26 +85,9 @@ const FeatureHighlights = () => (
     <div className="auth-fade-up-1" style={{ position: 'relative', zIndex: 1 }}>
       {/* Logo mark */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '2.5rem' }}>
-        <div
-          style={{
-            width: '44px',
-            height: '44px',
-            borderRadius: '10px',
-            background: 'rgba(59,130,246,0.15)',
-            border: '1px solid rgba(59,130,246,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="var(--auth-accent)" strokeWidth="2" style={{ width: '22px', height: '22px' }}>
-            <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-            <path d="M6 12v5c3 3 9 3 12 0v-5" />
-          </svg>
-        </div>
-        <span style={{ fontFamily: 'var(--auth-font-display)', fontSize: '1.5rem', color: 'var(--auth-text-primary)', fontWeight: 600 }}>
-          SmartProctor
+        <SmartProctorLogo size={44} />
+        <span style={{ fontFamily: 'var(--auth-font-display)', fontSize: '1.5rem', color: 'var(--auth-text-primary)', fontWeight: 700, letterSpacing: '-0.025em' }}>
+          Smart<span style={{ color: 'var(--auth-accent)' }}>Proctor</span>
         </span>
       </div>
 

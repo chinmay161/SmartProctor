@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useLogout } from '../../context/SessionContext';
 import RoleBasedHeader from '../../components/ui/RoleBasedHeader';
-import SecurityBadgeDisplay from '../../components/ui/SecurityBadgeDisplay';
+import AppFooter from '../../components/ui/AppFooter';
+
 
 import Button from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox';
@@ -49,7 +50,7 @@ const QuestionBankManagement = () => {
       usageCount: 45,
       avgScore: 78,
       avgTime: 120,
-      createdDate: '01/15/2026'
+      createdDate: '2026-01-15T10:00:00.000Z'
     },
     {
       id: 2,
@@ -63,7 +64,7 @@ const QuestionBankManagement = () => {
       usageCount: 67,
       avgScore: 92,
       avgTime: 45,
-      createdDate: '01/10/2026'
+      createdDate: '2026-01-10T10:00:00.000Z'
     },
     {
       id: 3,
@@ -77,7 +78,7 @@ const QuestionBankManagement = () => {
       usageCount: 23,
       avgScore: 54,
       avgTime: 180,
-      createdDate: '01/05/2026'
+      createdDate: '2026-01-05T10:00:00.000Z'
     },
     {
       id: 4,
@@ -90,7 +91,7 @@ const QuestionBankManagement = () => {
       usageCount: 12,
       avgScore: 71,
       avgTime: 900,
-      createdDate: '12/28/2025'
+      createdDate: '2025-12-28T10:00:00.000Z'
     },
     {
       id: 5,
@@ -109,7 +110,7 @@ const QuestionBankManagement = () => {
       usageCount: 89,
       avgScore: 85,
       avgTime: 90,
-      createdDate: '01/18/2026'
+      createdDate: '2026-01-18T10:00:00.000Z'
     },
     {
       id: 6,
@@ -128,19 +129,27 @@ const QuestionBankManagement = () => {
       usageCount: 156,
       avgScore: 94,
       avgTime: 30,
-      createdDate: '01/12/2026'
+      createdDate: '2026-01-12T10:00:00.000Z'
     }
   ];
 
-  const [questions, setQuestions] = useState(sampleQuestions);
+  const [questions, setQuestions] = useState([]);
 
-  // backend-driven: questions come from API
+  // Dynamically calculate statistics from the current questions array
+  const totalQuestions = (questions || []).length;
+  const mcqCount = (questions || []).filter(q => q.type === 'mcq').length;
+  const essayCount = (questions || []).filter(q => q.type === 'essay' || q.type === 'subjective').length;
+  
+  const scoredQuestions = (questions || []).filter(q => (q.usageCount || 0) > 0 || (q.avgScore || 0) > 0);
+  const avgPerformance = scoredQuestions.length > 0
+    ? Math.round(scoredQuestions.reduce((sum, q) => sum + (q.avgScore || 0), 0) / scoredQuestions.length)
+    : 0;
 
   const stats = {
-    totalQuestions: 247,
-    mcqCount: 156,
-    essayCount: 34,
-    avgPerformance: 76
+    totalQuestions,
+    mcqCount,
+    essayCount,
+    avgPerformance
   };
 
   useEffect(() => {
@@ -151,7 +160,7 @@ const QuestionBankManagement = () => {
         if (!mounted) return;
         setQuestions(qs || []);
       } catch (err) {
-        setQuestions([]);
+        if (mounted) setQuestions([]);
       }
     };
 
@@ -235,12 +244,12 @@ const QuestionBankManagement = () => {
   const { logout } = useLogout();
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen flex flex-col justify-between bg-background">
       <RoleBasedHeader
         userRole="teacher"
         onLogout={logout}
       />
-      <main className="pt-20 pb-12">
+      <main className="pt-20 pb-12 flex-1">
         <div className="max-w-[1920px] mx-auto px-4 md:px-6 lg:px-8">
           <div className="mb-6 md:mb-8">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
@@ -313,8 +322,8 @@ const QuestionBankManagement = () => {
               <div className="bg-card border border-border rounded-lg shadow-md p-4 md:p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-3">
-                      <Checkbox
-                      checked={selectedQuestions?.length === (questions || [])?.length}
+                    <Checkbox
+                      checked={selectedQuestions?.length > 0 && selectedQuestions?.length === (questions || [])?.length}
                       onChange={handleSelectAll}
                     />
                     <p className="text-sm font-medium text-foreground">
@@ -384,7 +393,8 @@ const QuestionBankManagement = () => {
           </div>
         </div>
       </main>
-      <SecurityBadgeDisplay variant="footer" />
+      <AppFooter />
+
       {showPreviewModal && (
         <QuestionPreviewModal
           question={previewQuestion}
@@ -405,4 +415,3 @@ const QuestionBankManagement = () => {
 };
 
 export default QuestionBankManagement;
- 

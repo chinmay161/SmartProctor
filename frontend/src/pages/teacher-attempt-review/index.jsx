@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { authAwareCall } from '../../services/authAwareCall';
 import Button from '../../components/ui/Button';
+import AppFooter from '../../components/ui/AppFooter';
 
 const renderValue = (value) => {
   if (value == null) return 'No answer submitted';
@@ -152,7 +153,8 @@ const TeacherAttemptReviewPage = () => {
   };
 
   return (
-    <main className="pt-20 pb-8">
+    <div className="min-h-screen flex flex-col justify-between">
+      <main className="pt-20 pb-8 flex-1">
       <div className="max-w-6xl mx-auto px-4 md:px-6 lg:px-8 space-y-6">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -280,7 +282,9 @@ const TeacherAttemptReviewPage = () => {
           </div>
         )}
       </div>
-    </main>
+      </main>
+      <AppFooter />
+    </div>
   );
 };
 

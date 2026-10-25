@@ -6,6 +6,8 @@ import { authAwareCall } from '../../../services/authAwareCall';
 import { useTheme } from '../../../context/ThemeContext';
 import { formatIstDateTime } from '../../../utils/dateTime';
 import { ExamListSkeleton, HistoryTableSkeleton } from '../../../components/ui/Skeleton';
+import ThemeToggle from '../../../components/ui/ThemeToggle';
+import AppFooter from '../../../components/ui/AppFooter';
 
 const DeviceTestModal = lazy(() => import('../../../components/proctoring/DeviceTestModal'));
 
@@ -481,7 +483,7 @@ const StudentDashboardExample = () => {
   ];
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-background)', transition: 'background 0.3s, color 0.3s' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: 'var(--color-background)', transition: 'background 0.3s, color 0.3s' }}>
 
       {/* ── Sticky Glassmorphic Header ── */}
       <header
@@ -579,7 +581,7 @@ const StudentDashboardExample = () => {
       </header>
 
       {/* ── Main content ── */}
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: 'clamp(1.5rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2rem)' }}>
+      <main style={{ maxWidth: '1200px', width: '100%', margin: '0 auto', flex: 1, padding: 'clamp(1.5rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2rem)' }}>
 
         {/* ── Hero zone ── */}
         <div
@@ -855,6 +857,7 @@ const StudentDashboardExample = () => {
           </div>
         )}
       </main>
+      <AppFooter />
     </div>
   );
 };

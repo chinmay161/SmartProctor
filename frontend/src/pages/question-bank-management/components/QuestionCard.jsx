@@ -2,6 +2,44 @@ import React, { useState } from 'react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 
+const formatCreatedDate = (dateVal) => {
+  if (!dateVal) return 'N/A';
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return String(dateVal);
+    return d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  } catch {
+    return String(dateVal);
+  }
+};
+
+const formatCreatedTime = (dateVal) => {
+  if (!dateVal) return '';
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  } catch {
+    return '';
+  }
+};
+
+const formatAvgTime = (seconds, usageCount = 0) => {
+  if (usageCount === 0 && (!seconds || seconds === 0)) return '—';
+  if (!seconds || seconds <= 0) return '0s';
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+};
+
 const QuestionCard = ({ question, onEdit, onDuplicate, onDelete, onPreview }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -35,6 +73,8 @@ const QuestionCard = ({ question, onEdit, onDuplicate, onDelete, onPreview }) =>
 
   const typeConfig = getTypeConfig(question?.type);
   const difficultyConfig = getDifficultyConfig(question?.difficulty);
+
+  const createdDateStr = question?.createdDate || question?.created_at;
 
   return (
     <div className="bg-card border border-border rounded-lg shadow-md hover:shadow-lg transition-smooth overflow-hidden">
@@ -125,31 +165,42 @@ const QuestionCard = ({ question, onEdit, onDuplicate, onDelete, onPreview }) =>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
           <div className="flex items-center space-x-2">
-            <Icon name="Eye" size={16} className="text-muted-foreground" />
+            <Icon name="Eye" size={16} className="text-muted-foreground shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">Used</p>
-              <p className="text-sm font-data font-semibold text-foreground">{question?.usageCount}</p>
+              <p className="text-sm font-data font-semibold text-foreground">{question?.usageCount || 0}</p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <Icon name="TrendingUp" size={16} className="text-muted-foreground" />
+            <Icon name="TrendingUp" size={16} className="text-muted-foreground shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">Avg Score</p>
-              <p className="text-sm font-data font-semibold text-foreground">{question?.avgScore}%</p>
+              <p className="text-sm font-data font-semibold text-foreground">
+                {question?.usageCount === 0 && (!question?.avgScore || question?.avgScore === 0) ? '—' : `${question?.avgScore || 0}%`}
+              </p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <Icon name="Clock" size={16} className="text-muted-foreground" />
+            <Icon name="Clock" size={16} className="text-muted-foreground shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">Avg Time</p>
-              <p className="text-sm font-data font-semibold text-foreground">{question?.avgTime}s</p>
+              <p className="text-sm font-data font-semibold text-foreground">
+                {formatAvgTime(question?.avgTime, question?.usageCount)}
+              </p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <Icon name="Calendar" size={16} className="text-muted-foreground" />
-            <div>
+            <Icon name="Calendar" size={16} className="text-muted-foreground shrink-0" />
+            <div className="min-w-0">
               <p className="text-xs text-muted-foreground">Created</p>
-              <p className="text-sm font-data font-semibold text-foreground">{question?.createdDate}</p>
+              <p className="text-sm font-data font-semibold text-foreground truncate">
+                {formatCreatedDate(createdDateStr)}
+              </p>
+              {formatCreatedTime(createdDateStr) && (
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {formatCreatedTime(createdDateStr)}
+                </p>
+              )}
             </div>
           </div>
         </div>

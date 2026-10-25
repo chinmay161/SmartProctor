@@ -8,6 +8,7 @@ import UserManagementTable from './components/UserManagementTable';
 import SystemSettingsPanel from './components/SystemSettingsPanel';
 import ReportsSection from './components/ReportsSection';
 import SecurityMonitoring from './components/SecurityMonitoring';
+import AppFooter from '../../components/ui/AppFooter';
 import { apiRequest } from '../../services/api';
 import { dashboardForRoles, extractRolesFromAuth0User } from '../../utils/roleUtils';
 
@@ -160,7 +161,7 @@ const AdminPanel = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-background)', transition: 'background 0.3s' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: 'var(--color-background)', transition: 'background 0.3s' }}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
       {/* ── Glassmorphic Header ── */}
@@ -210,7 +211,7 @@ const AdminPanel = () => {
         </div>
       </header>
 
-      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: 'clamp(1.5rem,4vw,2.5rem) clamp(1rem,4vw,2rem)' }}>
+      <main style={{ maxWidth: '1400px', width: '100%', margin: '0 auto', flex: 1, padding: 'clamp(1.5rem,4vw,2.5rem) clamp(1rem,4vw,2rem)' }}>
 
         {/* ── Hero zone ── */}
         <div className="sp-grid-bg sp-fade-up" style={{ borderRadius: '16px', padding: '24px 28px', border: '1px solid var(--color-border)', marginBottom: '24px', position: 'relative', overflow: 'hidden' }}>
@@ -336,6 +337,7 @@ const AdminPanel = () => {
 
         <style>{`.admin-bottom-grid { @media (max-width: 900px) { grid-template-columns: 1fr !important; } }`}</style>
       </main>
+      <AppFooter />
     </div>
   );
 };

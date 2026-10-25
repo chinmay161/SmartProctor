@@ -6,6 +6,7 @@ import Button from '../../components/ui/Button';
 import { authAwareCall } from '../../services/authAwareCall';
 import { formatViolationType, getViolationIcon } from '../../utils/violationSeverity';
 import { ReconnectingSocket } from '../../services/reconnectingSocket';
+import { useToast } from '../../context/ToastContext';
 
 const getBackendOrigin = () => {
   const apiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL;
@@ -30,7 +31,7 @@ const TeacherMonitoringPage = () => {
   const [loading, setLoading] = useState(true);
   const [socketReconnecting, setSocketReconnecting] = useState(false);
   const [error, setError] = useState('');
-  const [toasts, setToasts] = useState([]);
+  const { toast } = useToast();
   
   const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
   const [evidenceList, setEvidenceList] = useState([]);

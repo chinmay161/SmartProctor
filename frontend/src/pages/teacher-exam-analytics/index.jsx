@@ -6,6 +6,7 @@ import Button from '../../components/ui/Button';
 import Icon from '../../components/AppIcon';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import EvidenceGallery from './components/EvidenceGallery';
+import AppFooter from '../../components/ui/AppFooter';
 
 const TeacherExamAnalyticsPage = () => {
   const navigate = useNavigate();
@@ -112,7 +113,8 @@ const TeacherExamAnalyticsPage = () => {
   const violationData = analytics ? Object.entries(analytics.violation_analytics).map(([name, count]) => ({ name, count })) : [];
 
   return (
-    <main className="pt-20 pb-12 bg-background min-h-screen">
+    <div className="min-h-screen flex flex-col justify-between bg-background">
+      <main className="pt-20 pb-12 flex-1">
       <div className="max-w-7xl mx-auto px-4 md:px-6 lg:px-8 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -273,7 +275,9 @@ const TeacherExamAnalyticsPage = () => {
       </div>
 
       {showEvidence && <EvidenceGallery evidenceData={evidenceData} onClose={() => setShowEvidence(false)} />}
-    </main>
+      </main>
+      <AppFooter />
+    </div>
   );
 };
 
