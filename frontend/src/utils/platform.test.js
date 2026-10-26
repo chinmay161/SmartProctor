@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { isNativeApp, getNativeCallbackUrl, openUrl } from './platform';
+import { isNativeApp, getNativeCallbackUrl, openUrl, getAppVersion } from './platform';
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
+import { App } from '@capacitor/app';
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     isNativePlatform: vi.fn(),
+  },
+}));
+
+vi.mock('@capacitor/app', () => ({
+  App: {
+    getInfo: vi.fn(),
   },
 }));
 
@@ -55,8 +62,8 @@ describe('platform utility', () => {
     it('uses window.location.assign when running on web', async () => {
       Capacitor.isNativePlatform.mockReturnValue(false);
       const mockAssign = vi.fn();
-      const prevWindow = global.window;
-      global.window = {
+      const prevWindow = globalThis.window;
+      globalThis.window = {
         location: {
           assign: mockAssign,
         },
@@ -67,8 +74,25 @@ describe('platform utility', () => {
         expect(Browser.open).not.toHaveBeenCalled();
         expect(mockAssign).toHaveBeenCalledWith('https://example.com/auth');
       } finally {
-        global.window = prevWindow;
+        globalThis.window = prevWindow;
       }
+    });
+  });
+
+  describe('getAppVersion', () => {
+    it('returns native version from App.getInfo() when isNativeApp() is true', async () => {
+      Capacitor.isNativePlatform.mockReturnValue(true);
+      App.getInfo.mockResolvedValue({ version: '1.2.3' });
+
+      const version = await getAppVersion();
+      expect(version).toBe('v1.2.3');
+    });
+
+    it('returns formatted web package version when isNativeApp() is false', async () => {
+      Capacitor.isNativePlatform.mockReturnValue(false);
+
+      const version = await getAppVersion();
+      expect(version.startsWith('v')).toBe(true);
     });
   });
 });
