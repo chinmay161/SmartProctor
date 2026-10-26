@@ -9,6 +9,7 @@ import { ExamListSkeleton, HistoryTableSkeleton } from '../../../components/ui/S
 
 const DeviceTestModal = lazy(() => import('../../../components/proctoring/DeviceTestModal'));
 import ReportProblemModal from '../../../components/feedback/ReportProblemModal';
+import { isNativeApp } from '../../../utils/platform';
 
 /* ─── Inline SVG icons (no extra dep) ─── */
 const Icon = ({ d, d2, size = 20, cls = '' }) => (
@@ -97,14 +98,16 @@ const StatusBadge = ({ status }) => {
 };
 
 /* ─── Exam card ─── */
-const ExamCard = ({ exam, nowTs, onStart, delay }) => {
+const ExamCard = ({ exam, nowTs, onStart, onExplainWebOnly, delay }) => {
+  const isNative    = isNativeApp();
+  const isWebOnly   = isNative && exam?.is_mcq_only === false;
   const startTime   = exam?.start_time ? new Date(exam.start_time) : null;
   const hasStart    = Boolean(startTime && !Number.isNaN(startTime.getTime()));
   const isStarted   = !hasStart || nowTs >= startTime.getTime();
   const maxAttempts = Number(exam?.max_attempts ?? exam?.wizard_config?.maxAttempts ?? 1);
   const attemptsUsed = Number(exam?.attempts_used ?? 0);
   const isResume    = Boolean(exam?.has_in_progress);
-  const canStart    = isResume || isStarted;
+  const canStart    = !isWebOnly && (isResume || isStarted);
   const attemptNum  = isResume ? (attemptsUsed + 1) : Math.min(attemptsUsed + 1, maxAttempts);
 
   const startLabel  = hasStart
@@ -121,20 +124,30 @@ const ExamCard = ({ exam, nowTs, onStart, delay }) => {
 
   return (
     <div
-      className="sp-card sp-fade-up"
-      style={{ padding: '20px 24px', animationDelay: delay, position: 'relative', overflow: 'hidden' }}
+      className={`sp-card sp-fade-up ${isWebOnly ? 'is-web-only-card' : ''}`}
+      style={{
+        padding: '20px 24px',
+        animationDelay: delay,
+        position: 'relative',
+        overflow: 'hidden',
+        cursor: isWebOnly ? 'pointer' : 'default',
+        opacity: isWebOnly ? 0.85 : 1,
+      }}
+      onClick={() => {
+        if (isWebOnly) onExplainWebOnly?.(exam);
+      }}
     >
       {/* Accent edge */}
       <div style={{
         position: 'absolute', left: 0, top: '20%', bottom: '20%',
         width: '3px', borderRadius: '0 3px 3px 0',
-        background: canStart ? (isResume ? '#F59E0B' : 'var(--sp-accent)') : 'var(--color-border)',
+        background: isWebOnly ? '#EF4444' : (canStart ? (isResume ? '#F59E0B' : 'var(--sp-accent)') : 'var(--color-border)'),
         transition: 'background 0.3s',
       }} />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '14px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
             <span style={{
               display: 'inline-flex', alignItems: 'center',
               padding: '2px 8px', borderRadius: '6px',
@@ -143,6 +156,23 @@ const ExamCard = ({ exam, nowTs, onStart, delay }) => {
             }}>
               Attempt {attemptNum} of {maxAttempts}
             </span>
+            {isWebOnly && (
+              <span
+                className="sp-badge web-only-badge"
+                style={{
+                  background: 'rgba(239,68,68,0.12)',
+                  color: '#EF4444',
+                  fontWeight: 600,
+                  fontSize: '0.74rem',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                Web only
+              </span>
+            )}
           </div>
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', color: 'var(--color-foreground)', marginBottom: '4px', lineHeight: 1.25 }}>
             {exam.title}
@@ -180,15 +210,33 @@ const ExamCard = ({ exam, nowTs, onStart, delay }) => {
       )}
 
       <button
-        onClick={onStart}
-        disabled={!canStart}
+        type="button"
+        onClick={(e) => {
+          if (isWebOnly) {
+            e.stopPropagation();
+            onExplainWebOnly?.(exam);
+          } else {
+            onStart();
+          }
+        }}
+        disabled={!canStart && !isWebOnly}
+        className="touch-target"
         style={{
           width: '100%', padding: '10px',
           borderRadius: '9px',
-          background: canStart ? (isResume ? '#F59E0B' : 'var(--sp-accent)') : 'var(--color-muted)',
-          color: canStart ? '#fff' : 'var(--color-muted-foreground)',
+          background: isWebOnly
+            ? 'rgba(239,68,68,0.08)'
+            : canStart
+              ? (isResume ? '#F59E0B' : 'var(--sp-accent)')
+              : 'var(--color-muted)',
+          color: isWebOnly
+            ? '#EF4444'
+            : canStart
+              ? '#fff'
+              : 'var(--color-muted-foreground)',
+          border: isWebOnly ? '1px solid rgba(239,68,68,0.25)' : 'none',
           fontFamily: 'var(--font-body)', fontSize: '0.88rem', fontWeight: 600,
-          border: 'none', cursor: canStart ? 'pointer' : 'not-allowed',
+          cursor: isWebOnly || canStart ? 'pointer' : 'not-allowed',
           transition: 'background 0.2s, transform 0.15s, box-shadow 0.2s',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
         }}
@@ -200,13 +248,21 @@ const ExamCard = ({ exam, nowTs, onStart, delay }) => {
           }
         }}
         onMouseLeave={e => {
-          e.currentTarget.style.background = canStart ? (isResume ? '#F59E0B' : 'var(--sp-accent)') : 'var(--color-muted)';
+          e.currentTarget.style.background = isWebOnly
+            ? 'rgba(239,68,68,0.08)'
+            : canStart
+              ? (isResume ? '#F59E0B' : 'var(--sp-accent)')
+              : 'var(--color-muted)';
           e.currentTarget.style.boxShadow = 'none';
           e.currentTarget.style.transform = 'scale(1)';
         }}
       >
-        <Icon d={ICONS.play} size={15} />
-        {isResume ? 'Resume Exam' : (canStart ? 'Begin Exam' : 'Not Yet Available')}
+        <Icon d={isWebOnly ? ICONS.warn : ICONS.play} size={15} />
+        {isWebOnly
+          ? 'Web only — Tap for info'
+          : isResume
+            ? 'Resume Exam'
+            : (canStart ? 'Begin Exam' : 'Not Yet Available')}
       </button>
     </div>
   );
@@ -347,6 +403,7 @@ const HistoryRow = ({ item, onViewResult, index }) => {
         <button
           onClick={() => onViewResult(item)}
           disabled={!item?.can_view_result}
+          className="dashboard-view-btn touch-target"
           style={{
             padding: '6px 14px', borderRadius: '7px',
             background: item?.can_view_result ? 'rgba(59,130,246,0.1)' : 'transparent',
@@ -363,6 +420,87 @@ const HistoryRow = ({ item, onViewResult, index }) => {
         </button>
       </td>
     </tr>
+  );
+};
+
+/* ─── History card (mobile stacked cards < 640px) ─── */
+const HistoryCard = ({ item, onViewResult, index }) => {
+  const date = item?.submitted_at
+    ? new Date(item.submitted_at).toLocaleString('en-US', {
+        month: 'short',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '—';
+  const score = `${item?.score ?? '—'} / ${item?.out_of ?? 0}`;
+  const isProv = Boolean(item?.is_provisional || item?.attempt_status === 'PARTIALLY_EVALUATED');
+
+  return (
+    <div
+      className="sp-card sp-fade-up dashboard-history-card"
+      style={{
+        padding: '16px 18px',
+        animationDelay: `${0.05 * index}s`,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+        <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', color: 'var(--color-foreground)', fontWeight: 600, margin: 0, lineHeight: 1.3 }}>
+          {item.exam_title}
+        </h3>
+        <StatusBadge status={item.attempt_status} />
+      </div>
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '8px', color: 'var(--color-muted-foreground)', fontSize: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Icon d={ICONS.calendar} size={14} />
+          <span style={{ fontFamily: 'var(--font-body)', fontSize: '14px' }}>{date}</span>
+        </div>
+        <div>
+          <span style={{ fontFamily: 'var(--font-data)', fontSize: '14px', fontWeight: 600, color: 'var(--color-foreground)' }}>
+            Score: {score}
+          </span>
+          {isProv && (
+            <span style={{ display: 'block', fontSize: '12px', color: '#F59E0B', marginTop: '2px' }}>
+              Provisional
+            </span>
+          )}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onViewResult(item)}
+        disabled={!item?.can_view_result}
+        className="touch-target dashboard-view-btn"
+        style={{
+          width: '100%',
+          padding: '10px 14px',
+          borderRadius: '8px',
+          background: item?.can_view_result ? 'rgba(59,130,246,0.12)' : 'var(--color-muted)',
+          border: `1px solid ${item?.can_view_result ? 'rgba(59,130,246,0.3)' : 'var(--color-border)'}`,
+          color: item?.can_view_result ? 'var(--sp-accent)' : 'var(--color-muted-foreground)',
+          fontFamily: 'var(--font-body)',
+          fontSize: '14px',
+          fontWeight: 600,
+          cursor: item?.can_view_result ? 'pointer' : 'not-allowed',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '6px',
+          transition: 'all 0.2s',
+        }}
+      >
+        <Icon d={ICONS.eye} size={15} />
+        {item?.can_view_result ? 'View Result' : 'Result Not Published'}
+      </button>
+    </div>
   );
 };
 
@@ -387,6 +525,7 @@ const StudentDashboardExample = () => {
   const [activeTab, setActiveTab] = useState('exams'); // 'exams' | 'history' | 'account'
   const [showDeviceTest, setShowDeviceTest] = useState(false);
   const [showReportProblem, setShowReportProblem] = useState(false);
+  const [webOnlyNotice, setWebOnlyNotice] = useState(null);
 
   const completedExams = useMemo(() => {
     const seen = new Set();
@@ -483,14 +622,22 @@ const StudentDashboardExample = () => {
   ];
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--color-background)', transition: 'background 0.3s, color 0.3s' }}>
+    <div
+      className="student-dashboard-root"
+      style={{
+        minHeight: '100vh',
+        background: 'var(--color-background)',
+        transition: 'background 0.3s, color 0.3s',
+        boxSizing: 'border-box',
+      }}
+    >
 
       {/* ── Sticky Glassmorphic Header ── */}
       <header
         className="sp-glass sp-fade-in"
         style={{
           position: 'sticky', top: 0, zIndex: 50,
-          padding: '0 clamp(1rem, 4vw, 2rem)',
+          padding: 'var(--safe-top, 0px) clamp(1rem, 4vw, 2rem) 0',
           transition: 'background 0.3s',
         }}
       >
@@ -543,6 +690,7 @@ const StudentDashboardExample = () => {
             <button
               id="dashboard-theme-toggle"
               onClick={() => setTheme(isDark ? 'light' : 'dark')}
+              className="dashboard-theme-toggle touch-target"
               title={isDark ? 'Switch to Light' : 'Switch to Dark'}
               style={{
                 width: '34px', height: '34px', borderRadius: '8px',
@@ -581,7 +729,14 @@ const StudentDashboardExample = () => {
       </header>
 
       {/* ── Main content ── */}
-      <main style={{ maxWidth: '1200px', margin: '0 auto', padding: 'clamp(1.5rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2rem)' }}>
+      <main
+        style={{
+          maxWidth: '1200px',
+          margin: '0 auto',
+          padding: 'clamp(1.5rem, 4vw, 2.5rem) clamp(1rem, 4vw, 2rem)',
+          paddingBottom: 'calc(clamp(1.5rem, 4vw, 2.5rem) + var(--safe-bottom, 0px))',
+        }}
+      >
 
         {/* ── Hero zone ── */}
         <div
@@ -613,7 +768,11 @@ const StudentDashboardExample = () => {
         {error && (
           <div className="sp-scale-in" style={{ marginBottom: '16px', padding: '14px 18px', borderRadius: '10px', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
             <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.85rem', color: 'var(--sp-error)' }}>{error}</p>
-            <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', color: 'var(--color-muted-foreground)', cursor: 'pointer', padding: '2px', display: 'flex' }}>
+            <button
+              onClick={() => setError(null)}
+              className="dashboard-alert-dismiss touch-target"
+              style={{ background: 'none', border: 'none', color: 'var(--color-muted-foreground)', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
               <Icon d={ICONS.close} size={16} />
             </button>
           </div>
@@ -628,18 +787,23 @@ const StudentDashboardExample = () => {
         {historyError && (
           <div className="sp-scale-in" style={{ marginBottom: '16px', padding: '14px 18px', borderRadius: '10px', background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.85rem', color: 'var(--sp-error)' }}>{historyError}</p>
-            <button onClick={() => setHistoryError(null)} style={{ background: 'none', border: 'none', color: 'var(--color-muted-foreground)', cursor: 'pointer', display: 'flex' }}>
+            <button
+              onClick={() => setHistoryError(null)}
+              className="dashboard-alert-dismiss touch-target"
+              style={{ background: 'none', border: 'none', color: 'var(--color-muted-foreground)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
               <Icon d={ICONS.close} size={16} />
             </button>
           </div>
         )}
 
         {/* ── Mobile tab bar ── */}
-        <div className="flex md:hidden" style={{ gap: '6px', marginBottom: '20px' }}>
+        <div className="flex md:hidden dashboard-mobile-tabs" style={{ gap: '6px', marginBottom: '20px' }}>
           {tabs.map(t => (
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
+              className="dashboard-tab-btn touch-target"
               style={{
                 flex: 1, padding: '9px 6px', borderRadius: '9px',
                 background: activeTab === t.id ? 'rgba(59,130,246,0.12)' : 'var(--color-card)',
@@ -661,8 +825,18 @@ const StudentDashboardExample = () => {
         {/* EXAMS TAB */}
         {activeTab === 'exams' && (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.3rem', color: 'var(--color-foreground)', fontWeight: 400 }}>
+            <div
+              className="dashboard-header-row"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                marginBottom: '16px',
+              }}
+            >
+              <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.3rem', color: 'var(--color-foreground)', fontWeight: 400, margin: 0 }}>
                 Available Exams
                 {!loading && (
                   <span style={{ marginLeft: '10px', fontFamily: 'var(--font-body)', fontSize: '0.8rem', color: 'var(--color-muted-foreground)', fontWeight: 400 }}>
@@ -670,36 +844,40 @@ const StudentDashboardExample = () => {
                   </span>
                 )}
               </h2>
-              <button
-                type="button"
-                onClick={() => setShowDeviceTest(true)}
-                title="Check your camera and device speed before exam day"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '6px',
-                  padding: '7px 12px', borderRadius: '8px',
-                  background: 'var(--color-card)', border: '1px solid var(--color-border)',
-                  color: 'var(--color-foreground)', cursor: 'pointer',
-                  fontFamily: 'var(--font-body)', fontSize: '0.8rem', fontWeight: 500,
-                }}
-              >
-                <Icon d={ICONS.eye} size={15} />
-                Test my device
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowReportProblem(true)}
-                title="Report a technical issue"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '6px',
-                  padding: '7px 12px', borderRadius: '8px',
-                  background: 'var(--color-card)', border: '1px solid var(--color-border)',
-                  color: 'var(--color-foreground)', cursor: 'pointer',
-                  fontFamily: 'var(--font-body)', fontSize: '0.8rem', fontWeight: 500,
-                }}
-              >
-                <Icon d={ICONS.warn} size={15} />
-                Report a problem
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowDeviceTest(true)}
+                  title="Check your camera and device speed before exam day"
+                  className="touch-target"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    padding: '7px 12px', borderRadius: '8px',
+                    background: 'var(--color-card)', border: '1px solid var(--color-border)',
+                    color: 'var(--color-foreground)', cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', fontSize: '0.8rem', fontWeight: 500,
+                  }}
+                >
+                  <Icon d={ICONS.eye} size={15} />
+                  Test my device
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowReportProblem(true)}
+                  title="Report a technical issue"
+                  className="touch-target"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    padding: '7px 12px', borderRadius: '8px',
+                    background: 'var(--color-card)', border: '1px solid var(--color-border)',
+                    color: 'var(--color-foreground)', cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', fontSize: '0.8rem', fontWeight: 500,
+                  }}
+                >
+                  <Icon d={ICONS.warn} size={15} />
+                  Report a problem
+                </button>
+              </div>
             </div>
 
             {showDeviceTest && (
@@ -725,13 +903,14 @@ const StudentDashboardExample = () => {
                 <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.83rem', color: 'var(--color-muted-foreground)' }}>Check back later or contact your instructor.</p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '16px' }}>
                 {exams.map((exam, i) => (
                   <ExamCard
                     key={exam.id}
                     exam={exam}
                     nowTs={nowTs}
                     onStart={() => handleStartExam(exam.id)}
+                    onExplainWebOnly={(ex) => setWebOnlyNotice(ex)}
                     delay={`${0.07 * i}s`}
                   />
                 ))}
@@ -748,7 +927,7 @@ const StudentDashboardExample = () => {
                     </span>
                   </h2>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '16px' }}>
                   {completedExams.map((item, i) => (
                     <CompletedExamCard
                       key={item.exam_id}
@@ -781,35 +960,45 @@ const StudentDashboardExample = () => {
                 <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.83rem', color: 'var(--color-muted-foreground)' }}>Your exam results will appear here after you submit.</p>
               </div>
             ) : (
-              <div className="sp-card sp-scale-in" style={{ overflow: 'hidden' }}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', minWidth: '640px', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-muted)' }}>
-                        {['Exam', 'Status', 'Submitted', 'Score', 'Action'].map((h, i) => (
-                          <th
-                            key={h}
-                            style={{
-                              padding: '11px 16px',
-                              textAlign: i === 4 ? 'right' : 'left',
-                              fontFamily: 'var(--font-body)', fontSize: '0.72rem', fontWeight: 600,
-                              color: 'var(--color-muted-foreground)', letterSpacing: '0.06em',
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {h}
-                          </th>
+              <>
+                {/* Desktop Table (untouched at >= 640px) */}
+                <div className="sp-card sp-scale-in dashboard-history-table" style={{ overflow: 'hidden' }}>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', minWidth: '640px', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-muted)' }}>
+                          {['Exam', 'Status', 'Submitted', 'Score', 'Action'].map((h, i) => (
+                            <th
+                              key={h}
+                              style={{
+                                padding: '11px 16px',
+                                textAlign: i === 4 ? 'right' : 'left',
+                                fontFamily: 'var(--font-body)', fontSize: '0.72rem', fontWeight: 600,
+                                color: 'var(--color-muted-foreground)', letterSpacing: '0.06em',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {examHistory.map((item, i) => (
+                          <HistoryRow key={`${item.exam_id}-${i}`} item={item} onViewResult={handleViewResult} index={i} />
                         ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {examHistory.map((item, i) => (
-                        <HistoryRow key={`${item.exam_id}-${i}`} item={item} onViewResult={handleViewResult} index={i} />
-                      ))}
-                    </tbody>
-                  </table>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+
+                {/* Mobile Stacked Cards (shown below 640px) */}
+                <div className="dashboard-history-cards">
+                  {examHistory.map((item, i) => (
+                    <HistoryCard key={`hist-card-${item.exam_id}-${i}`} item={item} onViewResult={handleViewResult} index={i} />
+                  ))}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -821,7 +1010,7 @@ const StudentDashboardExample = () => {
               Your Account
             </h2>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '16px' }}>
               {/* Profile card */}
               <div className="sp-card sp-fade-up-1" style={{ padding: '24px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
@@ -873,6 +1062,118 @@ const StudentDashboardExample = () => {
                     <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.78rem', color: ok ? 'var(--sp-success)' : 'var(--sp-warning)', fontWeight: 600 }}>{status}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Web Only Notice Modal (App-9) */}
+        {webOnlyNotice && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="sp-fade-in"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 100,
+              background: 'rgba(0, 0, 0, 0.65)',
+              backdropFilter: 'blur(4px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '16px',
+            }}
+            onClick={() => setWebOnlyNotice(null)}
+          >
+            <div
+              className="sp-card sp-scale-in"
+              style={{
+                maxWidth: '460px',
+                width: '100%',
+                padding: '24px',
+                background: 'var(--color-card)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '16px',
+                boxShadow: 'var(--shadow-xl)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+                <div
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'rgba(239,68,68,0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#EF4444',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Icon d={ICONS.warn} size={22} />
+                </div>
+                <div>
+                  <h3
+                    style={{
+                      fontFamily: 'var(--font-display)',
+                      fontSize: '1.2rem',
+                      color: 'var(--color-foreground)',
+                      margin: 0,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Desktop Web Required
+                  </h3>
+                  <span
+                    className="sp-badge"
+                    style={{
+                      background: 'rgba(239,68,68,0.12)',
+                      color: '#EF4444',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Non-MCQ Exam
+                  </span>
+                </div>
+              </div>
+
+              <p
+                style={{
+                  fontFamily: 'var(--font-body)',
+                  fontSize: '14px',
+                  color: 'var(--color-muted-foreground)',
+                  lineHeight: 1.6,
+                  marginBottom: '20px',
+                }}
+              >
+                <strong>{webOnlyNotice.title}</strong> contains non-multiple-choice questions (such as code editing, text responses, or file submissions).
+                These question formats are not supported in the mobile app and must be taken on the desktop web version of SmartProctor.
+              </p>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  id="close-web-only-notice-btn"
+                  onClick={() => setWebOnlyNotice(null)}
+                  className="touch-target"
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    background: 'var(--sp-accent)',
+                    color: '#fff',
+                    border: 'none',
+                    fontFamily: 'var(--font-body)',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Understood
+                </button>
               </div>
             </div>
           </div>

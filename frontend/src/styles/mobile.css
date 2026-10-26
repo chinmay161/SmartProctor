@@ -124,3 +124,48 @@
     grid-template-columns: 1fr !important;
   }
 }
+
+/* ==========================================================================
+   Student Dashboard Mobile Ergonomics (App-9)
+   Below 640px (< sm)
+   ========================================================================== */
+
+@media (max-width: 639px) {
+  /* History switch: hide table, show stacked cards */
+  .dashboard-history-table {
+    display: none !important;
+  }
+
+  .dashboard-history-cards {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  /* Text at least 14px on phones */
+  .student-dashboard-root [style*="font-size: 0."],
+  .student-dashboard-root [style*="font-size:0."],
+  .student-dashboard-root .sp-badge,
+  .student-dashboard-root .dashboard-tab-btn,
+  .student-dashboard-root .dashboard-meta-text {
+    font-size: 14px !important;
+  }
+}
+
+@media (min-width: 640px) {
+  .dashboard-history-cards {
+    display: none !important;
+  }
+}
+
+/* Touch targets: 44px under pointer: coarse */
+@media (pointer: coarse) {
+  .dashboard-tab-btn,
+  .dashboard-view-btn,
+  .dashboard-alert-dismiss,
+  .dashboard-theme-toggle {
+    min-height: 44px !important;
+    min-width: 44px !important;
+  }
+}
+
