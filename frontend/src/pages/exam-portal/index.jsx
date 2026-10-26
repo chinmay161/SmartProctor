@@ -9,6 +9,9 @@ import SecurityMonitor from './components/SecurityMonitor';
 import QuestionDisplay from './components/QuestionDisplay';
 import SubmitConfirmationModal from './components/SubmitConfirmationModal';
 import ProctoredWatermarkOverlay from './components/ProctoredWatermarkOverlay';
+import ExamHeader from './components/ExamHeader';
+import ExamActionBar from './components/ExamActionBar';
+import ExamInterruptionOverlays from './components/ExamInterruptionOverlays';
 import { authAwareCall } from '../../services/authAwareCall';
 import {
   HIDDEN_VIDEO_STYLE,
@@ -196,7 +199,8 @@ const ExamPortal = () => {
 
   const sourceExam = examDataState;
   const securityConfig = examRules || sourceExam?.wizard_config || {};
-  const screenRecordingRequired = !isNativeApp() && Boolean(securityConfig?.enableScreenRecording);
+  const isNative = isNativeApp();
+  const screenRecordingRequired = !isNative && Boolean(securityConfig?.enableScreenRecording);
   const currentQuestion = sourceExam?.questions?.[currentQuestionIndex];
   const totalQuestions = sourceExam?.questions?.length || 0;
   const watermarkEnabled = Boolean(
@@ -737,6 +741,8 @@ const ExamPortal = () => {
       if (fullscreenActive) {
         hasEnteredFullscreenRef.current = true;
       }
+      // TODO: Native lockdown plugin will supply native violations in next task.
+      if (isNative) return;
       if (
         browserLockdownEnabled &&
         hasEnteredFullscreenRef.current &&
@@ -749,7 +755,7 @@ const ExamPortal = () => {
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled]);
+  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled, isNative]);
 
   useEffect(() => {
     if (isLoading || examBlocked || !sourceExam) return;
@@ -785,6 +791,8 @@ const ExamPortal = () => {
     };
 
     const handleBlur = () => {
+      // TODO: Native lockdown plugin will supply native violations in next task.
+      if (isNative) return;
       if (detectTabSwitchEnabled && examStatusRef.current !== 'ending') {
         addViolation('Window lost focus (possible tab switch)', 'WINDOW_BLUR');
       }
@@ -792,6 +800,8 @@ const ExamPortal = () => {
 
     let resizeTimer;
     const handleResize = () => {
+      // TODO: Native lockdown plugin will supply native violations in next task.
+      if (isNative) return;
       if (!browserLockdownEnabled) return;
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
@@ -823,7 +833,7 @@ const ExamPortal = () => {
       window.removeEventListener('resize', handleResize);
       if (resizeTimer) clearTimeout(resizeTimer);
     };
-  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled, detectTabSwitchEnabled, disableCopyPasteEnabled, disableRightClickEnabled]);
+  }, [isLoading, examBlocked, sourceExam, browserLockdownEnabled, detectTabSwitchEnabled, disableCopyPasteEnabled, disableRightClickEnabled, isNative]);
 
   // Nothing reports once the page starts unloading (reload / close / navigate away).
   useEffect(() => {
@@ -884,6 +894,8 @@ const ExamPortal = () => {
 
     const handleVisibilityChange = () => {
       flightRecorder.record('lifecycle', 'visibility', { hidden: document.hidden });
+      // TODO: Native lockdown plugin will supply native violations in next task.
+      if (isNative) return;
       if (detectTabSwitchEnabled && document.hidden && examStatusRef.current !== 'ending') {
         addViolation('Tab switched or window minimized', 'TAB_SWITCH');
       }
@@ -891,7 +903,7 @@ const ExamPortal = () => {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isLoading, examBlocked, sourceExam, detectTabSwitchEnabled]);
+  }, [isLoading, examBlocked, sourceExam, detectTabSwitchEnabled, isNative]);
 
   // Periodic vision fps summary every 30s
   useEffect(() => {
@@ -1329,7 +1341,7 @@ const ExamPortal = () => {
           cameraRequired={cameraRequired}
           micRequired={micRequired}
           requireScreenShare={!isNativeApp() && Boolean(securityConfig?.enableScreenRecording)}
-          requireFullscreen={browserLockdownEnabled}
+          requireFullscreen={!isNative && browserLockdownEnabled}
           onScreenStream={setScreenStream}
           skipFps={isResume && Boolean(fpsCheckStore.get(examId)?.passed)}
           calibrationMs={isResume ? 2000 : 3000}
@@ -1359,7 +1371,7 @@ const ExamPortal = () => {
   return (
     <>
     {inferenceVideo}
-    <div className="relative isolate min-h-screen bg-background flex flex-col">
+    <div className="relative isolate min-h-screen bg-background flex flex-col exam-portal-root">
       {watermarkEnabled && (
         <ProctoredWatermarkOverlay
           examTitle={sourceExam?.title}
@@ -1367,201 +1379,44 @@ const ExamPortal = () => {
           sessionId={sessionId || attemptId}
         />
       )}
-      <div className="bg-card border-b border-border px-4 py-3 sticky top-0 z-40 shadow-md">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <Icon name="FileText" size={24} className="text-primary" />
-            <div>
-              <h1 className="text-base md:text-lg font-heading font-semibold text-foreground">{sourceExam?.title}</h1>
-              <p className="text-xs text-muted-foreground">{sourceExam?.course}</p>
-            </div>
-          </div>
-          <div className="flex items-center space-x-4">
-            <ExamTimer
-              initialSeconds={remainingSeconds}
-              durationMinutes={durationMinutesForTimer}
-              onTimeUp={handleSubmit}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              iconName="AlertCircle"
-              onClick={() => setShowReportProblem(true)}
-              className="text-xs"
-            >
-              Report a problem
-            </Button>
-            {browserLockdownEnabled && !isFullscreen && (
-              <Button
-                variant="outline"
-                size="sm"
-                iconName="Maximize"
-                onClick={enterFullscreen}
-                className="hidden md:flex"
-              >
-                Fullscreen
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              iconName="List"
-              onClick={() => setShowPalette(!showPalette)}
-              className="md:hidden"
-            >
-              Questions
-            </Button>
-          </div>
-        </div>
-      </div>
 
-      {loadWarning && (
-        <div className="bg-warning/15 border-b border-warning/30 px-4 py-2 text-xs text-warning">
-          {loadWarning}
-        </div>
-      )}
+      <ExamHeader
+        sourceExam={sourceExam}
+        remainingSeconds={remainingSeconds}
+        durationMinutesForTimer={durationMinutesForTimer}
+        onTimeUp={handleSubmit}
+        onReportProblem={() => setShowReportProblem(true)}
+        showFullscreenBtn={browserLockdownEnabled && !isFullscreen}
+        onEnterFullscreen={enterFullscreen}
+        onTogglePalette={() => setShowPalette(!showPalette)}
+        isNative={isNative}
+        showNativeLockdownBanner={isNative && (import.meta.env.VITE_APP_SPIKE === 'true' || import.meta.env.VITE_APP_SPIKE === true)}
+      />
 
-      {clientVision && vision.cameraStatus.state === 'lost' && (
-        <div role="alert" className="bg-destructive/15 border-b border-destructive/30 px-4 py-3 text-sm text-destructive flex flex-wrap items-center justify-between gap-3">
-          {vision.cameraStatus.permission === 'denied' ? (
-            <>
-              <span>
-                <strong>Camera access is blocked for this site.</strong> Click the lock icon in the address bar → Site settings →
-                Camera → Allow. Proctoring resumes automatically; if your browser asks you to reload, use the button.
-              </span>
-              <Button size="sm" variant="outline" onClick={() => {
-                try { sessionStorage.setItem(APP_RELOAD_KEY, '1'); } catch { /* best-effort */ }
-                window.location.reload();
-              }}>
-                Reload
-              </Button>
-            </>
-          ) : (
-            <span>
-              <strong>Camera disconnected — reconnecting…</strong> Check that the camera is plugged in, switched on, and not used
-              by another app. Your answers are saved.
-            </span>
-          )}
-        </div>
-      )}
-
-      {!screenShareBlocked && screenShareLost && (
-        <div role="alert" className="bg-destructive/15 border-b border-destructive/30 px-4 py-3 text-sm text-destructive flex flex-wrap items-center justify-between gap-3">
-          <span><strong>{screenShareLost.title}.</strong> {screenShareLost.steps.join(' ')}</span>
-          <Button size="sm" variant="outline" iconName="Monitor" onClick={() => void reshareScreen()}>Share entire screen</Button>
-        </div>
-      )}
-
-      {screenRecordingRequired && screenShareBlocked && (
-        <div className="fixed inset-0 z-[65] bg-black/55 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-card border border-border rounded-2xl shadow-2xl p-6 text-center">
-            <div className="w-14 h-14 mx-auto rounded-full bg-destructive/15 flex items-center justify-center mb-4">
-              <Icon name="Monitor" size={26} className="text-destructive" />
-            </div>
-            <h2 className="text-lg font-semibold text-foreground mb-2">Screen Sharing Required</h2>
-            <p className="text-sm text-muted-foreground mb-5">
-              Screen sharing stopped. Share your entire screen to continue.
-            </p>
-            {screenShareLost?.title && screenShareLost.title !== 'Screen sharing stopped' && (
-              <p className="text-xs text-destructive mb-4">
-                {screenShareLost.title}
-              </p>
-            )}
-            <Button
-              variant="default"
-              size="lg"
-              iconName="Monitor"
-              onClick={() => void reshareScreen()}
-              className="w-full"
-            >
-              Share entire screen
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {micRequired && micBlocked && (
-        <div className="fixed inset-0 z-[65] bg-black/55 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-card border border-border rounded-2xl shadow-2xl p-6 text-center">
-            <div className="w-14 h-14 mx-auto rounded-full bg-destructive/15 flex items-center justify-center mb-4">
-              <Icon name="MicOff" size={26} className="text-destructive" />
-            </div>
-            <h2 className="text-lg font-semibold text-foreground mb-2">Microphone not available</h2>
-            <p className="text-sm text-muted-foreground mb-5">
-              Audio proctoring is required for this exam, but the microphone is not running. Please check your microphone connection and browser permissions, then click Retry.
-            </p>
-            <Button
-              variant="default"
-              size="lg"
-              iconName="RefreshCw"
-              onClick={() => void handleRetryMic()}
-              className="w-full"
-            >
-              Retry
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {(authReconnecting || socketReconnecting) && (
-        <div role="status" className="bg-warning/15 border-b border-warning/30 px-4 py-2 text-xs text-warning">
-          Reconnecting… your answers are kept and will sync once the connection is restored.
-        </div>
-      )}
-
-      {proctorWarning && (
-        <div className="bg-destructive/15 border-l-4 border-destructive/80 px-4 py-3 text-sm text-destructive font-semibold flex items-center justify-between shadow-sm z-50 animate-in slide-in-from-top-2">
-          <div className="flex items-center">
-            <Icon name="AlertTriangle" className="mr-3" size={20} />
-            {proctorWarning}
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => setProctorWarning('')}>
-             Dismiss
-          </Button>
-        </div>
-      )}
-
-      {browserLockdownEnabled && !isFullscreen && (
-        <div className="fixed inset-0 z-[60] bg-black/55 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-card border border-border rounded-2xl shadow-2xl p-6 text-center">
-            <div className="w-14 h-14 mx-auto rounded-full bg-primary/15 flex items-center justify-center mb-4">
-              <Icon name="Maximize" size={26} className="text-primary" />
-            </div>
-            <h2 className="text-lg font-semibold text-foreground mb-2">Fullscreen Required</h2>
-            <p className="text-sm text-muted-foreground mb-5">
-              This exam uses browser lockdown. Enter fullscreen to continue and keep the exam active.
-            </p>
-            <Button
-              variant="default"
-              size="lg"
-              iconName="Maximize"
-              onClick={enterFullscreen}
-              className="w-full"
-            >
-              Enter Fullscreen
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {violationLock && (
-        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="max-w-xl w-full bg-card border border-destructive/50 rounded-2xl shadow-2xl p-7 text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-destructive/15 flex items-center justify-center mb-4">
-              <Icon name="AlertTriangle" size={30} className="text-destructive" />
-            </div>
-            <h2 className="text-xl font-semibold text-foreground mb-2">Security Violation Detected</h2>
-            <p className="text-base text-destructive font-medium mb-4">{violationLock.message}</p>
-            <p className="text-sm text-muted-foreground">
-              Exam controls are temporarily locked for {Math.max(1, Math.round(violationLock.durationMs / 1000))} seconds.
-            </p>
-          </div>
-        </div>
-      )}
-
+      <ExamInterruptionOverlays
+        loadWarning={loadWarning}
+        clientVision={clientVision}
+        vision={vision}
+        screenRecordingRequired={screenRecordingRequired}
+        screenShareBlocked={screenShareBlocked}
+        screenShareLost={screenShareLost}
+        onReshareScreen={() => void reshareScreen()}
+        micRequired={micRequired}
+        micBlocked={micBlocked}
+        onRetryMic={() => void handleRetryMic()}
+        authReconnecting={authReconnecting}
+        socketReconnecting={socketReconnecting}
+        proctorWarning={proctorWarning}
+        onDismissProctorWarning={() => setProctorWarning('')}
+        browserLockdownEnabled={browserLockdownEnabled}
+        isFullscreen={isFullscreen}
+        onEnterFullscreen={enterFullscreen}
+        violationLock={violationLock}
+        isNative={isNative}
+      />
 
       <div className="relative z-10 flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto exam-question-scroll-panel">
           <div className="max-w-4xl mx-auto p-4 md:p-6 lg:p-8">
             <div className="mb-6">
               <div className="flex items-center justify-between mb-2">
@@ -1586,52 +1441,17 @@ const ExamPortal = () => {
               onAnswerChange={(answer) => handleAnswerChange(currentQuestion?.id, answer)}
             />
 
-            <div className="mt-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  iconName="ChevronLeft"
-                  onClick={handlePrevious}
-                  disabled={currentQuestionIndex === 0}
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  iconName="Flag"
-                  onClick={handleMarkForReview}
-                  className={markedForReview?.has(currentQuestion?.id) ? 'bg-warning/20' : ''}
-                >
-                  {markedForReview?.has(currentQuestion?.id) ? 'Unmark' : 'Mark for Review'}
-                </Button>
-              </div>
-              <div className="flex gap-2">
-                {currentQuestionIndex < totalQuestions - 1 ? (
-                  <Button
-                    variant="default"
-                    iconName="ChevronRight"
-                    iconPosition="right"
-                    onClick={handleNext}
-                    fullWidth
-                    className="sm:w-auto"
-                  >
-                    Next
-                  </Button>
-                ) : (
-                  <Button
-                    variant="success"
-                    iconName="CheckCircle"
-                    onClick={handleSubmit}
-                    fullWidth
-                    className="sm:w-auto"
-                  >
-                    Submit Exam
-                  </Button>
-                )}
-              </div>
-            </div>
+            <ExamActionBar
+              currentIndex={currentQuestionIndex}
+              totalQuestions={totalQuestions}
+              isMarkedForReview={markedForReview?.has(currentQuestion?.id)}
+              onPrevious={handlePrevious}
+              onMarkForReview={handleMarkForReview}
+              onNext={handleNext}
+              onSubmit={handleSubmit}
+            />
 
-            <div className="mt-6 p-4 bg-muted/50 rounded-lg">
+            <div className="mt-6 p-4 bg-muted/50 rounded-lg desktop-keyboard-shortcuts">
               <p className="text-xs text-muted-foreground">
                 <strong>Keyboard Shortcuts:</strong> Arrow Left (Previous) | Arrow Right (Next) | M (Mark for Review)
               </p>
@@ -1639,17 +1459,19 @@ const ExamPortal = () => {
           </div>
         </div>
 
-        <div className="hidden lg:block w-80 border-l border-border bg-card overflow-y-auto">
-          <QuestionPalette
-            questions={sourceExam?.questions}
-            currentIndex={currentQuestionIndex}
-            answers={answers}
-            markedForReview={markedForReview}
-            onQuestionSelect={handleQuestionSelect}
-            answeredCount={answeredCount}
-            reviewCount={reviewCount}
-            unansweredCount={unansweredCount}
-          />
+        <aside className="exam-security-sidebar lg:w-80 lg:border-l lg:border-border lg:bg-card lg:overflow-y-auto">
+          <div className="hidden lg:block">
+            <QuestionPalette
+              questions={sourceExam?.questions}
+              currentIndex={currentQuestionIndex}
+              answers={answers}
+              markedForReview={markedForReview}
+              onQuestionSelect={handleQuestionSelect}
+              answeredCount={answeredCount}
+              reviewCount={reviewCount}
+              unansweredCount={unansweredCount}
+            />
+          </div>
           <SecurityMonitor 
             ref={securityMonitorRef}
             violations={violations} 
@@ -1662,15 +1484,18 @@ const ExamPortal = () => {
             getVisionTelemetry={clientVision ? vision.getTelemetry : null}
             screenStream={screenStream}
           />
-        </div>
+        </aside>
       </div>
 
       {showPalette && (
         <div className="fixed inset-0 bg-black/50 z-50 lg:hidden" onClick={() => setShowPalette(false)}>
-          <div className="absolute right-0 top-0 bottom-0 w-80 bg-card shadow-xl overflow-y-auto" onClick={(e) => e?.stopPropagation()}>
+          <div
+            className="absolute right-0 top-0 bottom-0 w-80 max-w-[85vw] bg-card shadow-xl overflow-y-auto exam-palette-drawer"
+            onClick={(e) => e?.stopPropagation()}
+          >
             <div className="p-4 border-b border-border flex items-center justify-between">
               <h3 className="font-semibold text-foreground">Questions</h3>
-              <Button variant="ghost" size="icon" onClick={() => setShowPalette(false)}>
+              <Button variant="ghost" size="icon" onClick={() => setShowPalette(false)} className="touch-target">
                 <Icon name="X" size={20} />
               </Button>
             </div>
@@ -1679,22 +1504,13 @@ const ExamPortal = () => {
               currentIndex={currentQuestionIndex}
               answers={answers}
               markedForReview={markedForReview}
-              onQuestionSelect={handleQuestionSelect}
+              onQuestionSelect={(idx) => {
+                handleQuestionSelect(idx);
+                setShowPalette(false);
+              }}
               answeredCount={answeredCount}
               reviewCount={reviewCount}
               unansweredCount={unansweredCount}
-            />
-            <SecurityMonitor 
-              ref={securityMonitorRef}
-              violations={violations} 
-              sessionId={sessionId}
-              securityConfig={securityConfig}
-              onAddViolation={addViolation}
-              onRequestSnapshot={requestSnapshot}
-              clientVision={clientVision}
-              managedStream={clientVision ? vision.stream : null}
-              getVisionTelemetry={clientVision ? vision.getTelemetry : null}
-              screenStream={screenStream}
             />
           </div>
         </div>

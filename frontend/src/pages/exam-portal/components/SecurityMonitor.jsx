@@ -472,8 +472,8 @@ const SecurityMonitor = forwardRef(({
   }, [clientVision, cameraStatus, sessionId, onAddViolation, onRequestSnapshot, securityConfig]);
 
   return (
-    <div className="p-4 border-t border-border flex flex-col h-full bg-card">
-      <div className="flex items-center justify-between mb-3">
+    <div className="p-4 border-t border-border flex flex-col h-full bg-card exam-security-monitor">
+      <div className="flex items-center justify-between mb-3 exam-security-monitor-header">
         <h3 className="text-sm font-semibold text-foreground">Security Monitor</h3>
         <div className="flex items-center space-x-1">
           <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
@@ -482,7 +482,7 @@ const SecurityMonitor = forwardRef(({
       </div>
 
       {/* Webcam Status */}
-      <div className="mb-4 p-3 bg-muted/50 rounded-lg">
+      <div className="mb-4 p-3 bg-muted/50 rounded-lg exam-security-camera-card">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2">
             <Icon
@@ -553,8 +553,9 @@ const SecurityMonitor = forwardRef(({
         </div>
       </div>
 
-      <div className="mb-4 p-3 bg-muted/50 rounded-lg">
-        <div className="flex items-center justify-between mb-2">
+      <div className="exam-security-details space-y-4">
+        <div className="mb-4 p-3 bg-muted/50 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2">
             <Icon
               name="Monitor"
@@ -685,6 +686,7 @@ const SecurityMonitor = forwardRef(({
             </div>
           ))}
         </div>
+      </div>
       </div>
     </div>
   );
