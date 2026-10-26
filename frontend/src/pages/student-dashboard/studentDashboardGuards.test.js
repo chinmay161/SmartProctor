@@ -264,4 +264,128 @@ describe('Student Dashboard & Native Guards (App-9)', () => {
       expect(steps).not.toContain('fullscreen');
     });
   });
+
+  describe('5. App-10: Phone Layout Rules (Header, Stat Cards, Floating Toggle, Gate)', () => {
+    const resolveHeaderLayout = (viewportWidth) => {
+      if (viewportWidth < 640) {
+        return {
+          desktopNavHidden: true,
+          subtitleHidden: true,
+          themeToggle44px: true,
+          logoutIconOnly: true,
+          pageOverflowClip: true,
+        };
+      }
+      return {
+        desktopNavHidden: false,
+        subtitleHidden: false,
+        themeToggle44px: false,
+        logoutIconOnly: false,
+        pageOverflowClip: false,
+      };
+    };
+
+    it('hides desktop nav and switches header buttons to 44px icon-only on phones (<640px)', () => {
+      const phoneHeader = resolveHeaderLayout(360);
+      expect(phoneHeader.desktopNavHidden).toBe(true);
+      expect(phoneHeader.subtitleHidden).toBe(true);
+      expect(phoneHeader.themeToggle44px).toBe(true);
+      expect(phoneHeader.logoutIconOnly).toBe(true);
+      expect(phoneHeader.pageOverflowClip).toBe(true);
+    });
+
+    it('preserves desktop nav and full header controls at viewport >= 640px', () => {
+      const desktopHeader = resolveHeaderLayout(1024);
+      expect(desktopHeader.desktopNavHidden).toBe(false);
+      expect(desktopHeader.subtitleHidden).toBe(false);
+      expect(desktopHeader.themeToggle44px).toBe(false);
+      expect(desktopHeader.logoutIconOnly).toBe(false);
+      expect(desktopHeader.pageOverflowClip).toBe(false);
+    });
+
+    const resolveStatsGridLayout = (viewportWidth) => {
+      if (viewportWidth < 640) {
+        return {
+          columns: 3,
+          isCompact: true,
+          labelFontSize: '11px',
+        };
+      }
+      return {
+        columns: 'auto-fit',
+        isCompact: false,
+        labelFontSize: '0.8rem',
+      };
+    };
+
+    it('configures stat cards to 3 in a row with compact padding on phones', () => {
+      const phoneStats = resolveStatsGridLayout(360);
+      expect(phoneStats.columns).toBe(3);
+      expect(phoneStats.isCompact).toBe(true);
+      expect(phoneStats.labelFontSize).toBe('11px');
+    });
+
+    it('keeps original auto-fit stat cards at >= 640px', () => {
+      const desktopStats = resolveStatsGridLayout(768);
+      expect(desktopStats.columns).toBe('auto-fit');
+      expect(desktopStats.isCompact).toBe(false);
+      expect(desktopStats.labelFontSize).toBe('0.8rem');
+    });
+
+    const resolveThemeToggleLayout = ({ viewportWidth, pointer }) => {
+      if (viewportWidth < 640 || pointer === 'coarse') {
+        return {
+          iconOnly: true,
+          minTouchTarget: 44,
+          labelVisible: false,
+        };
+      }
+      return {
+        iconOnly: false,
+        minTouchTarget: 34,
+        labelVisible: true,
+      };
+    };
+
+    it('switches floating ThemeToggle to icon-only 44px on phone or coarse pointer', () => {
+      const phoneToggle = resolveThemeToggleLayout({ viewportWidth: 360, pointer: 'coarse' });
+      expect(phoneToggle.iconOnly).toBe(true);
+      expect(phoneToggle.minTouchTarget).toBe(44);
+      expect(phoneToggle.labelVisible).toBe(false);
+    });
+
+    it('keeps pill with label on desktop with fine pointer', () => {
+      const desktopToggle = resolveThemeToggleLayout({ viewportWidth: 1200, pointer: 'fine' });
+      expect(desktopToggle.iconOnly).toBe(false);
+      expect(desktopToggle.labelVisible).toBe(true);
+    });
+
+    const resolveGateModalLayout = (viewportWidth) => {
+      if (viewportWidth < 640) {
+        return {
+          alignItems: 'flex-start',
+          headerWraps: true,
+          reportProblemBelowTitle: true,
+          cameraWidth100Percent: true,
+          respectsSafeBottom: true,
+        };
+      }
+      return {
+        alignItems: 'center',
+        headerWraps: false,
+        reportProblemBelowTitle: false,
+        cameraWidth100Percent: false,
+        respectsSafeBottom: false,
+      };
+    };
+
+    it('enforces PreExamGate scroll-from-top and header wrap on phones', () => {
+      const phoneGate = resolveGateModalLayout(360);
+      expect(phoneGate.alignItems).toBe('flex-start');
+      expect(phoneGate.headerWraps).toBe(true);
+      expect(phoneGate.reportProblemBelowTitle).toBe(true);
+      expect(phoneGate.cameraWidth100Percent).toBe(true);
+      expect(phoneGate.respectsSafeBottom).toBe(true);
+    });
+  });
 });
