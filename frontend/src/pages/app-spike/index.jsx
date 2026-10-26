@@ -1004,6 +1004,21 @@ export default function AppSpikeBenchmark() {
               🔄 Reload
             </button>
             <button
+              onClick={() => navigate('/app-spike/lock')}
+              style={{
+                background: 'rgba(16, 185, 129, 0.2)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              🔒 ExamLock Spike →
+            </button>
+            <button
               onClick={() => navigate('/login')}
               style={{
                 background: 'rgba(148, 163, 184, 0.15)',
