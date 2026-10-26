@@ -187,6 +187,11 @@ def test_telemetry_session_ownership_check(client: TestClient):
     db = SessionLocal()
     session_id = f"sess_{uuid.uuid4().hex[:8]}"
     try:
+        exam = db.query(Exam).filter_by(id="exam_owner_test").first()
+        if not exam:
+            exam = Exam(id="exam_owner_test", title="Owner Test Exam", created_by="teacher_owner")
+            db.add(exam)
+            db.commit()
         session = ExamSession(
             id=session_id,
             exam_id="exam_owner_test",

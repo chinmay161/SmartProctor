@@ -150,3 +150,59 @@ def test_normalize_database_url_strips_quotes():
     assert u.host == "ep-empty-glade-b43e9qf7.c-6.us-east-2.aws.neon.tech"
     assert u.query.get("sslmode") == "require"
 
+
+def test_requirements_and_render_start_command():
+    req_path = os.path.join(os.path.dirname(__file__), "..", "requirements.txt")
+    with open(req_path, "r", encoding="utf-8") as f:
+        req_content = f.read()
+
+    assert "uvicorn[standard]" in req_content
+    assert "websockets" in req_content
+
+    render_path = os.path.join(os.path.dirname(__file__), "..", "..", "render.yaml")
+    if os.path.exists(render_path):
+        with open(render_path, "r", encoding="utf-8") as f:
+            render_content = f.read()
+        assert "uvicorn app.main:app" in render_content
+
+
+def test_ws_route_accepts_connection():
+    from starlette.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    client = TestClient(app)
+    # Connecting without a token is accepted by route and closed with 4401
+    with client.websocket_connect("/ws/student/test-session-id") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            ws.receive_text()
+        assert exc_info.value.code == 4401
+
+
+def test_global_exception_handler_returns_cors_and_request_id():
+    from starlette.testclient import TestClient
+
+    # Register temporary test endpoint that raises an unhandled Exception
+    @app.get("/test-unhandled-exception")
+    def _faulty_endpoint():
+        raise RuntimeError("simulated crash in route")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    req_id = "req-custom-err-12345"
+    res = client.get(
+        "/test-unhandled-exception",
+        headers={
+            "Origin": "http://localhost:5173",
+            "X-Request-ID": req_id,
+        },
+    )
+
+    assert res.status_code == 500
+    data = res.json()
+    assert req_id in data["detail"]
+    assert data["requestId"] == req_id
+    assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    assert res.headers.get("access-control-allow-credentials") == "true"
+    assert "X-Request-ID" in res.headers.get("access-control-expose-headers", "")
+    assert res.headers.get("x-request-id") == req_id
+
+

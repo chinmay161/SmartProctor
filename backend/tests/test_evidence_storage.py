@@ -159,6 +159,10 @@ def test_legacy_passthrough(_reset_storage):
 
 
 def test_oversize_upload_rejected(db):
+    exam = Exam(id="e1", title="Test Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
+
     session = ExamSession(
         exam_id="e1",
         student_id="student_123",
@@ -187,6 +191,10 @@ def test_oversize_upload_rejected(db):
 
 
 def test_non_jpeg_rejected(db):
+    exam = Exam(id="e1", title="Test Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
+
     session = ExamSession(
         exam_id="e1",
         student_id="student_123",
@@ -217,6 +225,10 @@ def test_non_jpeg_rejected(db):
 def test_upload_failure_still_saves_violation(db, _reset_storage):
     storage: FakeMemoryStorage = _reset_storage
     storage.fail_save = True
+
+    exam = Exam(id="e1", title="Test Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
 
     session = ExamSession(
         exam_id="e1",
