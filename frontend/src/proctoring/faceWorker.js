@@ -15,7 +15,7 @@ self.onmessage = async ({ data }) => {
       const create = (delegate) => FaceLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: data.modelUrl, delegate },
         runningMode: 'VIDEO',
-        numFaces: data.numFaces || 1,
+        numFaces: data.numFaces || 3,
         outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: true,
       });
@@ -41,10 +41,26 @@ self.onmessage = async ({ data }) => {
       const stamp = Math.max(Math.round(ts), lastTs + 1);
       lastTs = stamp;
       const t0 = performance.now();
-      const result = landmarker.detectForVideo(bitmap, stamp);
+      const rawResult = landmarker.detectForVideo(bitmap, stamp);
       const ms = performance.now() - t0;
-      const faceCount = result.faceLandmarks ? result.faceLandmarks.length : 0;
-      post({ type: 'result', id, faceCount, ms });
+      const result = rawResult ? {
+        faceLandmarks: rawResult.faceLandmarks ? rawResult.faceLandmarks.map((points) =>
+          points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+        ) : [],
+        faceBlendshapes: rawResult.faceBlendshapes ? rawResult.faceBlendshapes.map((fb) => ({
+          categories: (fb.categories || []).map((c) => ({
+            categoryName: c.categoryName,
+            score: c.score,
+          })),
+        })) : [],
+        facialTransformationMatrixes: rawResult.facialTransformationMatrixes ? rawResult.facialTransformationMatrixes.map((m) => ({
+          rows: m.rows || 4,
+          columns: m.columns || 4,
+          data: Array.from(m.data || []),
+        })) : [],
+      } : null;
+      const faceCount = result?.faceLandmarks?.length || 0;
+      post({ type: 'result', id, faceCount, ms, result });
     } catch (error) {
       post({ type: 'detect-error', id, error: String(error?.message || error) });
     } finally {
