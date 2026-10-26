@@ -6,48 +6,59 @@ const QuestionDisplay = ({ question, answer, onAnswerChange }) => {
 
   const renderMultipleChoice = () => (
     <div className="space-y-3">
-      {question?.options?.map((option) => (
-        <label
-          key={option?.value || option?.id}
-          className="flex items-start space-x-3 p-4 border border-border rounded-lg cursor-pointer hover:bg-accent/50 transition-colors"
-        >
-          <Input
-            type="radio"
-            name={`question-${question?.id}`}
-            value={option?.value || option?.id}
-            checked={answer === (option?.value || option?.id)}
-            onChange={(e) => onAnswerChange(e?.target?.value)}
-            className="mt-1"
-          />
-          <span className="flex-1 text-sm text-foreground">
-            <strong className="mr-2">{(option?.label || option?.id)?.toUpperCase()}.</strong>
-            {option?.text}
-          </span>
-        </label>
-      ))}
+      {question?.options?.map((option) => {
+        const optionValue = option?.value || option?.id;
+        const isSelected = answer === optionValue;
+        return (
+          <label
+            key={optionValue}
+            className={`flex items-center space-x-3 p-3.5 sm:p-4 border rounded-lg cursor-pointer transition-colors w-full min-h-[48px] mcq-option-row touch-target ${
+              isSelected ? 'bg-primary/10 border-primary shadow-xs' : 'border-border hover:bg-accent/50'
+            }`}
+          >
+            <Input
+              type="radio"
+              name={`question-${question?.id}`}
+              value={optionValue}
+              checked={isSelected}
+              onChange={(e) => onAnswerChange(e?.target?.value)}
+              className="shrink-0"
+            />
+            <span className="flex-1 text-sm text-foreground leading-snug">
+              <strong className="mr-2">{(option?.label || option?.id)?.toUpperCase()}.</strong>
+              {option?.text}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 
   const renderTrueFalse = () => (
     <div className="space-y-3">
-      {['true', 'false']?.map((option) => (
-        <label
-          key={option}
-          className="flex items-start space-x-3 p-4 border border-border rounded-lg cursor-pointer hover:bg-accent/50 transition-colors"
-        >
-          <Input
-            type="radio"
-            name={`question-${question?.id}`}
-            value={option}
-            checked={answer === option}
-            onChange={(e) => onAnswerChange(e?.target?.value)}
-            className="mt-1"
-          />
-          <span className="flex-1 text-sm text-foreground font-medium">
-            {option?.charAt(0)?.toUpperCase() + option?.slice(1)}
-          </span>
-        </label>
-      ))}
+      {['true', 'false']?.map((option) => {
+        const isSelected = answer === option;
+        return (
+          <label
+            key={option}
+            className={`flex items-center space-x-3 p-3.5 sm:p-4 border rounded-lg cursor-pointer transition-colors w-full min-h-[48px] mcq-option-row touch-target ${
+              isSelected ? 'bg-primary/10 border-primary shadow-xs' : 'border-border hover:bg-accent/50'
+            }`}
+          >
+            <Input
+              type="radio"
+              name={`question-${question?.id}`}
+              value={option}
+              checked={isSelected}
+              onChange={(e) => onAnswerChange(e?.target?.value)}
+              className="shrink-0"
+            />
+            <span className="flex-1 text-sm text-foreground font-medium leading-snug">
+              {option?.charAt(0)?.toUpperCase() + option?.slice(1)}
+            </span>
+          </label>
+        );
+      })}
     </div>
   );
 
@@ -78,7 +89,7 @@ const QuestionDisplay = ({ question, answer, onAnswerChange }) => {
   );
 
   return (
-    <div className="bg-card border border-border rounded-lg p-6 shadow-sm">
+    <div className="bg-card border border-border rounded-lg p-4 sm:p-6 shadow-sm">
       <div className="mb-6">
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-semibold text-foreground flex-1">
