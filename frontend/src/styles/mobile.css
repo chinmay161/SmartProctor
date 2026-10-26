@@ -1,0 +1,126 @@
+/* ==========================================================================
+   Mobile & Touch Foundations (SmartProctor)
+   App-8: Safe areas, dvh viewport, touch targets, and mobile form ergonomics.
+   Rule: At viewport widths >= 640px with a mouse pointer, desktop styles
+   remain 100% unchanged.
+   ========================================================================== */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* 100dvh with 100vh fallback */
+.min-h-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Base touch target rule for coarse pointers (minimum 44x44px for accessibility) */
+@media (pointer: coarse) {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Floating ThemeToggle:
+   When native or pointer: coarse, top = calc(14px + var(--safe-top)) with a 44px target.
+   Desktop with mouse pointer remains unchanged. */
+@media (pointer: coarse) {
+  .floating-theme-toggle {
+    top: calc(14px + var(--safe-top, 0px)) !important;
+    min-height: 44px !important;
+    min-width: 44px !important;
+    padding: 0 16px !important;
+  }
+}
+
+.floating-theme-toggle.is-native {
+  top: calc(14px + var(--safe-top, 0px)) !important;
+  min-height: 44px !important;
+  min-width: 44px !important;
+  padding: 0 16px !important;
+}
+
+/* ==========================================================================
+   Auth Layout & Mobile Keyboard Accommodations (Login & Signup)
+   Phones / narrow viewports (< 640px)
+   ========================================================================== */
+
+@media (max-width: 639px) {
+  /* Prevent vertical centering that clips top/bottom content when software keyboard opens */
+  .auth-scroll-panel {
+    align-items: flex-start !important;
+    min-height: 100dvh !important;
+    padding-top: max(1.5rem, calc(1rem + var(--safe-top, 0px))) !important;
+    padding-bottom: max(1.5rem, calc(1rem + var(--safe-bottom, 0px))) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Labels, error, and helper texts must be at least 14px on phones */
+  .auth-field-label {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+
+  .auth-field-error {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+
+  .auth-helper-text {
+    font-size: 14px !important;
+    line-height: 1.5 !important;
+  }
+
+  .auth-checkbox-label {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+
+  .auth-trust-badge {
+    font-size: 13px !important;
+  }
+
+  /* Inputs: 16px font-size prevents browser auto-zoom; scroll-margin ensures visible above keyboard */
+  .auth-input {
+    font-size: 16px !important;
+    scroll-margin-bottom: 120px;
+  }
+}
+
+/* Touch accommodations under pointer: coarse */
+@media (pointer: coarse) {
+  /* Google button & CTA */
+  .auth-touch-btn {
+    min-height: 44px !important;
+  }
+
+  /* Whole label for Remember Me is comfortably tappable */
+  .auth-checkbox-label {
+    min-height: 44px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    cursor: pointer;
+  }
+
+  /* Password eye visibility buttons 44px touch target */
+  .auth-eye-btn {
+    min-height: 44px !important;
+    min-width: 44px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+}
+
+/* Signup: First and last name become one column below 480px */
+@media (max-width: 479px) {
+  .signup-names-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

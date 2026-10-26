@@ -4,6 +4,7 @@ import { Auth0Provider } from '@auth0/auth0-react'
 import './index.css'
 import App from './App.jsx'
 import './styles/tailwind.css';
+import './styles/mobile.css';
 import { initFrontendSentry } from './utils/sentryScrubber'
 import { isNativeApp, getNativeCallbackUrl } from './utils/platform'
 
