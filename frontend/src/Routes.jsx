@@ -20,6 +20,7 @@ import TeacherMonitoringPage from './pages/exam-monitoring';
 import HeadPoseDiagnosticPage from './pages/headpose-diagnostic';
 import AIDiagnosticsDashboard from './pages/ai-diagnostics';
 import AppSpikeBenchmark from './pages/app-spike';
+import UseWebVersionPage from './pages/native-guard/UseWebVersionPage';
 
 import NativeAuthHandler from './components/auth/NativeAuthHandler';
 
@@ -38,6 +39,11 @@ const Routes = () => {
               element={<AppSpikeBenchmark />}
             />
           )}
+          {/* Native Guard Route */}
+          <Route
+            path="/use-web-version"
+            element={<UseWebVersionPage />}
+          />
           {/* Public Routes */}
           <Route 
             path="/" 
