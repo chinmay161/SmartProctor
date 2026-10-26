@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTheme } from '../../context/ThemeContext';
+import { isNativeApp } from '../../utils/platform';
 
 /**
  * Floating dark/light mode toggle pill.
@@ -9,10 +10,12 @@ import { useTheme } from '../../context/ThemeContext';
 const ThemeToggle = ({ floating = true }) => {
   const { resolvedTheme, setTheme } = useTheme();
   const isDark = resolvedTheme === 'dark';
+  const isNative = isNativeApp();
 
   return (
     <button
       id="theme-toggle-btn"
+      className={floating ? `floating-theme-toggle ${isNative ? 'is-native' : ''}` : ''}
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
       title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
       style={{

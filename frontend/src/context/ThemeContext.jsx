@@ -1,4 +1,6 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { setSystemBarTheme } from '../utils/platform';
 
 const ThemeContext = createContext({
   theme: 'system',
@@ -48,6 +50,7 @@ export const ThemeProvider = ({ children }) => {
     } else {
       root.classList?.remove('dark');
     }
+    setSystemBarTheme(effectiveTheme);
   }, [theme]);
 
   useEffect(() => {
@@ -63,6 +66,7 @@ export const ThemeProvider = ({ children }) => {
       } else {
         root.classList?.remove('dark');
       }
+      setSystemBarTheme(newTheme);
     };
 
     if (mediaQuery?.addEventListener) {
