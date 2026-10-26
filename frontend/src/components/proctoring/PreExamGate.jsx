@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import { probeCameraPermission } from './useVisionProctoring';
 import { SCREEN_SHARE_HELP, shareEntireScreen } from './screenShare';
 import { requestExamFullscreen } from './fullscreen';
+import { isNativeApp } from '../../utils/platform';
 import flightRecorder from '../../telemetry/flightRecorder';
 import { getDeviceSnapshot } from '../../telemetry/deviceSnapshot';
 
@@ -166,11 +167,12 @@ const PreExamGate = ({
   const audioSteps = (micRequired || variant === 'device-test') && variant !== 'permission-only'
     ? ['mic', 'noise', 'speech']
     : [];
+  const isNative = isNativeApp();
   const stepIds = [
     ...visionSteps,
     ...audioSteps,
-    ...(requireScreenShare && variant !== 'device-test' ? ['screen'] : []),
-    ...(requireFullscreen && variant !== 'device-test' ? ['fullscreen'] : []),
+    ...(!isNative && requireScreenShare && variant !== 'device-test' ? ['screen'] : []),
+    ...(!isNative && requireFullscreen && variant !== 'device-test' ? ['fullscreen'] : []),
   ];
 
   const [steps, setSteps] = useState(() => Object.fromEntries(stepIds.map((id) => [id, { status: 'pending', detail: '' }])));

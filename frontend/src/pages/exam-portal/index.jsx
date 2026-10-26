@@ -34,6 +34,7 @@ import flightRecorder from '../../telemetry/flightRecorder';
 import { VIOLATION_DROP_REASONS } from '../../telemetry/violationDropReasons';
 import ReportProblemModal from '../../components/feedback/ReportProblemModal';
 import PilotScenarioPanel from './components/PilotScenarioPanel';
+import { isNativeApp } from '../../utils/platform';
 
 // Only camera exams need the gate UI, so it ships in its own chunk.
 const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
@@ -195,7 +196,7 @@ const ExamPortal = () => {
 
   const sourceExam = examDataState;
   const securityConfig = examRules || sourceExam?.wizard_config || {};
-  const screenRecordingRequired = Boolean(securityConfig?.enableScreenRecording);
+  const screenRecordingRequired = !isNativeApp() && Boolean(securityConfig?.enableScreenRecording);
   const currentQuestion = sourceExam?.questions?.[currentQuestionIndex];
   const totalQuestions = sourceExam?.questions?.length || 0;
   const watermarkEnabled = Boolean(
@@ -397,7 +398,7 @@ const ExamPortal = () => {
         setIsResume(resumable);
         setCameraRequired(requiresCamera);
         setMicRequired(requiresMic);
-        const needsGate = requiresCamera || requiresMic || Boolean(cfg?.enableScreenRecording) || Boolean(cfg?.browserLockdown);
+        const needsGate = requiresCamera || requiresMic || (!isNativeApp() && Boolean(cfg?.enableScreenRecording)) || Boolean(cfg?.browserLockdown);
         setStage(needsGate ? 'gate' : 'starting');
       } catch {
         if (mounted) {
@@ -1327,7 +1328,7 @@ const ExamPortal = () => {
           variant={INFERENCE_MODE === 'server' ? 'permission-only' : (isResume ? 'resume' : 'exam')}
           cameraRequired={cameraRequired}
           micRequired={micRequired}
-          requireScreenShare={Boolean(securityConfig?.enableScreenRecording)}
+          requireScreenShare={!isNativeApp() && Boolean(securityConfig?.enableScreenRecording)}
           requireFullscreen={browserLockdownEnabled}
           onScreenStream={setScreenStream}
           skipFps={isResume && Boolean(fpsCheckStore.get(examId)?.passed)}
