@@ -51,11 +51,12 @@ const ICONS = {
 /* ─── Stat card ─── */
 const StatCard = ({ icon, label, value, color, delay }) => (
   <div
-    className={`sp-card p-5 sp-count-up`}
+    className="sp-card p-5 sp-count-up dashboard-stat-card"
     style={{ animationDelay: delay }}
   >
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+    <div className="dashboard-stat-icon-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
       <div
+        className="dashboard-stat-icon"
         style={{
           width: '40px', height: '40px', borderRadius: '10px',
           background: `${color}18`,
@@ -66,10 +67,10 @@ const StatCard = ({ icon, label, value, color, delay }) => (
         <Icon d={icon} size={18} />
       </div>
     </div>
-    <p style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', fontWeight: 600, color: 'var(--color-foreground)', lineHeight: 1, marginBottom: '6px' }}>
+    <p className="dashboard-stat-value" style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', fontWeight: 600, color: 'var(--color-foreground)', lineHeight: 1, marginBottom: '6px' }}>
       {value ?? '—'}
     </p>
-    <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.8rem', color: 'var(--color-muted-foreground)', fontWeight: 500 }}>
+    <p className="dashboard-stat-label" style={{ fontFamily: 'var(--font-body)', fontSize: '0.8rem', color: 'var(--color-muted-foreground)', fontWeight: 500 }}>
       {label}
     </p>
   </div>
@@ -634,16 +635,16 @@ const StudentDashboardExample = () => {
 
       {/* ── Sticky Glassmorphic Header ── */}
       <header
-        className="sp-glass sp-fade-in"
+        className="sp-glass sp-fade-in dashboard-header"
         style={{
           position: 'sticky', top: 0, zIndex: 50,
           padding: 'var(--safe-top, 0px) clamp(1rem, 4vw, 2rem) 0',
           transition: 'background 0.3s',
         }}
       >
-        <div style={{ maxWidth: '1200px', margin: '0 auto', height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+        <div className="dashboard-header-inner" style={{ maxWidth: '1200px', margin: '0 auto', height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
           {/* Logo + greeting */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+          <div className="dashboard-brand-row" style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: '1 1 auto' }}>
             <div style={{
               width: '36px', height: '36px', borderRadius: '9px',
               background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)',
@@ -653,18 +654,18 @@ const StudentDashboardExample = () => {
                 <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
               </svg>
             </div>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', color: 'var(--color-foreground)', lineHeight: 1, whiteSpace: 'nowrap' }}>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
+              <p className="dashboard-brand-title" style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', color: 'var(--color-foreground)', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 SmartProctor
               </p>
-              <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.72rem', color: 'var(--color-muted-foreground)', marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <p className="dashboard-brand-subtitle" style={{ fontFamily: 'var(--font-body)', fontSize: '0.72rem', color: 'var(--color-muted-foreground)', marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 Welcome back, <strong style={{ color: 'var(--sp-accent)' }}>{displayName}</strong>
               </p>
             </div>
           </div>
 
           {/* Nav tabs (desktop) */}
-          <nav style={{ display: 'flex', gap: '4px' }} className="hidden md:flex">
+          <nav className="dashboard-desktop-nav hidden md:flex" style={{ gap: '4px' }}>
             {tabs.map(t => (
               <button
                 key={t.id}
@@ -685,7 +686,7 @@ const StudentDashboardExample = () => {
           </nav>
 
           {/* Right actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+          <div className="dashboard-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
             {/* Theme toggle */}
             <button
               id="dashboard-theme-toggle"
@@ -710,6 +711,8 @@ const StudentDashboardExample = () => {
             <button
               id="dashboard-logout-btn"
               onClick={handleLogout}
+              className="dashboard-logout-btn touch-target"
+              title="Logout"
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px',
                 padding: '7px 14px', borderRadius: '8px',
@@ -722,7 +725,7 @@ const StudentDashboardExample = () => {
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-muted-foreground)'; e.currentTarget.style.background = 'transparent'; }}
             >
               <Icon d={ICONS.logout} size={15} />
-              <span className="hidden sm:inline">Logout</span>
+              <span className="dashboard-logout-text hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
@@ -740,7 +743,7 @@ const StudentDashboardExample = () => {
 
         {/* ── Hero zone ── */}
         <div
-          className="sp-grid-bg sp-fade-up"
+          className="sp-grid-bg sp-fade-up dashboard-hero-card"
           style={{
             borderRadius: '16px',
             padding: '28px 28px 24px',
@@ -759,7 +762,7 @@ const StudentDashboardExample = () => {
           </div>
 
           {/* Stats grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', position: 'relative', zIndex: 1 }}>
+          <div className="dashboard-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', position: 'relative', zIndex: 1 }}>
             {stats.map((s, i) => <StatCard key={i} {...s} />)}
           </div>
         </div>
