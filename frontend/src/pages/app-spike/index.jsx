@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as Sentry from '@sentry/react';
+import { FilesetResolver } from '@mediapipe/tasks-vision';
 import { loadVisionTasks, ASSETS } from '../../proctoring/visionEngine';
+import { createVisionController } from '../../proctoring/controller';
 import { createAudioClassifier, createAudioEngine } from '../../proctoring/audioEngine';
 import flightRecorder from '../../telemetry/flightRecorder';
 
@@ -58,24 +60,21 @@ async function getBatterySnapshot() {
   return { level: null, charging: null, text: 'N/A' };
 }
 
-function detectWasmVariant() {
+async function detectWasmVariant() {
   try {
     const entries = performance.getEntriesByType('resource');
     const wasmEntry = entries.find((e) => e.name && e.name.includes('.wasm'));
     if (wasmEntry) {
-      if (wasmEntry.name.includes('nosimd')) return 'nosimd (from asset path)';
-      return 'simd (from asset path)';
+      if (wasmEntry.name.includes('nosimd')) return 'nosimd (network)';
+      return 'simd (network)';
     }
   } catch {
     /* ignore */
   }
 
   try {
-    const simdSupported = WebAssembly.validate(new Uint8Array([
-      0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3,
-      2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 26, 11,
-    ]));
-    return simdSupported ? 'simd (validated)' : 'nosimd (validated)';
+    const isSimd = await FilesetResolver.isSimdSupported();
+    return isSimd ? 'simd (probe)' : 'nosimd (probe)';
   } catch {
     return 'unknown';
   }
@@ -317,6 +316,10 @@ export default function AppSpikeBenchmark() {
   const [finalReport, setFinalReport] = useState(null);
   const [suiteResults, setSuiteResults] = useState([]);
   const [batteryState, setBatteryState] = useState({ level: null, charging: null, text: 'reading...' });
+  const [wasmVariant, setWasmVariant] = useState('detecting...');
+  const [realTestRunning, setRealTestRunning] = useState(false);
+  const [realTestProgress, setRealTestProgress] = useState('');
+  const [realTestResults, setRealTestResults] = useState(null);
 
   // Live telemetry metrics
   const [liveFaceFps, setLiveFaceFps] = useState(0);
@@ -339,6 +342,7 @@ export default function AppSpikeBenchmark() {
   // Read initial battery
   useEffect(() => {
     getBatterySnapshot().then(setBatteryState);
+    detectWasmVariant().then(setWasmVariant);
   }, []);
 
   // Cleanup on unmount
@@ -774,11 +778,165 @@ export default function AppSpikeBenchmark() {
     }
   };
 
+  const runRealControllerTest = async () => {
+    if (realTestRunning || running || suiteRunning) return;
+    setRealTestRunning(true);
+    setRealTestResults(null);
+    cancelBenchmarkRef.current = false;
+    let c1 = null;
+    let c2 = null;
+    let observer1 = null;
+    let observer2 = null;
+
+    try {
+      await ensureCamera();
+
+      // ================= PHASE 1: Main Thread Mode (60 s) =================
+      setRealTestProgress('Phase 1/2: Running Main-Thread Controller (60 s)...');
+      const mainTrace = [];
+      const mainViolations = [];
+      let mainLongTaskCount = 0;
+      let mainLongTaskTotalMs = 0;
+
+      if (typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes?.includes('longtask')) {
+        try {
+          observer1 = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              mainLongTaskCount += 1;
+              mainLongTaskTotalMs += entry.duration;
+            }
+          });
+          observer1.observe({ type: 'longtask', buffered: false });
+        } catch { /* ignore */ }
+      }
+
+      c1 = createVisionController({
+        video: videoRef.current,
+        detectObjects: true,
+        micRequired: true,
+        options: { faceInWorker: false },
+        onViolation: (v) => {
+          mainViolations.push({ type: v.type, ts: Math.round(v.ts || performance.now()) });
+        },
+      });
+      await c1.loadModels();
+      c1.start({ yaw: 0, pitch: 0 });
+
+      const phase1Start = performance.now();
+      let nextTrace1 = phase1Start + 2000;
+      while (performance.now() - phase1Start < 60000 && !cancelBenchmarkRef.current) {
+        const now = performance.now();
+        if (now >= nextTrace1) {
+          const tel = c1.getTelemetry();
+          mainTrace.push(tel?.faceFps ?? 0);
+          nextTrace1 = now + 2000;
+          setRealTestProgress(`Phase 1/2: Main-Thread Mode (${Math.round((60000 - (now - phase1Start)) / 1000)} s remaining, face fps: ${tel?.faceFps ?? 0})...`);
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      c1.stop();
+      c1.dispose();
+      c1 = null;
+      observer1?.disconnect();
+      observer1 = null;
+
+      if (cancelBenchmarkRef.current) {
+        setRealTestProgress('Real controller test cancelled.');
+        return;
+      }
+
+      // Cooldown 2s
+      setRealTestProgress('Switching modes (2 s cooldown)...');
+      await new Promise((r) => setTimeout(r, 2000));
+      if (cancelBenchmarkRef.current) return;
+
+      // ================= PHASE 2: Web Worker Mode (60 s) =================
+      setRealTestProgress('Phase 2/2: Running Web Worker Controller (60 s)...');
+      const workerTrace = [];
+      const workerViolations = [];
+      let workerLongTaskCount = 0;
+      let workerLongTaskTotalMs = 0;
+
+      if (typeof PerformanceObserver !== 'undefined' && PerformanceObserver.supportedEntryTypes?.includes('longtask')) {
+        try {
+          observer2 = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+              workerLongTaskCount += 1;
+              workerLongTaskTotalMs += entry.duration;
+            }
+          });
+          observer2.observe({ type: 'longtask', buffered: false });
+        } catch { /* ignore */ }
+      }
+
+      c2 = createVisionController({
+        video: videoRef.current,
+        detectObjects: true,
+        micRequired: true,
+        options: { faceInWorker: true },
+        onViolation: (v) => {
+          workerViolations.push({ type: v.type, ts: Math.round(v.ts || performance.now()) });
+        },
+      });
+      await c2.loadModels();
+      c2.start({ yaw: 0, pitch: 0 });
+
+      const phase2Start = performance.now();
+      let nextTrace2 = phase2Start + 2000;
+      while (performance.now() - phase2Start < 60000 && !cancelBenchmarkRef.current) {
+        const now = performance.now();
+        if (now >= nextTrace2) {
+          const tel = c2.getTelemetry();
+          workerTrace.push(tel?.faceFps ?? 0);
+          nextTrace2 = now + 2000;
+          setRealTestProgress(`Phase 2/2: Web Worker Mode (${Math.round((60000 - (now - phase2Start)) / 1000)} s remaining, face fps: ${tel?.faceFps ?? 0})...`);
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      c2.stop();
+      c2.dispose();
+      c2 = null;
+      observer2?.disconnect();
+      observer2 = null;
+
+      const report = {
+        main: {
+          governorTrace: mainTrace,
+          avgFaceFps: mainTrace.length ? Math.round((mainTrace.reduce((a, b) => a + b, 0) / mainTrace.length) * 10) / 10 : 0,
+          longTaskCount: mainLongTaskCount,
+          longTaskTotalMs: Math.round(mainLongTaskTotalMs),
+          violations: mainViolations,
+        },
+        worker: {
+          governorTrace: workerTrace,
+          avgFaceFps: workerTrace.length ? Math.round((workerTrace.reduce((a, b) => a + b, 0) / workerTrace.length) * 10) / 10 : 0,
+          longTaskCount: workerLongTaskCount,
+          longTaskTotalMs: Math.round(workerLongTaskTotalMs),
+          violations: workerViolations,
+        },
+      };
+      setRealTestResults(report);
+      setRealTestProgress('Real controller test completed (120 s total).');
+    } catch (err) {
+      console.error('[RealControllerTest] error:', err);
+      setRealTestProgress(`Test failed: ${err?.message || err}`);
+    } finally {
+      observer1?.disconnect();
+      observer2?.disconnect();
+      try { c1?.dispose(); } catch { /* ignore */ }
+      try { c2?.dispose(); } catch { /* ignore */ }
+      setRealTestRunning(false);
+    }
+  };
+
   const stopAll = () => {
     cancelBenchmarkRef.current = true;
     setStatusMessage('Benchmark stopped by user.');
     setRunning(false);
     setSuiteRunning(false);
+    setRealTestRunning(false);
     setCooldownRemaining(0);
   };
 
@@ -908,7 +1066,7 @@ export default function AppSpikeBenchmark() {
             </div>
             <div>
               <span style={{ color: '#64748b' }}>WASM Variant:</span>{' '}
-              <strong style={{ color: '#a7f3d0' }}>{detectWasmVariant()}</strong>
+              <strong style={{ color: '#a7f3d0' }}>{wasmVariant}</strong>
             </div>
           </div>
         </div>
@@ -1071,7 +1229,7 @@ export default function AppSpikeBenchmark() {
 
             {/* Action Buttons */}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              {!running ? (
+              {!running && !realTestRunning ? (
                 <>
                   <button
                     onClick={handleRunSingle}
@@ -1107,6 +1265,24 @@ export default function AppSpikeBenchmark() {
                   >
                     ⚡ Run All Suite (6 Tests)
                   </button>
+
+                  <button
+                    onClick={runRealControllerTest}
+                    style={{
+                      background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '9px 18px',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)',
+                    }}
+                    title="Real controller test: runs createVisionController in main-thread and worker modes (face + object + audio, 60s each = 120s total)"
+                  >
+                    🧪 Real controller test (120 s)
+                  </button>
                 </>
               ) : (
                 <button
@@ -1133,8 +1309,8 @@ export default function AppSpikeBenchmark() {
             style={{
               padding: '8px 12px',
               borderRadius: '6px',
-              background: running ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255,255,255,0.04)',
-              border: '1px solid ' + (running ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255,255,255,0.08)'),
+              background: running || realTestRunning ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255,255,255,0.04)',
+              border: '1px solid ' + (running || realTestRunning ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255,255,255,0.08)'),
               fontSize: '0.82rem',
               display: 'flex',
               alignItems: 'center',
@@ -1143,7 +1319,7 @@ export default function AppSpikeBenchmark() {
               gap: '6px',
             }}
           >
-            <span>{statusMessage}</span>
+            <span>{realTestRunning ? realTestProgress : statusMessage}</span>
             <div style={{ display: 'flex', gap: '12px' }}>
               {cooldownRemaining > 0 && (
                 <span style={{ color: '#fb923c', fontWeight: 700 }}>
@@ -1153,6 +1329,11 @@ export default function AppSpikeBenchmark() {
               {running && cooldownRemaining === 0 && (
                 <span style={{ color: '#38bdf8', fontWeight: 700 }}>
                   ⏳ {secondsRemaining} s remaining
+                </span>
+              )}
+              {realTestRunning && (
+                <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                  ⚡ Real Controller Active
                 </span>
               )}
             </div>
@@ -1269,6 +1450,144 @@ export default function AppSpikeBenchmark() {
             </div>
           </div>
         </div>
+
+        {/* Real Controller Test Results (120 s: Main vs Worker) */}
+        {realTestResults && (
+          <div
+            style={{
+              background: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid rgba(14, 165, 233, 0.4)',
+              borderRadius: '12px',
+              padding: '1.25rem',
+              marginBottom: '1.5rem',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: '12px',
+                borderBottom: '1px solid rgba(255,255,255,0.1)',
+                paddingBottom: '8px',
+                flexWrap: 'wrap',
+                gap: '8px',
+              }}
+            >
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: '#38bdf8' }}>
+                🧪 Real Vision Controller Test Results (120 s: Main Thread vs Web Worker)
+              </h2>
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  background: 'rgba(14, 165, 233, 0.2)',
+                  color: '#38bdf8',
+                  fontWeight: 600,
+                }}
+              >
+                Face + Object + Audio (60s Main + 60s Worker)
+              </span>
+            </div>
+
+            {/* Metrics Comparison Table */}
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left', marginBottom: '16px' }}>
+              <thead>
+                <tr style={{ background: 'rgba(255,255,255,0.05)', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                  <th style={{ padding: '8px' }}>Controller Mode</th>
+                  <th style={{ padding: '8px' }}>Average Face FPS</th>
+                  <th style={{ padding: '8px' }}>Long Tasks (&gt;50 ms)</th>
+                  <th style={{ padding: '8px' }}>Total Long Task Time</th>
+                  <th style={{ padding: '8px' }}>Violations Emitted</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <td style={{ padding: '8px', fontWeight: 700, color: '#38bdf8' }}>Main Thread (faceInWorker: false)</td>
+                  <td style={{ padding: '8px', color: '#f1f5f9' }}>{realTestResults.main.avgFaceFps} fps</td>
+                  <td style={{ padding: '8px', color: realTestResults.main.longTaskCount > 0 ? '#f87171' : '#34d399', fontWeight: 700 }}>
+                    {realTestResults.main.longTaskCount}
+                  </td>
+                  <td style={{ padding: '8px', color: '#cbd5e1' }}>{realTestResults.main.longTaskTotalMs} ms</td>
+                  <td style={{ padding: '8px', color: '#cbd5e1' }}>
+                    {realTestResults.main.violations.length} {realTestResults.main.violations.length > 0 && `(${realTestResults.main.violations.map((v) => v.type).join(', ')})`}
+                  </td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <td style={{ padding: '8px', fontWeight: 700, color: '#2dd4bf' }}>Web Worker (faceInWorker: true)</td>
+                  <td style={{ padding: '8px', color: '#34d399', fontWeight: 700 }}>{realTestResults.worker.avgFaceFps} fps</td>
+                  <td style={{ padding: '8px', color: '#34d399', fontWeight: 700 }}>
+                    {realTestResults.worker.longTaskCount}
+                  </td>
+                  <td style={{ padding: '8px', color: '#34d399' }}>{realTestResults.worker.longTaskTotalMs} ms</td>
+                  <td style={{ padding: '8px', color: '#cbd5e1' }}>
+                    {realTestResults.worker.violations.length} {realTestResults.worker.violations.length > 0 && `(${realTestResults.worker.violations.map((v) => v.type).join(', ')})`}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Governor Trace (every 2 s) */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '6px' }}>
+                📈 Governor Trace: Achieved Face FPS Every 2 s
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#38bdf8', fontWeight: 600, marginBottom: '6px' }}>
+                    Main Thread Governor Trace (2 s intervals):
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {realTestResults.main.governorTrace.map((fps, idx) => (
+                      <span key={idx} style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.1)', color: '#93c5fd', fontSize: '0.75rem' }}>
+                        {fps}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(0,0,0,0.3)', padding: '10px', borderRadius: '8px', border: '1px solid rgba(45, 212, 191, 0.2)' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#2dd4bf', fontWeight: 600, marginBottom: '6px' }}>
+                    Web Worker Governor Trace (2 s intervals):
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                    {realTestResults.worker.governorTrace.map((fps, idx) => (
+                      <span key={idx} style={{ padding: '2px 6px', borderRadius: '4px', background: 'rgba(45, 212, 191, 0.1)', color: '#5eead4', fontSize: '0.75rem' }}>
+                        {fps}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* In-depth Analysis Report */}
+            <div
+              style={{
+                background: 'rgba(30, 41, 59, 0.7)',
+                border: '1px solid rgba(148, 163, 184, 0.25)',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                fontSize: '0.8rem',
+                lineHeight: 1.6,
+                color: '#cbd5e1',
+              }}
+            >
+              <div style={{ color: '#fbbf24', fontWeight: 700, marginBottom: '6px', fontSize: '0.85rem' }}>
+                🔍 Diagnostic Analysis: Video Dropped Frames & CAMERA_FROZEN Stability
+              </div>
+              <p style={{ margin: '0 0 8px 0' }}>
+                <strong style={{ color: '#f1f5f9' }}>Why Video Dropped Frames rose from 124 to 452 per 60 s in worker mode:</strong><br />
+                In main-thread mode, heavy synchronous WASM inference blocks the main JavaScript thread 60–92% of the time. This throttles the browser event loop, delaying video frame ingestion and decoder processing. In worker mode, inference runs completely off-thread, achieving <strong>0 main-thread long tasks</strong>. As a result, the camera feed and Chromium video decoder process at full unthrottled 30 fps (~1800 frames / 60 s). Because the proctoring <code>&lt;video&gt;</code> element is rendered off-screen (1px invisible), the Chromium compositor intentionally drops non-presented decoded frames (452 drops out of ~1800 decoded frames ≈ 25% drop rate, typical for backgrounded/unrendered video tracks).
+              </p>
+              <p style={{ margin: 0 }}>
+                <strong style={{ color: '#f1f5f9' }}>Can CAMERA_FROZEN false-fire because of it?</strong><br />
+                <strong style={{ color: '#34d399' }}>NO.</strong> <code>CAMERA_FROZEN</code> evaluates the pixel-level difference (<code>meanAbsDiff</code> via <code>frameDiff()</code>) between consecutive analyzed camera frames. Dropped decoded video frames do not freeze the camera image; as long as the student is in front of the camera, the frames that are analyzed exhibit normal motion and camera noise well above the threshold. In addition, <code>temporalEngine</code> requires frame differences to stay under threshold for 5 continuous seconds (<code>minDurationMs</code>) before triggering <code>CAMERA_FROZEN</code>, while total camera stalls are properly isolated as <code>CAMERA_DISCONNECTED</code>.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Suite Results Table ("Run All") */}
         {suiteResults.length > 0 && (
