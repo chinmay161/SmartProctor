@@ -14,6 +14,7 @@ import flightRecorder from '../telemetry/flightRecorder';
 import { VIOLATION_DROP_REASONS } from '../telemetry/violationDropReasons';
 
 export const CONTROLLER_DEFAULTS = Object.freeze({
+  faceInWorker: false,
   targetFaceFps: 5,
   minFaceFps: 2,
   targetObjectFps: 1.5,
@@ -124,6 +125,9 @@ export function createVisionController({
   let nextFaceAt = 0;
   let nextObjectAt = 0;
   let faceMs = null;
+  let faceHandoffMs = null; // main-thread createImageBitmap handoff time
+  let faceInFlight = false;
+  let consecutiveUnderTarget = 0;
   let objectMs = null; // inference time (off-thread when in a worker)
   let objectMainMs = null; // main-thread share of each object inference
   let lastAdaptAt = 0;
@@ -359,7 +363,12 @@ export function createVisionController({
     if (tasks) return { ok: true, delegates: delegates(), loadMs: 0 };
     setPhase('models');
     try {
-      tasks = await loadVisionTasks({ detectObjects, objectModel, ...(objectDelegate ? { objectDelegate } : {}) });
+      tasks = await loadVisionTasks({
+        detectObjects,
+        objectModel,
+        faceInWorker: Boolean(cfg.faceInWorker),
+        ...(objectDelegate ? { objectDelegate } : {}),
+      });
       const warmupMs = await warmUp();
       return { ok: true, delegates: delegates(), loadMs: tasks.loadMs, warmupMs };
     } catch (error) {
@@ -376,7 +385,11 @@ export function createVisionController({
     while (!videoReady() && performance.now() < deadline) await new Promise((r) => setTimeout(r, 50));
     if (!videoReady()) return 0;
     for (let i = 0; i < 3; i += 1) {
-      tasks.face.detect(video, performance.now());
+      if (tasks.face?.inWorker) {
+        await tasks.face.detectAsync(video, performance.now());
+      } else {
+        tasks.face?.detect(video, performance.now());
+      }
       if (tasks.objects) await tasks.objects.detectAsync(video, performance.now());
       await new Promise((r) => setTimeout(r, 0));
     }
@@ -439,6 +452,55 @@ export function createVisionController({
       frameDiff: (lastFrameDiff = frameDiff()),
       inferenceMs: ms,
     };
+  };
+
+  const runFaceWorker = (now) => {
+    faceInFlight = true;
+    const mode = loopMode;
+    lastAnalysedFramePerf = lastFramePerf;
+    const diff = frameDiff();
+    lastFrameDiff = diff;
+    tasks.face.detectAsync(video, now).then((res) => {
+      faceInFlight = false;
+      if (!res || disposed || loopMode !== mode) return;
+      const { result, ms, handoffMs } = res;
+      faceMs = ewma(faceMs, ms);
+      if (typeof handoffMs === 'number') {
+        faceHandoffMs = ewma(faceHandoffMs, handoffMs);
+      }
+      faceTimes.push(now);
+      lastInferencePerf = now;
+      lastInferenceAt = Date.now();
+
+      const landmarks = result?.faceLandmarks || [];
+      const faceCount = landmarks.length;
+      lastFaceCount = faceCount;
+      let pose = null;
+      let blinkScore = null;
+      if (faceCount > 0) {
+        const i = primaryFaceIndex(landmarks);
+        pose = poseFromMatrix(result.facialTransformationMatrixes?.[i]);
+        blinkScore = blinkScoreFromBlendshapes(result.faceBlendshapes?.[i]?.categories);
+      }
+      lastPose = pose ? { yaw: Math.round(pose.yaw), pitch: Math.round(pose.pitch), roll: Math.round(pose.roll) } : null;
+      const blink = faceCount > 0 ? blinkDetector.update(blinkScore) : blinkDetector.update(null);
+      const sample = {
+        ts: now,
+        faceCount,
+        yaw: pose ? pose.yaw : null,
+        pitch: pose ? pose.pitch : null,
+        roll: pose ? pose.roll : null,
+        blink,
+        blinkScore,
+        frameDiff: diff,
+        inferenceMs: ms,
+        handoffMs,
+      };
+      collector?.('face', sample);
+      if (mode === 'monitor') handleEvents(engine.pushFace(sample));
+    }, () => {
+      faceInFlight = false;
+    });
   };
 
   // Object detection is asynchronous (normally in a worker); at most one in flight.
@@ -516,15 +578,48 @@ export function createVisionController({
 
   const adapt = (now) => {
     if (now - lastAdaptAt < cfg.adaptEveryMs) return;
+    const dt = (now - lastAdaptAt) / 1000;
+    const adaptWindowStart = lastAdaptAt;
     lastAdaptAt = now;
-    // Budget only what blocks the main thread.
-    const cost = faceFps * (faceMs ?? 0) + (tasks?.objects ? objectFps * (objectMainMs ?? 0) : 0);
-    if (cost > cfg.budgetMsPerSec) {
-      if (tasks?.objects && objectFps > cfg.minObjectFps) objectFps = Math.max(cfg.minObjectFps, objectFps * 0.75);
-      else if (faceFps > cfg.minFaceFps) faceFps = Math.max(cfg.minFaceFps, faceFps - 1);
-    } else if (cost < cfg.budgetMsPerSec * 0.5) {
-      if (faceFps < cfg.targetFaceFps) faceFps = Math.min(cfg.targetFaceFps, faceFps + 1);
-      else if (tasks?.objects && objectFps < cfg.targetObjectFps) objectFps = Math.min(cfg.targetObjectFps, objectFps * 1.25);
+
+    const isWorker = Boolean(cfg.faceInWorker && tasks?.face?.inWorker);
+
+    if (isWorker) {
+      // Main-thread cost = faceFps * faceHandoffMs + objectFps * objectMainMs
+      const cost = faceFps * (faceHandoffMs ?? 0) + (tasks?.objects ? objectFps * (objectMainMs ?? 0) : 0);
+      if (cost > cfg.budgetMsPerSec) {
+        if (tasks?.objects && objectFps > cfg.minObjectFps) objectFps = Math.max(cfg.minObjectFps, objectFps * 0.75);
+      } else if (cost < cfg.budgetMsPerSec * 0.5) {
+        if (tasks?.objects && objectFps < cfg.targetObjectFps) objectFps = Math.min(cfg.targetObjectFps, objectFps * 1.25);
+      }
+
+      // Face fps adaptation is driven by achieved fps vs target over the adapt windows:
+      // reduce when below 80% of target for 2 consecutive windows, recover otherwise, never below minFaceFps.
+      const faceInWindow = faceTimes.filter((t) => t > adaptWindowStart && t <= now).length;
+      const achievedFps = dt > 0 ? faceInWindow / dt : 0;
+      const target = faceFps;
+      if (achievedFps < target * 0.8) {
+        consecutiveUnderTarget += 1;
+        if (consecutiveUnderTarget >= 2) {
+          faceFps = Math.max(cfg.minFaceFps, faceFps - 1);
+          consecutiveUnderTarget = 0;
+        }
+      } else {
+        consecutiveUnderTarget = 0;
+        if (faceFps < cfg.targetFaceFps) {
+          faceFps = Math.min(cfg.targetFaceFps, faceFps + 1);
+        }
+      }
+    } else {
+      // Budget only what blocks the main thread.
+      const cost = faceFps * (faceMs ?? 0) + (tasks?.objects ? objectFps * (objectMainMs ?? 0) : 0);
+      if (cost > cfg.budgetMsPerSec) {
+        if (tasks?.objects && objectFps > cfg.minObjectFps) objectFps = Math.max(cfg.minObjectFps, objectFps * 0.75);
+        else if (faceFps > cfg.minFaceFps) faceFps = Math.max(cfg.minFaceFps, faceFps - 1);
+      } else if (cost < cfg.budgetMsPerSec * 0.5) {
+        if (faceFps < cfg.targetFaceFps) faceFps = Math.min(cfg.targetFaceFps, faceFps + 1);
+        else if (tasks?.objects && objectFps < cfg.targetObjectFps) objectFps = Math.min(cfg.targetObjectFps, objectFps * 1.25);
+      }
     }
   };
 
@@ -570,14 +665,24 @@ export function createVisionController({
 
     let ran = false;
     if (now >= nextFaceAt) {
-      const sample = freshFrame || !monitoring ? runFace(now) : null;
-      if (sample) lastAnalysedFramePerf = lastFramePerf;
       const interval = 1000 / faceFps;
       nextFaceAt = Math.max(nextFaceAt + interval, now + interval * 0.5);
-      if (sample) {
-        ran = true;
-        collector?.('face', sample);
-        if (monitoring) handleEvents(engine.pushFace(sample));
+      if (tasks.face?.inWorker) {
+        if (!tasks.face.busy && !faceInFlight) {
+          const shouldRun = freshFrame || !monitoring;
+          if (shouldRun) {
+            ran = true;
+            runFaceWorker(now);
+          }
+        }
+      } else {
+        const sample = freshFrame || !monitoring ? runFace(now) : null;
+        if (sample) lastAnalysedFramePerf = lastFramePerf;
+        if (sample) {
+          ran = true;
+          collector?.('face', sample);
+          if (monitoring) handleEvents(engine.pushFace(sample));
+        }
       }
     } else if (tasks.objects && !tasks.objects.failed && !objectsInFlight && loopMode !== 'calibrate' && now >= nextObjectAt) {
       runObjects(now);
@@ -638,6 +743,8 @@ export function createVisionController({
       objectFps: tasks?.objects ? Math.round((objects.length / seconds) * 10) / 10 : null,
       faceMs: mean(face.map((s) => s.inferenceMs)),
       objectMs: mean(objects.map((s) => s.inferenceMs)),
+      faceHandoffMs: mean(face.map((s) => s.handoffMs).filter(Number.isFinite)),
+      faceInWorker: Boolean(tasks?.face?.inWorker),
       delegates: delegates(),
     };
     setPhase('models');
@@ -670,6 +777,8 @@ export function createVisionController({
     engine.setBaseline(baseline || { yaw: 0, pitch: 0 });
     faceFps = cfg.targetFaceFps;
     objectFps = cfg.targetObjectFps;
+    consecutiveUnderTarget = 0;
+    faceInFlight = false;
     prevGray = null;
     lastAdaptAt = performance.now();
     setPhase('running');
@@ -724,11 +833,14 @@ export function createVisionController({
       phase,
       running: loopMode === 'monitor' && phase === 'running' && inferenceAgeMs !== null && inferenceAgeMs < cfg.staleAfterMs,
       faceCount: lastFaceCount,
+      faceMode: tasks?.face?.inWorker ? 'worker' : 'main',
       faceFps: Math.round((faceTimes.length / windowSec) * 10) / 10,
+      achievedFaceFps: Math.round((faceTimes.length / windowSec) * 10) / 10,
       objectFps: tasks?.objects ? Math.round((objectTimes.length / windowSec) * 10) / 10 : null,
       targetFaceFps: Math.round(faceFps * 10) / 10,
       targetObjectFps: tasks?.objects ? Math.round(objectFps * 10) / 10 : null,
       faceMs: faceMs === null ? null : Math.round(faceMs),
+      faceHandoffMs: faceHandoffMs === null ? null : Math.round(faceHandoffMs),
       objectMs: objectMs === null ? null : Math.round(objectMs),
       objectsInWorker: Boolean(tasks?.objects?.inWorker),
       lastInferenceAt,

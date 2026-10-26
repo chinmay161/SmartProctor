@@ -901,7 +901,9 @@ const ExamPortal = () => {
         flightRecorder.record('perf', 'vision_fps_summary', {
           running: Boolean(tel.running),
           phase: tel.phase || null,
+          face_mode: tel.faceMode || 'main',
           face_fps: tel.faceFps ?? null,
+          achieved_face_fps: tel.achievedFaceFps ?? tel.faceFps ?? null,
           object_fps: tel.objectFps ?? null,
           inference_age_ms: tel.inferenceAgeMs ?? null,
         });
