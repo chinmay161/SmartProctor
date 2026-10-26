@@ -26,23 +26,44 @@
   }
 }
 
-/* Floating ThemeToggle:
-   When native or pointer: coarse, top = calc(14px + var(--safe-top)) with a 44px target.
-   Desktop with mouse pointer remains unchanged. */
-@media (pointer: coarse) {
+/* Floating ThemeToggle (App-8 & App-10):
+   On phones (<640px), coarse pointers, or native app:
+   Icon-only, 44px circular button; hides the text label so it never overlaps the logo.
+   Desktop (>= 640px) with mouse pointer remains unchanged pill with "Light"/"Dark". */
+@media (max-width: 639px), (pointer: coarse) {
   .floating-theme-toggle {
     top: calc(14px + var(--safe-top, 0px)) !important;
-    min-height: 44px !important;
+    right: calc(14px + var(--safe-right, 0px)) !important;
+    width: 44px !important;
+    height: 44px !important;
     min-width: 44px !important;
-    padding: 0 16px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    justify-content: center !important;
+    gap: 0 !important;
+  }
+
+  .floating-theme-toggle .theme-toggle-label {
+    display: none !important;
   }
 }
 
 .floating-theme-toggle.is-native {
   top: calc(14px + var(--safe-top, 0px)) !important;
-  min-height: 44px !important;
+  right: calc(14px + var(--safe-right, 0px)) !important;
+  width: 44px !important;
+  height: 44px !important;
   min-width: 44px !important;
-  padding: 0 16px !important;
+  min-height: 44px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  justify-content: center !important;
+  gap: 0 !important;
+}
+
+.floating-theme-toggle.is-native .theme-toggle-label {
+  display: none !important;
 }
 
 /* ==========================================================================
@@ -91,6 +112,11 @@
     font-size: 16px !important;
     scroll-margin-bottom: 120px;
   }
+
+  /* Prevent floating theme toggle from covering the logo text on phones */
+  .auth-mobile-logo {
+    padding-right: 56px !important;
+  }
 }
 
 /* Touch accommodations under pointer: coarse */
@@ -126,11 +152,119 @@
 }
 
 /* ==========================================================================
-   Student Dashboard Mobile Ergonomics (App-9)
+   Student Dashboard Mobile Ergonomics (App-9 & App-10)
    Below 640px (< sm)
    ========================================================================== */
 
 @media (max-width: 639px) {
+  /* Page safety net for horizontal overflow */
+  .student-dashboard-root {
+    overflow-x: clip !important;
+  }
+
+  /* Dashboard header on phones: 1 row, hide desktop tabs and subtitle */
+  .dashboard-desktop-nav {
+    display: none !important;
+  }
+
+  .dashboard-brand-subtitle {
+    display: none !important;
+  }
+
+  .dashboard-brand-row {
+    min-width: 0 !important;
+  }
+
+  .dashboard-brand-title {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .dashboard-header-inner {
+    gap: 8px !important;
+  }
+
+  .dashboard-header-actions {
+    gap: 8px !important;
+  }
+
+  /* Theme toggle and logout as 44px icon-only buttons on phones */
+  .dashboard-theme-toggle {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    font-size: 18px !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 8px !important;
+  }
+
+  .dashboard-logout-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 8px !important;
+  }
+
+  .dashboard-logout-text {
+    display: none !important;
+  }
+
+  /* Compact Hero card on phones */
+  .dashboard-hero-card {
+    padding: 14px 12px 14px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .dashboard-hero-card h1 {
+    font-size: 1.25rem !important;
+    margin-bottom: 12px !important;
+  }
+
+  /* Compact 3-in-a-row stat cards */
+  .dashboard-stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .dashboard-stat-card {
+    padding: 10px 6px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    text-align: center !important;
+  }
+
+  .dashboard-stat-icon-wrap {
+    margin-bottom: 6px !important;
+    justify-content: center !important;
+  }
+
+  .dashboard-stat-icon {
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 7px !important;
+  }
+
+  .dashboard-stat-icon svg {
+    width: 15px !important;
+    height: 15px !important;
+  }
+
+  .dashboard-stat-value {
+    font-size: 1.25rem !important;
+    margin-bottom: 2px !important;
+  }
+
   /* History switch: hide table, show stacked cards */
   .dashboard-history-table {
     display: none !important;
@@ -150,9 +284,22 @@
   .student-dashboard-root .dashboard-meta-text {
     font-size: 14px !important;
   }
+
+  .student-dashboard-root .dashboard-stat-label {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
+  }
 }
 
 @media (min-width: 640px) {
+  .dashboard-desktop-nav {
+    display: flex !important;
+  }
+
   .dashboard-history-cards {
     display: none !important;
   }
@@ -166,6 +313,64 @@
   .dashboard-theme-toggle {
     min-height: 44px !important;
     min-width: 44px !important;
+  }
+}
+
+/* ==========================================================================
+   Gate / DeviceTestModal on phones (App-10)
+   ========================================================================== */
+
+@media (max-width: 639px) {
+  /* Overlay: scroll from top, respect safe areas, prevent page-level scroll */
+  .gate-modal-overlay {
+    align-items: flex-start !important;
+    padding-top: max(0.75rem, calc(0.5rem + var(--safe-top, 0px))) !important;
+    padding-bottom: max(1.25rem, calc(1rem + var(--safe-bottom, 0px))) !important;
+    padding-left: max(0.5rem, calc(0.5rem + var(--safe-left, 0px))) !important;
+    padding-right: max(0.5rem, calc(0.5rem + var(--safe-right, 0px))) !important;
+    overflow-x: clip !important;
+  }
+
+  /* Modal card: at most 100% of viewport minus safe areas */
+  .gate-modal-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 1rem !important;
+    box-sizing: border-box !important;
+    overflow-x: clip !important;
+    margin: 0 auto !important;
+  }
+
+  /* Header row wraps: "Report a problem" goes below the title */
+  .gate-modal-header {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
+  .gate-modal-title {
+    width: 100% !important;
+  }
+
+  .gate-modal-report-btn {
+    align-self: flex-start !important;
+    min-height: 36px !important;
+  }
+
+  /* Camera preview: width 100% with aspect ratio kept */
+  .gate-preview-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Action buttons stay reachable above bottom bar */
+  .gate-modal-actions {
+    flex-wrap: wrap !important;
+    padding-bottom: max(0.25rem, var(--safe-bottom, 0px)) !important;
+  }
+
+  .gate-modal-actions > * {
+    min-height: 44px !important;
   }
 }
 
