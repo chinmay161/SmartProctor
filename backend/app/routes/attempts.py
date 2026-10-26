@@ -19,6 +19,7 @@ from ..schemas.attempt import (
 from ..schemas.result import ExamResultResponse
 from ..services.attempt_service import (
     _max_attempts_for_exam,
+    _question_lookup_for_attempt,
     build_attempt_review_payload_for_student,
     check_result_visibility,
     evaluate_attempt,
@@ -103,6 +104,9 @@ def resume_exam_attempt(exam_id: str, user=Depends(require_role("student"))):
     db = SessionLocal()
     try:
         attempt, answers, remaining = resume_attempt(db, exam_id, user["sub"])
+        questions, _ = _question_lookup_for_attempt(db, attempt)
+        eq_map = {str(q.id): str(q.source_question_id) for q in questions if q.source_question_id}
+
         serialized_answers = []
         for answer in answers:
             value = answer.answer
@@ -110,9 +114,11 @@ def resume_exam_attempt(exam_id: str, user=Depends(require_role("student"))):
                 value = json.loads(answer.answer) if answer.answer is not None else None
             except (TypeError, json.JSONDecodeError):
                 value = answer.answer
+            frontend_qid = eq_map.get(str(answer.question_id), str(answer.question_id))
             serialized_answers.append(
                 {
-                    "question_id": answer.question_id,
+                    "question_id": frontend_qid,
+                    "source_question_id": frontend_qid,
                     "answer": value,
                     "last_saved_at": answer.last_saved_at,
                 }

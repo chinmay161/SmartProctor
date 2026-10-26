@@ -277,10 +277,14 @@ def _question_lookup_for_attempt(db: Session, attempt: ExamAttempt) -> tuple[lis
 
 
 def _answer_lookup_for_attempt(db: Session, attempt: ExamAttempt) -> dict[str, ExamAnswer]:
+    questions, q_lookup = _question_lookup_for_attempt(db, attempt)
     answers = db.query(ExamAnswer).filter_by(attempt_id=attempt.id).all()
     lookup: dict[str, ExamAnswer] = {}
     for answer in answers:
         lookup[str(answer.question_id)] = answer
+        q = q_lookup.get(str(answer.question_id))
+        if q and q.source_question_id:
+            lookup[str(q.source_question_id)] = answer
     return lookup
 
 
@@ -362,21 +366,25 @@ def _hydrate_attempt_answers_for_all_questions(db: Session, attempt: ExamAttempt
 
     for question in questions:
         answer = (
-            answer_lookup.get(str(question.source_question_id))
-            or answer_lookup.get(str(question.id))
+            answer_lookup.get(str(question.id))
+            or answer_lookup.get(str(question.source_question_id))
         )
         if not answer:
             answer = ExamAnswer(
                 attempt_id=attempt.id,
-                question_id=question.source_question_id,
+                question_id=str(question.id),
                 answer=None,
                 max_score=int(question.marks or 1),
             )
             db.add(answer)
             changed = True
-        elif answer.max_score is None or int(answer.max_score) != int(question.marks or 1):
-            answer.max_score = int(question.marks or 1)
-            changed = True
+        else:
+            if answer.question_id != str(question.id):
+                answer.question_id = str(question.id)
+                changed = True
+            if answer.max_score is None or int(answer.max_score) != int(question.marks or 1):
+                answer.max_score = int(question.marks or 1)
+                changed = True
         pairs.append((question, answer))
 
     if changed:
@@ -586,17 +594,18 @@ def save_answer(db: Session, attempt: ExamAttempt, question_id: str, answer: Any
 
     questions, question_lookup = _question_lookup_for_attempt(db, attempt)
     question = question_lookup.get(str(question_id)) if questions else None
-    target_question_id = str(question.source_question_id) if question else str(question_id)
+    target_question_id = str(question.id) if question else str(question_id)
     target_marks = int(question.marks or 1) if question else 1
 
     existing = (
         db.query(ExamAnswer)
         .filter_by(attempt_id=attempt.id, question_id=target_question_id)
         .first()
-        or (db.query(ExamAnswer).filter_by(attempt_id=attempt.id, question_id=str(question.id)).first() if question else None)
+        or (db.query(ExamAnswer).filter_by(attempt_id=attempt.id, question_id=str(question.source_question_id)).first() if question and question.source_question_id else None)
     )
     payload = json.dumps(answer) if not isinstance(answer, str) else answer
     if existing:
+        existing.question_id = target_question_id
         existing.answer = payload
         existing.max_score = target_marks
         existing.last_saved_at = now_utc
