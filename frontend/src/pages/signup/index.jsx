@@ -119,7 +119,7 @@ const Signup = () => {
           <div style={{ width: '100%', maxWidth: '500px', paddingTop: '1rem', paddingBottom: '1rem' }}>
             {/* Mobile-only logo */}
             <div
-              className="lg:hidden auth-fade-up"
+              className="lg:hidden auth-fade-up auth-mobile-logo"
               style={{
                 display: 'flex',
                 alignItems: 'center',

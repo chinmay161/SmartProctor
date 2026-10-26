@@ -59,7 +59,7 @@ const ThemeToggle = ({ floating = true }) => {
       <span style={{ fontSize: '13px', lineHeight: 1 }}>
         {isDark ? '🌙' : '☀️'}
       </span>
-      <span>{isDark ? 'Dark' : 'Light'}</span>
+      <span className="theme-toggle-label">{isDark ? 'Dark' : 'Light'}</span>
     </button>
   );
 };

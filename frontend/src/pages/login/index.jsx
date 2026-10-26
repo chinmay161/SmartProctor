@@ -44,7 +44,7 @@ const Login = () => {
           <div style={{ width: '100%', maxWidth: '460px' }}>
             {/* Mobile-only logo */}
             <div
-              className="lg:hidden auth-fade-up"
+              className="lg:hidden auth-fade-up auth-mobile-logo"
               style={{
                 display: 'flex',
                 alignItems: 'center',
