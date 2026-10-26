@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthTransitionSkeleton } from '../../../components/ui/Skeleton';
-import { isNativeApp, openUrl } from '../../../utils/platform';
+import { isNativeApp, openUrl, getAppVersion } from '../../../utils/platform';
 
 /* ─────────────── helpers ─────────────── */
 
@@ -21,6 +21,7 @@ const AuthField = ({ label, id, error, children }) => (
   <div className="auth-input-wrap" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
     <label
       htmlFor={id}
+      className="auth-field-label"
       style={{
         fontFamily: 'var(--auth-font-body)',
         fontSize: '0.8rem',
@@ -33,7 +34,7 @@ const AuthField = ({ label, id, error, children }) => (
     </label>
     {children}
     {error && (
-      <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.75rem', color: 'var(--auth-error)', marginTop: '2px' }}>
+      <p className="auth-field-error" style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.75rem', color: 'var(--auth-error)', marginTop: '2px' }}>
         {error}
       </p>
     )}
@@ -64,8 +65,19 @@ const LoginForm = () => {
   const [shake, setShake] = useState(false);
   const { loginWithRedirect, isLoading: auth0Loading } = useAuth0();
   const navigate = useNavigate();
+  const [appVersion, setAppVersion] = useState('v1.0.0');
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    getAppVersion().then((v) => {
+      if (mounted && v) setAppVersion(v);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleVersionTap = () => {
     tapCountRef.current += 1;
@@ -190,6 +202,8 @@ const LoginForm = () => {
         <input
           id="login-email"
           type="email"
+          autoComplete="email"
+          inputMode="email"
           placeholder="you@institution.edu"
           value={formData.email}
           onChange={e => handleInputChange('email', e.target.value)}
@@ -204,10 +218,12 @@ const LoginForm = () => {
       </AuthField>
 
       {/* Remember me + Forgot */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
         <label
+          htmlFor="login-remember"
+          className="auth-checkbox-label"
           style={{
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
             gap: '8px',
             cursor: 'pointer',
@@ -224,16 +240,17 @@ const LoginForm = () => {
             onChange={e => handleInputChange('rememberMe', e.target.checked)}
             style={{
               accentColor: 'var(--auth-accent)',
-              width: '15px',
-              height: '15px',
+              width: '18px',
+              height: '18px',
               borderRadius: '4px',
               cursor: 'pointer',
             }}
           />
-          Remember me
+          <span>Remember me</span>
         </label>
         <button
           type="button"
+          className="auth-touch-btn auth-helper-text"
           style={{
             background: 'none',
             border: 'none',
@@ -241,8 +258,10 @@ const LoginForm = () => {
             fontSize: '0.83rem',
             color: 'var(--auth-accent)',
             cursor: 'pointer',
-            padding: 0,
+            padding: '8px 4px',
             transition: 'opacity 0.2s',
+            display: 'inline-flex',
+            alignItems: 'center',
           }}
           onMouseEnter={e => (e.currentTarget.style.opacity = '0.75')}
           onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
@@ -300,6 +319,7 @@ const LoginForm = () => {
         type="button"
         onClick={handleGoogleSignIn}
         disabled={busy}
+        className="auth-touch-btn touch-target"
         style={{
           width: '100%',
           padding: '11px',
@@ -326,7 +346,7 @@ const LoginForm = () => {
       </button>
 
       {/* Create account link */}
-      <p style={{ textAlign: 'center', fontFamily: 'var(--auth-font-body)', fontSize: '0.85rem', color: 'var(--auth-text-secondary)' }}>
+      <p className="auth-helper-text" style={{ textAlign: 'center', fontFamily: 'var(--auth-font-body)', fontSize: '0.85rem', color: 'var(--auth-text-secondary)' }}>
         Don't have an account?{' '}
         <Link
           to="/signup"
@@ -351,6 +371,7 @@ const LoginForm = () => {
         {['🔒 SSL Secured', 'FERPA Compliant', 'SOC 2 Certified'].map(badge => (
           <span
             key={badge}
+            className="auth-trust-badge"
             style={{
               fontFamily: 'var(--auth-font-body)',
               fontSize: '0.72rem',
@@ -367,6 +388,7 @@ const LoginForm = () => {
       <div style={{ textAlign: 'center', marginTop: '12px' }}>
         <span
           onClick={handleVersionTap}
+          className="auth-helper-text"
           style={{
             fontFamily: 'var(--auth-font-body)',
             fontSize: '0.7rem',
@@ -375,9 +397,9 @@ const LoginForm = () => {
             cursor: 'pointer',
             userSelect: 'none',
           }}
-          title="v1.0.0 (tap 5 times for diagnostic benchmark)"
+          title={`${appVersion} (tap 5 times for diagnostic benchmark)`}
         >
-          v1.0.0
+          {appVersion}
         </span>
       </div>
     </div>
