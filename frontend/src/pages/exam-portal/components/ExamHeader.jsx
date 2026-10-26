@@ -83,6 +83,8 @@ const ExamHeader = ({
           >
             Questions
           </Button>
+          {/* Reserved header slot for compact camera chip on phones */}
+          <div className="exam-header-camera-slot md:hidden w-[82px] h-[46px] shrink-0 pointer-events-none" aria-hidden="true" />
         </div>
       </div>
     </header>

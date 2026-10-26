@@ -28,6 +28,7 @@ const TeacherMonitoringPage = () => {
   const [sessions, setSessions] = useState([]);
   const [studentStates, setStudentStates] = useState({});
   const [loading, setLoading] = useState(true);
+  const [socketConnecting, setSocketConnecting] = useState(false);
   const [socketReconnecting, setSocketReconnecting] = useState(false);
   const [error, setError] = useState('');
   const [toasts, setToasts] = useState([]);
@@ -162,12 +163,21 @@ const TeacherMonitoringPage = () => {
       onStateChange: (state) => {
         if (!mountedRef.current) return;
         if (state === 'open') {
+          setSocketConnecting(false);
           setSocketReconnecting(false);
-        } else if (state === 'reconnecting' || state === 'connecting') {
+        } else if (state === 'connecting') {
+          setSocketConnecting(true);
+          setSocketReconnecting(false);
+        } else if (state === 'reconnecting') {
+          setSocketConnecting(false);
           setSocketReconnecting(true);
         } else if (state === 'failed') {
+          setSocketConnecting(false);
           setSocketReconnecting(false);
           showToast('Live monitoring connection could not be established', 'error');
+        } else {
+          setSocketConnecting(false);
+          setSocketReconnecting(false);
         }
       },
       onOpen: async () => {
@@ -441,6 +451,12 @@ const TeacherMonitoringPage = () => {
               <div role="status" className="mt-2 inline-flex items-center gap-2 px-2.5 py-1 bg-warning/15 border border-warning/30 rounded text-xs text-warning font-medium">
                 <Icon name="RefreshCw" size={13} className="animate-spin shrink-0" />
                 <span>Live updates reconnecting…</span>
+              </div>
+            )}
+            {socketConnecting && !socketReconnecting && (
+              <div role="status" className="mt-2 inline-flex items-center gap-2 px-2.5 py-1 bg-primary/10 border border-primary/20 rounded text-xs text-primary font-medium">
+                <Icon name="Loader2" size={13} className="animate-spin shrink-0" />
+                <span>Connecting live updates…</span>
               </div>
             )}
           </div>

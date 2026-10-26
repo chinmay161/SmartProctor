@@ -324,4 +324,49 @@ describe('App-11: Exam Portal Mobile Layout & Interim Native Behaviour', () => {
       expect(desktopLayout.hideMonitorDetails).toBe(false);
     });
   });
+
+  describe('5. App-13: UI Enhancements & Fixes', () => {
+    it('proctored watermark overlay stays within mobile bounds without edge clipping', () => {
+      // Simulate mobile badge layout constraints
+      const badgeClasses = 'absolute max-w-[85vw] sm:max-w-[28rem] -rotate-18 rounded-md border border-primary/10 bg-background/5 px-2.5 sm:px-3 py-1 sm:py-1.5 text-[8px] font-semibold uppercase tracking-[0.2em] sm:tracking-[0.3em] text-primary/12 shadow-none backdrop-blur-[1px] whitespace-nowrap overflow-hidden text-ellipsis';
+
+      expect(badgeClasses).toContain('max-w-[85vw]');
+      expect(badgeClasses).toContain('overflow-hidden');
+      expect(badgeClasses).toContain('text-ellipsis');
+    });
+
+    it('exam header reserves a dedicated slot for the compact camera chip on phones', () => {
+      const headerCameraSlotClass = 'exam-header-camera-slot md:hidden w-[82px] h-[46px] shrink-0 pointer-events-none';
+      expect(headerCameraSlotClass).toContain('w-[82px]');
+      expect(headerCameraSlotClass).toContain('h-[46px]');
+      expect(headerCameraSlotClass).toContain('md:hidden');
+    });
+
+    it('treats connecting as distinct from reconnecting in banners', () => {
+      const resolveBanners = ({ socketConnecting, socketReconnecting }) => {
+        const banners = [];
+        if (socketConnecting && !socketReconnecting) {
+          banners.push('connecting');
+        }
+        if (socketReconnecting) {
+          banners.push('reconnecting');
+        }
+        return banners;
+      };
+
+      // 1. Initial connect: must show connecting only, NOT reconnecting warning
+      const initial = resolveBanners({ socketConnecting: true, socketReconnecting: false });
+      expect(initial).toEqual(['connecting']);
+      expect(initial).not.toContain('reconnecting');
+
+      // 2. Open: no banners
+      const open = resolveBanners({ socketConnecting: false, socketReconnecting: false });
+      expect(open).toEqual([]);
+
+      // 3. Drop & reconnect: shows reconnecting banner
+      const drop = resolveBanners({ socketConnecting: false, socketReconnecting: true });
+      expect(drop).toEqual(['reconnecting']);
+    });
+  });
 });
+

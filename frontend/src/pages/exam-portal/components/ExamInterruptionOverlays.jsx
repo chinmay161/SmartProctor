@@ -20,6 +20,7 @@ const ExamInterruptionOverlays = ({
   micBlocked,
   onRetryMic,
   authReconnecting,
+  socketConnecting,
   socketReconnecting,
   proctorWarning,
   onDismissProctorWarning,
@@ -116,6 +117,13 @@ const ExamInterruptionOverlays = ({
               Retry
             </Button>
           </div>
+        </div>
+      )}
+
+      {socketConnecting && !socketReconnecting && (
+        <div role="status" className="bg-primary/10 border-b border-primary/20 px-3 sm:px-4 py-1.5 text-xs text-primary flex items-center gap-2">
+          <Icon name="Loader2" size={14} className="animate-spin shrink-0" />
+          <span>Connecting to live proctoring service…</span>
         </div>
       )}
 

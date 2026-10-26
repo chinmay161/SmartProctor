@@ -167,6 +167,7 @@ const ExamPortal = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [proctorWarning, setProctorWarning] = useState('');
   const [authReconnecting, setAuthReconnecting] = useState(false);
+  const [socketConnecting, setSocketConnecting] = useState(false);
   const [socketReconnecting, setSocketReconnecting] = useState(false);
   const [violationLock, setViolationLock] = useState(null);
   const pendingSavesRef = useRef({});
@@ -247,6 +248,16 @@ const ExamPortal = () => {
       auth0Audience,
       fallbackPaths,
     });
+
+  useEffect(() => {
+    if (auth0Authenticated && getAccessTokenSilently) {
+      flightRecorder.setAccessTokenGetter(() =>
+        getAccessTokenSilently({
+          authorizationParams: { audience: auth0Audience },
+        })
+      );
+    }
+  }, [auth0Authenticated, getAccessTokenSilently, auth0Audience]);
 
   const requestSnapshot = async (activeSessionId, payload) => {
     if (!activeSessionId) return null;
@@ -491,6 +502,7 @@ const ExamPortal = () => {
       }
       (resume?.saved_answers || []).forEach((saved) => {
         if (saved?.question_id) restoredAnswers[String(saved.question_id)] = saved.answer;
+        if (saved?.source_question_id) restoredAnswers[String(saved.source_question_id)] = saved.answer;
       });
     } catch {
       restoredAnswers = {};
@@ -639,17 +651,26 @@ const ExamPortal = () => {
       getUrl: getWsUrl,
       onStateChange: (state) => {
         flightRecorder.record('socket', 'socket_state_change', { state });
-        if (state === 'reconnecting' || state === 'connecting') {
+        if (state === 'reconnecting') {
           flightRecorder.record('socket', 'socket_reconnect_attempt', { state });
         }
         if (!mounted) return;
         if (state === 'open') {
+          setSocketConnecting(false);
           setSocketReconnecting(false);
-        } else if (state === 'reconnecting' || state === 'connecting') {
+        } else if (state === 'connecting') {
+          setSocketConnecting(true);
+          setSocketReconnecting(false);
+        } else if (state === 'reconnecting') {
+          setSocketConnecting(false);
           setSocketReconnecting(true);
         } else if (state === 'failed') {
+          setSocketConnecting(false);
           setSocketReconnecting(false);
           setProctorWarning('Live proctoring connection could not be established for this exam session.');
+        } else {
+          setSocketConnecting(false);
+          setSocketReconnecting(false);
         }
       },
       onOpen: (event, rws) => {
@@ -1405,6 +1426,7 @@ const ExamPortal = () => {
         micBlocked={micBlocked}
         onRetryMic={() => void handleRetryMic()}
         authReconnecting={authReconnecting}
+        socketConnecting={socketConnecting}
         socketReconnecting={socketReconnecting}
         proctorWarning={proctorWarning}
         onDismissProctorWarning={() => setProctorWarning('')}

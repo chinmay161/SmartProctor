@@ -418,12 +418,12 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Single SecurityMonitor on phones: compact camera / status chip in top-right */
+  /* Single SecurityMonitor on phones: compact camera / status chip docked into reserved header slot */
   .exam-security-sidebar {
     position: fixed !important;
-    top: calc(52px + var(--safe-top, 0px)) !important;
+    top: calc(4px + var(--safe-top, 0px)) !important;
     right: max(8px, var(--safe-right, 0px)) !important;
-    z-index: 30 !important;
+    z-index: 50 !important;
     width: auto !important;
     background: transparent !important;
     border: none !important;
