@@ -374,3 +374,141 @@
   }
 }
 
+/* ==========================================================================
+   Exam Portal Mobile Ergonomics (App-11)
+   Below 640px (< sm) and coarse pointers
+   Hard rule: Desktop (>= 640px) with mouse pointer remains 100% unchanged.
+   ========================================================================== */
+
+@media (max-width: 639px) {
+  /* Prevent horizontal scroll at root */
+  .exam-portal-root {
+    overflow-x: clip !important;
+    min-height: 100dvh !important;
+  }
+
+  /* ExamHeader: safe-top clearance and compact layout */
+  .exam-header {
+    padding-top: max(0.5rem, calc(0.5rem + var(--safe-top, 0px))) !important;
+    padding-left: max(0.75rem, calc(0.5rem + var(--safe-left, 0px))) !important;
+    padding-right: max(0.75rem, calc(0.5rem + var(--safe-right, 0px))) !important;
+  }
+
+  /* ExamActionBar: sticky bottom bar on phones */
+  .exam-action-bar {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: 35 !important;
+    margin-top: 0 !important;
+    background: hsl(var(--card) / 0.96) !important;
+    backdrop-filter: blur(8px) !important;
+    border-top: 1px solid hsl(var(--border)) !important;
+    padding: 0.625rem 0.75rem !important;
+    padding-bottom: max(0.625rem, calc(var(--safe-bottom, 0px) + 0.375rem)) !important;
+    padding-left: max(0.75rem, calc(var(--safe-left, 0px) + 0.75rem)) !important;
+    padding-right: max(0.75rem, calc(var(--safe-right, 0px) + 0.75rem)) !important;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08) !important;
+  }
+
+  /* Question scroll panel clearance for sticky bottom action bar */
+  .exam-question-scroll-panel {
+    padding-bottom: calc(76px + var(--safe-bottom, 0px)) !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Single SecurityMonitor on phones: compact camera / status chip in top-right */
+  .exam-security-sidebar {
+    position: fixed !important;
+    top: calc(52px + var(--safe-top, 0px)) !important;
+    right: max(8px, var(--safe-right, 0px)) !important;
+    z-index: 30 !important;
+    width: auto !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    pointer-events: none;
+  }
+
+  .exam-security-monitor {
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    height: auto !important;
+  }
+
+  .exam-security-monitor-header,
+  .exam-security-details {
+    display: none !important;
+  }
+
+  .exam-security-camera-card {
+    margin: 0 !important;
+    padding: 2px !important;
+    width: 80px !important;
+    border-radius: 8px !important;
+    background: hsl(var(--card) / 0.94) !important;
+    backdrop-filter: blur(8px) !important;
+    border: 1.5px solid hsl(var(--primary) / 0.4) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25) !important;
+    pointer-events: auto;
+  }
+
+  .exam-security-camera-card > div:first-child {
+    display: none !important;
+  }
+
+  .exam-security-camera-card .aspect-video {
+    border-radius: 6px !important;
+    background: #000 !important;
+    height: 48px !important;
+  }
+
+  /* Palette drawer on phones */
+  .exam-palette-drawer {
+    max-width: 85vw !important;
+    padding-top: var(--safe-top, 0px) !important;
+    padding-bottom: var(--safe-bottom, 0px) !important;
+  }
+
+  /* MCQ option rows: full-width, min height 48px, text >= 14px */
+  .mcq-option-row {
+    min-height: 48px !important;
+    width: 100% !important;
+  }
+
+  .mcq-option-row,
+  .mcq-option-row span,
+  .mcq-option-row strong {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+
+  .exam-portal-root .text-xs:not(.dashboard-stat-label) {
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+  }
+}
+
+/* Touch & coarse pointer rules */
+@media (pointer: coarse) {
+  /* Hide desktop keyboard shortcuts hints */
+  .desktop-keyboard-shortcuts {
+    display: none !important;
+  }
+
+  /* Action buttons and question buttons are min 44x44px */
+  .exam-action-bar button,
+  .exam-header button,
+  .mcq-option-row {
+    min-height: 44px !important;
+  }
+
+  /* Prevent hover-only styling artifacts on touch screens */
+  .mcq-option-row:hover:not(:active) {
+    background-color: transparent;
+  }
+}
+
