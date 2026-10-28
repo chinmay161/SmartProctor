@@ -5,6 +5,8 @@ venv/
 .env
 .env.*
 !.env.example
+!.env.production.example
+!*.example
 *.db
 *.db-wal
 *.db-shm
@@ -36,3 +38,9 @@ backend/data/*
 
 graphify-out/
 .agents/
+
+# Android Keystores & Signing
+*.jks
+*.keystore
+keystore.properties
+*.properties.local

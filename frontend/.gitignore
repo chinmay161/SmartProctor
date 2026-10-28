@@ -25,3 +25,9 @@ dist-ssr
 
 # Self-hosted MediaPipe WASM (copied from node_modules by scripts/copy-mediapipe-wasm.mjs)
 public/mediapipe/
+
+# Keystores & Signing Credentials
+*.jks
+*.keystore
+keystore.properties
+*.properties.local
