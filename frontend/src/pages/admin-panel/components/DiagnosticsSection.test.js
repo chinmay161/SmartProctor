@@ -105,4 +105,57 @@ describe('DiagnosticsSection logic', () => {
     expect(backendMessage).toContain('Backend test error sent');
     expect(frontendMessage).toBe('Sentry is not configured in this build');
   });
+
+  describe('Storage Diagnostics logic', () => {
+    it('calls /admin/diagnostics/storage-test and handles successful result', async () => {
+      const mockResult = {
+        mode: 's3',
+        ok: true,
+        step_failed: null,
+        error_class: null,
+        message: 'Storage write, presign, fetch, and delete succeeded',
+      };
+      const apiRequestSpy = vi.spyOn(apiModule, 'apiRequest').mockResolvedValueOnce(mockResult);
+
+      let storageResult = null;
+      try {
+        storageResult = await apiModule.apiRequest('/admin/diagnostics/storage-test', 'POST', null, 'mock-token');
+      } catch (err) {
+        storageResult = { ok: false, message: err.message };
+      }
+
+      expect(apiRequestSpy).toHaveBeenCalledWith('/admin/diagnostics/storage-test', 'POST', null, 'mock-token');
+      expect(storageResult.ok).toBe(true);
+      expect(storageResult.mode).toBe('s3');
+    });
+
+    it('handles storage_not_configured result without throwing', async () => {
+      const mockResult = {
+        mode: 'local',
+        ok: false,
+        reason: 'storage_not_configured',
+      };
+      vi.spyOn(apiModule, 'apiRequest').mockResolvedValueOnce(mockResult);
+
+      const storageResult = await apiModule.apiRequest('/admin/diagnostics/storage-test', 'POST', null, null);
+      expect(storageResult.ok).toBe(false);
+      expect(storageResult.reason).toBe('storage_not_configured');
+    });
+
+    it('handles storage upload failure result with redacted error', async () => {
+      const mockResult = {
+        mode: 's3',
+        ok: false,
+        step_failed: 'write',
+        error_class: 'ClientError',
+        message: 'S3 PutObject failed: [REDACTED]',
+      };
+      vi.spyOn(apiModule, 'apiRequest').mockResolvedValueOnce(mockResult);
+
+      const storageResult = await apiModule.apiRequest('/admin/diagnostics/storage-test', 'POST', null, null);
+      expect(storageResult.ok).toBe(false);
+      expect(storageResult.step_failed).toBe('write');
+      expect(storageResult.message).toContain('[REDACTED]');
+    });
+  });
 });
