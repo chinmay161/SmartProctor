@@ -4,6 +4,7 @@ import { useAuth0 } from '@auth0/auth0-react';
 import { authAwareCall } from '../../services/authAwareCall';
 import Button from '../../components/ui/Button';
 import AppFooter from '../../components/ui/AppFooter';
+import { formatStudentName } from '../../utils/formatUser';
 
 const renderValue = (value) => {
   if (value == null) return 'No answer submitted';
@@ -162,7 +163,7 @@ const TeacherAttemptReviewPage = () => {
               Attempt Review
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {review ? `${review.exam_title} - ${review.student_id}` : 'Review and grade submitted responses'}
+              {review ? `${review.exam_title} - ${formatStudentName(review)}` : 'Review and grade submitted responses'}
             </p>
           </div>
           <Button variant="outline" iconName="ArrowLeft" onClick={() => navigate(`/teacher-dashboard/completed/${encodeURIComponent(examId)}/analytics`)}>

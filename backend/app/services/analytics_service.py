@@ -5,6 +5,7 @@ from ..models.exam_attempt import ExamAttempt
 from ..models.violation import Violation
 from ..models.user_profile import UserProfile
 from .evidence_storage import resolve_evidence_field
+from ..auth.user_service import resolve_user_display
 import io
 import csv
 
@@ -58,7 +59,7 @@ def get_exam_analytics(db: Session, exam_id: str):
     for s in latest_sessions:
         uid = s.student_id
         user = db.query(UserProfile).filter_by(auth0_sub=uid).first()
-        name = _display_name_for_profile(user, uid)
+        name = resolve_user_display(uid, db=db).get("name") or _display_name_for_profile(user, uid)
         
         attempt = db.query(ExamAttempt).filter_by(id=s.attempt_id).first() if s.attempt_id else None
         
@@ -220,7 +221,7 @@ def get_exam_evidence(db: Session, exam_id: str):
     for s in sessions:
         uid = s.student_id
         user = db.query(UserProfile).filter_by(auth0_sub=uid).first()
-        name = _display_name_for_profile(user, uid)
+        name = resolve_user_display(uid, db=db).get("name") or _display_name_for_profile(user, uid)
         
         violations = db.query(Violation).filter_by(session_id=s.id).all()
         student_violations = []

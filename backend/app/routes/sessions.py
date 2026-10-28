@@ -163,7 +163,8 @@ def end_exam_session(session_id: str, user=Depends(require_role("student"))):
 
         if session.attempt_id:
             attempt = require_attempt_owner(db, session.attempt_id, user["sub"])
-            submit_attempt(db, attempt)
+            if attempt.status == AttemptStatus.IN_PROGRESS:
+                submit_attempt(db, attempt)
 
         session.status = SessionStatus.ENDED
         session.ended_at = session.ended_at or session.started_at

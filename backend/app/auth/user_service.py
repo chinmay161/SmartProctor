@@ -230,3 +230,66 @@ def update_user_blocked(user_id: str, blocked: bool):
     )
     r.raise_for_status()
     return {"user_id": user_id, "blocked": bool(blocked), "status": "suspended" if blocked else "active"}
+
+
+import re
+
+_user_display_cache: dict[str, dict] = {}
+
+
+def resolve_user_display(user_id: str, db=None) -> dict[str, str]:
+    """Resolve human-readable display name and email for a given user id.
+
+    Prevents raw OAuth strings like 'google-oauth2|111098044937374607894' from leaking into UI.
+    """
+    if not user_id:
+        return {"name": "Student", "email": ""}
+
+    if user_id in _user_display_cache:
+        return _user_display_cache[user_id]
+
+    name = None
+    email = None
+
+    # Check local database profile first
+    if db is not None:
+        try:
+            profile = db.query(UserProfile).filter_by(auth0_sub=user_id).first()
+            if profile and profile.email:
+                email = profile.email
+        except Exception:
+            pass
+
+    # Query Auth0 Management API if configured
+    try:
+        u = get_user_detail(user_id)
+        if u:
+            name = u.get("name") or u.get("nickname")
+            if not email:
+                email = u.get("email")
+    except Exception:
+        pass
+
+    # If explicit name is not set, derive from email if available
+    if not name and email and "@" in email:
+        raw_user = email.split("@")[0]
+        cleaned = re.sub(r"^\d{4}\.", "", raw_user).replace(".", " ")
+        words = [w.capitalize() for w in re.split(r"[\s_-]+", cleaned) if w]
+        if words:
+            name = " ".join(words)
+        else:
+            name = email
+
+    # If still not set, clean the OAuth provider ID
+    if not name:
+        if "|" in user_id:
+            provider, raw = user_id.split("|", 1)
+            prov_name = "Google" if "google" in provider else ("GitHub" if "github" in provider else "Student")
+            short_id = raw[-4:] if len(raw) >= 4 else raw
+            name = f"{prov_name} Student ({short_id})"
+        else:
+            name = user_id
+
+    result = {"name": name, "email": email or ""}
+    _user_display_cache[user_id] = result
+    return result

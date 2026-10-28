@@ -7,6 +7,7 @@ import { authAwareCall } from '../../services/authAwareCall';
 import { formatViolationType, getViolationIcon } from '../../utils/violationSeverity';
 import { ReconnectingSocket } from '../../services/reconnectingSocket';
 import { useToast } from '../../context/ToastContext';
+import { formatStudentName } from '../../utils/formatUser';
 
 const getBackendOrigin = () => {
   const apiBase = import.meta.env.VITE_API_BASE || import.meta.env.VITE_API_URL;
@@ -61,11 +62,15 @@ const TeacherMonitoringPage = () => {
   const [, setTick] = useState(0);
 
   const showToast = (message, type = 'success') => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+    if (toast && typeof toast[type] === 'function') {
+      toast[type](message);
+    } else if (toast?.info) {
+      toast.info(message);
+    }
+
+
+
+
   };
 
   useEffect(() => {
@@ -94,10 +99,12 @@ const TeacherMonitoringPage = () => {
           const next = { ...prev };
           (data || []).forEach(s => {
               if (!next[s.id]) {
-                  next[s.id] = { violations: s.violation_count || 0, lastViolation: 'None', lastSeen: Date.now(), trustScore: s.integrity_score ?? s.trust_score ?? 100 };
+                  next[s.id] = { violations: s.violation_count || 0, lastViolation: 'None', lastSeen: Date.now(), trustScore: s.integrity_score ?? s.trust_score ?? 100, studentName: s.student_name, studentEmail: s.student_email, studentId: s.student_id };
               } else {
                   next[s.id].trustScore = s.integrity_score ?? s.trust_score ?? next[s.id].trustScore;
                   next[s.id].violations = s.violation_count ?? next[s.id].violations;
+                  if (s.student_name) next[s.id].studentName = s.student_name;
+                  if (s.student_email) next[s.id].studentEmail = s.student_email;
               }
           });
           return next;
@@ -250,7 +257,7 @@ const TeacherMonitoringPage = () => {
                 lastSeen: Date.now()
               }
             }));
-            showToast(`New violation from ${data.student_id || sid}`, 'warning');
+            showToast(`New violation from ${formatStudentName(studentStates[sid] || data)}`, 'warning');
           }
         } catch (err) {
           console.error('WS MSG Parse Error', err);
@@ -487,6 +494,7 @@ const TeacherMonitoringPage = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {sessions.map(session => {
               const state = studentStates[session.id] || { violations: 0, lastViolation: 'None', lastSeen: 0 };
+              const displayName = formatStudentName(session);
               
               // Backend strictly determines this now to prevent false offline states
               let isActive = state.serverStatus === 'live';
@@ -505,10 +513,10 @@ const TeacherMonitoringPage = () => {
                   
                   <div className="flex justify-between items-start mb-4">
                     <div>
-                      <h3 className="font-semibold text-foreground text-lg truncate pr-2" title={session.student_id}>
-                        {session.student_id}
+                      <h3 className="font-semibold text-foreground text-lg truncate pr-2" title={displayName}>
+                        {displayName}
                       </h3>
-                      <p className="text-xs text-muted-foreground font-mono mt-1">ID: {session.id.substring(0, 8)}...</p>
+                      <p className="text-xs text-muted-foreground truncate font-mono mt-0.5" title={session.student_email || session.id}>{session.student_email || `ID: ${session.id.substring(0, 8)}...`}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className={`px-2 py-0.5 rounded-full text-xs font-bold ${state.trustScore > 80 ? 'bg-success/20 text-success' : state.trustScore > 50 ? 'bg-warning/20 text-warning' : 'bg-destructive/20 text-destructive'}`}>
@@ -597,7 +605,7 @@ const TeacherMonitoringPage = () => {
 
       {/* Floating Toasts */}
       <div className="fixed bottom-6 right-6 flex flex-col gap-3 z-50 pointer-events-none">
-        {toasts.map(toast => (
+        {false && [].map(toast => (
           <div 
             key={toast.id} 
             className={`pointer-events-auto px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 animate-in slide-in-from-right-8 fade-in 

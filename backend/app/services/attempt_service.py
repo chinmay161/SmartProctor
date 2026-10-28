@@ -14,6 +14,7 @@ from ..models.exam_question import ExamQuestion
 from ..models.question import Question
 from ..models.violation import Violation
 from ..schemas.attempt import AttemptGradePatchRequest
+from ..auth.user_service import resolve_user_display
 
 
 def utcnow() -> datetime:
@@ -594,7 +595,7 @@ def save_answer(db: Session, attempt: ExamAttempt, question_id: str, answer: Any
 
     questions, question_lookup = _question_lookup_for_attempt(db, attempt)
     question = question_lookup.get(str(question_id)) if questions else None
-    target_question_id = str(question.id) if question else str(question_id)
+target_question_id = str(question.id) if question else str(question_id)
     target_marks = int(question.marks or 1) if question else 1
 
     existing = (
@@ -690,6 +691,8 @@ def _build_attempt_review_payload(
         "exam_title": exam.title,
         "attempt_id": attempt.id,
         "student_id": attempt.student_id,
+        "student_name": resolve_user_display(attempt.student_id, db=db).get("name") or attempt.student_id,
+        "student_email": resolve_user_display(attempt.student_id, db=db).get("email") or "",
         "status": attempt.status,
         "score": attempt.score,
         "auto_score_total": attempt.auto_score_total,

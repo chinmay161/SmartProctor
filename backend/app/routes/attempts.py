@@ -23,6 +23,7 @@ from ..services.attempt_service import (
     build_attempt_review_payload_for_student,
     check_result_visibility,
     evaluate_attempt,
+    _question_lookup_for_attempt,
     resume_attempt,
     save_answer,
     start_exam_attempt,
@@ -104,9 +105,8 @@ def resume_exam_attempt(exam_id: str, user=Depends(require_role("student"))):
     db = SessionLocal()
     try:
         attempt, answers, remaining = resume_attempt(db, exam_id, user["sub"])
-        questions, _ = _question_lookup_for_attempt(db, attempt)
+questions, _ = _question_lookup_for_attempt(db, attempt)
         eq_map = {str(q.id): str(q.source_question_id) for q in questions if q.source_question_id}
-
         serialized_answers = []
         for answer in answers:
             value = answer.answer
@@ -117,7 +117,7 @@ def resume_exam_attempt(exam_id: str, user=Depends(require_role("student"))):
             frontend_qid = eq_map.get(str(answer.question_id), str(answer.question_id))
             serialized_answers.append(
                 {
-                    "question_id": frontend_qid,
+"question_id": frontend_qid,
                     "source_question_id": frontend_qid,
                     "answer": value,
                     "last_saved_at": answer.last_saved_at,

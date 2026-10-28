@@ -3,6 +3,7 @@ from ..database import SessionLocal
 from ..auth.roles import require_role
 from ..permissions.proctor_permissions import require_proctor
 from ..models.exam_session import ExamSession
+from ..auth.user_service import resolve_user_display
 
 router = APIRouter(prefix="/proctoring", tags=["Proctoring"])
 
@@ -49,10 +50,13 @@ def monitor_sessions(
         from ..models.exam_attempt import ExamAttempt
         result = []
         for s in sessions:
+            user_info = resolve_user_display(s.student_id, db=db)
             base = {
                 "id": s.id,
                 "exam_id": s.exam_id,
                 "student_id": s.student_id,
+                "student_name": user_info.get("name") or "Student",
+                "student_email": user_info.get("email") or "",
                 "status": s.status,
                 "attempt_id": s.attempt_id,
                 "trust_score": 100,
