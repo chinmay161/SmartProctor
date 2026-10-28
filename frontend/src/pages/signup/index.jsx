@@ -94,8 +94,8 @@ const Signup = () => {
       <ThemeToggle />
 
       <div
+        className="min-h-dvh"
         style={{
-          minHeight: '100vh',
           background: 'var(--auth-bg)',
           display: 'flex',
           transition: 'background 0.3s, color 0.3s',
@@ -106,20 +106,20 @@ const Signup = () => {
 
         {/* Right form panel */}
         <div
+          className="auth-scroll-panel min-h-dvh"
           style={{
             flex: 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: 'clamp(1.5rem, 4vw, 3rem)',
-            minHeight: '100vh',
             overflowY: 'auto',
           }}
         >
           <div style={{ width: '100%', maxWidth: '500px', paddingTop: '1rem', paddingBottom: '1rem' }}>
             {/* Mobile-only logo */}
             <div
-              className="lg:hidden auth-fade-up"
+              className="lg:hidden auth-fade-up auth-mobile-logo"
               style={{
                 display: 'flex',
                 alignItems: 'center',

@@ -1,12 +1,44 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+class StorageNotConfiguredError(Exception):
+    """Raised when evidence storage is not configured or disabled."""
+    pass
+
+
+class StorageEvidenceError(Exception):
+    """Raised by storage when an evidence operation fails with a specific reason code."""
+    def __init__(self, reason: str, message: str = ""):
+        self.reason = reason
+        self.message = message or reason
+        super().__init__(self.message)
+
+
+def redact_sensitive_info(text: str) -> str:
+    """Redacts credentials, secret keys, tokens, and signed URL query parameters."""
+    if not text:
+        return ""
+    s = str(text)
+    # Redact URL credentials: http(s)://user:pass@host
+    s = re.sub(r'(https?://)[^/@\s]+:[^/@\s]+@', r'\1[REDACTED_CREDS]@', s)
+    # Redact signed query params in URLs: e.g. ?X-Amz-Signature=... or ?token=...
+    s = re.sub(r'(https?://[^\s\?]+)\?[^\s]+', r'\1?[SIGNED_QUERY_REDACTED]', s)
+    # Redact key/secret/token patterns in text
+    s = re.sub(
+        r'(?i)(secret[_-]?access[_-]?key|access[_-]?key[_-]?id|token|password|credential|sig|signature)\s*[:=]\s*["\']?[^"\'\s,;]+["\']?',
+        r'\1=[REDACTED]',
+        s,
+    )
+    return s
 
 
 class EvidenceStorage:
@@ -57,36 +89,41 @@ class S3Storage(EvidenceStorage):
         import boto3
         from botocore.config import Config
 
-        self.bucket = os.getenv("S3_BUCKET", "")
+        self.bucket = os.getenv("S3_BUCKET", "").strip()
         self.ttl_seconds = int(os.getenv("EVIDENCE_URL_TTL_SECONDS", "3600"))
 
+        addressing_style = os.getenv("S3_ADDRESSING_STYLE", "path").strip().lower()
         client_config = Config(
             connect_timeout=5,
             read_timeout=10,
             retries={"max_attempts": 1},
+            s3={"addressing_style": addressing_style},
+            signature_version="s3v4",
         )
 
         client_kwargs = {
             "service_name": "s3",
-            "region_name": os.getenv("S3_REGION", "auto"),
+            "region_name": os.getenv("S3_REGION", "auto").strip() or "auto",
             "config": client_config,
         }
 
         endpoint_url = os.getenv("S3_ENDPOINT_URL")
-        if endpoint_url:
-            client_kwargs["endpoint_url"] = endpoint_url
+        if endpoint_url and endpoint_url.strip():
+            client_kwargs["endpoint_url"] = endpoint_url.strip()
 
         access_key = os.getenv("S3_ACCESS_KEY_ID")
-        if access_key:
-            client_kwargs["aws_access_key_id"] = access_key
+        if access_key and access_key.strip():
+            client_kwargs["aws_access_key_id"] = access_key.strip()
 
         secret_key = os.getenv("S3_SECRET_ACCESS_KEY")
-        if secret_key:
-            client_kwargs["aws_secret_access_key"] = secret_key
+        if secret_key and secret_key.strip():
+            client_kwargs["aws_secret_access_key"] = secret_key.strip()
 
         self.s3 = boto3.client(**client_kwargs)
 
     def save(self, data: bytes, key: str) -> str:
+        if not self.bucket:
+            raise StorageNotConfiguredError("S3 storage is not configured: S3_BUCKET is empty")
         clean_key = key.lstrip("/\\")
         self.s3.put_object(
             Bucket=self.bucket,
@@ -104,6 +141,8 @@ class S3Storage(EvidenceStorage):
         # Legacy values starting with "/evidence/" pass through unchanged
         if stored_value.startswith("/evidence/"):
             return stored_value
+        if not self.bucket:
+            raise StorageNotConfiguredError("S3 storage is not configured: S3_BUCKET is empty")
 
         clean_key = stored_value.lstrip("/\\")
         return self.s3.generate_presigned_url(
@@ -114,6 +153,8 @@ class S3Storage(EvidenceStorage):
 
     def delete(self, key: str) -> None:
         if not key or key.startswith("/evidence/"):
+            return
+        if not self.bucket:
             return
         clean_key = key.lstrip("/\\")
         try:
@@ -133,6 +174,8 @@ def get_evidence_storage() -> EvidenceStorage:
     backend_type = os.getenv("EVIDENCE_STORAGE", "local").strip().lower()
     if backend_type == "s3":
         _storage_instance = S3Storage()
+    elif backend_type in ("none", "disabled", "unconfigured"):
+        raise StorageNotConfiguredError(f"Evidence storage is not configured (EVIDENCE_STORAGE={backend_type})")
     else:
         _storage_instance = LocalStorage()
     return _storage_instance

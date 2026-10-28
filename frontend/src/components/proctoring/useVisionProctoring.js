@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { withSystemPrompt } from '../../utils/proctoringSuppression';
+import { isNativeApp } from '../../utils/platform';
 
 // 'client' (default): MediaPipe in the browser. 'server': legacy snapshot upload flow.
 export const INFERENCE_MODE =
@@ -63,7 +64,13 @@ export async function probeCameraPermission() {
  * Owns one vision controller (camera + MediaPipe + rules). The heavy module is
  * fetched with a dynamic import the first time it's needed.
  */
-export function useVisionProctoring({ detectObjects = true, micRequired = false, onViolation, onShadowViolation } = {}) {
+export function useVisionProctoring({
+  detectObjects = true,
+  micRequired = false,
+  options = {},
+  onViolation,
+  onShadowViolation,
+} = {}) {
   const videoRef = useRef(null);
   const controllerRef = useRef(null);
   const loadingRef = useRef(null);
@@ -73,6 +80,12 @@ export function useVisionProctoring({ detectObjects = true, micRequired = false,
   const [stream, setStream] = useState(null);
   // { state: 'ok' | 'lost', permission: 'granted' | 'denied' | 'prompt' | null, kind }
   const [cameraStatus, setCameraStatus] = useState({ state: 'ok', permission: null, kind: null });
+
+  const defaultFaceInWorker = isNativeApp() || import.meta.env.VITE_FACE_WORKER === 'true';
+  const resolvedOptions = useMemo(() => ({
+    faceInWorker: defaultFaceInWorker,
+    ...options,
+  }), [defaultFaceInWorker, options]);
 
   useEffect(() => {
     onViolationRef.current = onViolation;
@@ -91,6 +104,7 @@ export function useVisionProctoring({ detectObjects = true, micRequired = false,
           video: videoRef.current,
           detectObjects,
           micRequired,
+          options: resolvedOptions,
           onViolation: (v) => onViolationRef.current?.(v),
           onShadowViolation: (v) => onShadowRef.current?.(v),
           onStateChange: setPhase,
@@ -105,7 +119,7 @@ export function useVisionProctoring({ detectObjects = true, micRequired = false,
       });
     }
     return loadingRef.current;
-  }, [detectObjects, micRequired]);
+  }, [detectObjects, micRequired, resolvedOptions]);
 
   const requestCamera = useCallback(async () => {
     let controller;

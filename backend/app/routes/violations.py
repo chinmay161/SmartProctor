@@ -115,7 +115,37 @@ def list_violations(session_id: str, user=Depends(get_current_user)):
         )
         storage = get_evidence_storage()
         results = []
+        import logging
+        from ..services.evidence_storage import redact_sensitive_info
+
         for v in violations:
+            ev_files = None
+            ev_status = getattr(v, "evidence_status", None)
+            if v.evidence_files:
+                try:
+                    ev_files = resolve_evidence_field(v.evidence_files, storage)
+                    if ev_files:
+                        ev_status = ev_status or "captured"
+                    else:
+                        raise RuntimeError("Empty resolved evidence URL")
+                except Exception as e:
+                    ev_status = "url_failed"
+                    ev_files = None
+                    err_class = type(e).__name__
+                    err_msg = redact_sensitive_info(str(e))
+                    logging.getLogger(__name__).error("Evidence failure [url_failed]: %s: %s", err_class, err_msg)
+                    record_event(
+                        db,
+                        session_id=session.id,
+                        exam_id=session.exam_id,
+                        student_id=session.student_id,
+                        category="violation",
+                        name="evidence_failed",
+                        data={"reason": "url_failed", "error_class": err_class, "message": err_msg},
+                    )
+            elif not ev_status:
+                ev_status = "no_image_in_request"
+
             results.append({
                 "id": str(v.id),
                 "session_id": v.session_id,
@@ -130,7 +160,8 @@ def list_violations(session_id: str, user=Depends(get_current_user)):
                 "reason": v.reason,
                 "duration_ms": v.duration_ms,
                 "metadata": v.metadata_,
-                "evidence_files": resolve_evidence_field(v.evidence_files, storage),
+                "evidence_files": ev_files,
+                "evidence_status": ev_status,
                 "dispute_status": v.dispute_status,
                 "dispute_reason": v.dispute_reason,
                 "integrity_deduction": v.integrity_deduction,

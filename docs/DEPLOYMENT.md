@@ -40,11 +40,45 @@ Render free tier instances have ephemeral disks that are wiped on every sleep or
    - `S3_SECRET_ACCESS_KEY`: `<R2_SECRET_ACCESS_KEY>`
    - `S3_REGION`: `auto`
 
-### Option B: AWS S3 / Supabase Storage
-- Ensure bucket permissions allow PutObject and GetObject.
-- Set `S3_ENDPOINT_URL` (for Supabase: `https://<project-ref>.supabase.co/storage/v1/s3`), `S3_BUCKET`, `S3_REGION`, etc.
+### Option B: Supabase Storage (S3-Compatible Protocol)
+Supabase provides an S3-compatible API for storage buckets.
 
-Evidence images are private and served via short-lived signed URLs (`EVIDENCE_URL_TTL_SECONDS=3600`).
+#### Where to Find Configuration in the Supabase Dashboard:
+1. In the Supabase Dashboard, select your project and click **Storage** in the left sidebar.
+2. Select **S3 Connection** (or **Settings** → **S3 Connection**).
+3. Under **S3 Access Keys**, click **Generate new key** (or copy existing credentials):
+   - **Endpoint URL**: displayed as `https://<project-ref>.supabase.co/storage/v1/s3` -> Set `S3_ENDPOINT_URL`.
+   - **Region**: displayed in the S3 connection details (e.g. `us-east-1`, `eu-west-1`, `ap-southeast-1`) -> Set `S3_REGION`.
+   - **Access Key ID**: copy from the generated key modal -> Set `S3_ACCESS_KEY_ID`.
+   - **Secret Access Key**: copy from the generated key modal -> Set `S3_SECRET_ACCESS_KEY`.
+4. Under **Buckets**, create a new bucket (e.g. `evidence` or `smartproctor-evidence`):
+   - Ensure the bucket name matches `S3_BUCKET`.
+   - Buckets can be Private (recommended); SmartProctor generates time-limited signed URLs (`EVIDENCE_URL_TTL_SECONDS=3600`).
+5. Configure environment variables in Render:
+   ```env
+   EVIDENCE_STORAGE=s3
+   S3_ENDPOINT_URL=https://<project-ref>.supabase.co/storage/v1/s3
+   S3_BUCKET=smartproctor-evidence
+   S3_ACCESS_KEY_ID=<YOUR_S3_ACCESS_KEY_ID>
+   S3_SECRET_ACCESS_KEY=<YOUR_S3_SECRET_ACCESS_KEY>
+   S3_REGION=us-east-1
+   S3_ADDRESSING_STYLE=path
+   EVIDENCE_URL_TTL_SECONDS=3600
+   ```
+
+#### Checklist for Likely Mistakes:
+- [ ] **Missing `/storage/v1/s3` suffix**: The endpoint URL MUST end in `/storage/v1/s3` (e.g. `https://xyzproject.supabase.co/storage/v1/s3`). Omitting this suffix causes 404 or connection errors.
+- [ ] **Addressing style**: Must use `S3_ADDRESSING_STYLE=path` (the default). Virtual-host addressing tries to connect to `https://<bucket>.xyzproject.supabase.co/storage/v1/s3`, which fails DNS resolution.
+- [ ] **Wrong region**: Supabase S3 connection specifies an explicit region (e.g. `us-east-1` or project-specific region). Do not use `auto` if your Supabase project requires its assigned region.
+- [ ] **Bucket name case sensitivity**: Supabase bucket names are strictly case-sensitive. `Evidence` != `evidence`.
+- [ ] **S3 access key permissions**: The S3 credentials must have write/read/delete permissions on the target bucket.
+- [ ] **Storage diagnostics**: Use the admin panel **Diagnostics** tab and click **Test storage** to verify write, presign, fetch, and delete against your Supabase bucket.
+
+### Option C: AWS S3
+- Set `EVIDENCE_STORAGE=s3`
+- Ensure IAM user/role permissions allow `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject`.
+- Set `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
+- Set `S3_ADDRESSING_STYLE=auto` (or `virtual`).
 
 ---
 

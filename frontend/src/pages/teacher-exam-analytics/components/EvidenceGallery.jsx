@@ -37,6 +37,15 @@ const normalizeEvidencePaths = (rawValue) => {
   return [String(rawValue)];
 };
 
+const EVIDENCE_STATUS_LABELS = {
+  no_image_in_request: 'No image sent',
+  invalid_image: 'Invalid image',
+  too_large: 'Image too large',
+  storage_not_configured: 'Storage not configured',
+  upload_failed: 'Upload failed',
+  url_failed: 'Link failed',
+};
+
 const REVIEW_BADGES = {
   CONFIRMED: { label: 'Confirmed', bg: 'bg-destructive/15 text-destructive border-destructive/30' },
   FALSE_POSITIVE: { label: 'False Alarm', bg: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
@@ -197,7 +206,10 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
                           onError={(e) => e.target.style.display = 'none'}
                         />
                       ) : (
-                        <div className="text-xs text-muted-foreground">No snapshot</div>
+                        <div className="flex flex-col items-center justify-center text-xs text-muted-foreground p-2 text-center gap-1">
+                          <Icon name="CameraOff" size={20} className="opacity-50" />
+                          <span>{EVIDENCE_STATUS_LABELS[v.evidence_status] || 'No snapshot captured'}</span>
+                        </div>
                       )}
                       <div className="absolute top-2 right-2 flex gap-1">
                          <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded shadow-sm ${v.severity === 'severe' ? 'bg-destructive/90 text-white' : v.severity === 'major' ? 'bg-warning/90 text-white' : 'bg-primary/90 text-white'}`}>

@@ -4,6 +4,7 @@ import { extractRolesFromAuth0User } from '../utils/roleUtils';
 import { apiRequest } from '../services/api';
 import { setAccessTokenProvider, setLoginRedirectHandler } from '../services/httpClient';
 import { setSentryRole } from '../utils/sentryScrubber';
+import { isNativeApp, openUrl, getNativeCallbackUrl } from '../utils/platform';
 
 // Keys written by the removed custom-session token storage. Exact names only:
 // other code (e.g. ThemeContext's 'smartproctor-theme') shares the prefix.
@@ -48,6 +49,7 @@ export const SessionProvider = ({ children }) => {
     logout: auth0Logout,
   } = useAuth0();
   const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+  const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN;
 
   const [profile, setProfile] = useState(null);
   const [roles, setRoles] = useState([]);
@@ -71,6 +73,7 @@ export const SessionProvider = ({ children }) => {
     );
     setLoginRedirectHandler((options = {}) =>
       loginWithRedirect({
+        ...(isNativeApp() ? { openUrl } : {}),
         ...options,
         authorizationParams: { audience: auth0Audience, ...options.authorizationParams },
       })
@@ -151,8 +154,16 @@ export const SessionProvider = ({ children }) => {
   ]);
 
   const logout = useCallback(() => {
-    auth0Logout({ logoutParams: { returnTo: window.location.origin } });
-  }, [auth0Logout]);
+    if (isNativeApp()) {
+      const nativeReturnTo = getNativeCallbackUrl(auth0Domain);
+      auth0Logout({
+        openUrl,
+        logoutParams: { returnTo: nativeReturnTo },
+      });
+    } else {
+      auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+    }
+  }, [auth0Logout, auth0Domain]);
 
   const isResolvingRoles = isAuthenticated && !hasResolvedRoles;
 

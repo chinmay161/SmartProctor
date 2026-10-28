@@ -20,8 +20,8 @@ const Login = () => {
       <ThemeToggle />
 
       <div
+        className="min-h-dvh"
         style={{
-          minHeight: '100vh',
           background: 'var(--auth-bg)',
           display: 'flex',
           transition: 'background 0.3s, color 0.3s',
@@ -32,19 +32,19 @@ const Login = () => {
 
         {/* Right form panel */}
         <div
+          className="auth-scroll-panel min-h-dvh"
           style={{
             flex: 1,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: 'clamp(1.5rem, 4vw, 3rem)',
-            minHeight: '100vh',
           }}
         >
           <div style={{ width: '100%', maxWidth: '460px' }}>
             {/* Mobile-only logo */}
             <div
-              className="lg:hidden auth-fade-up"
+              className="lg:hidden auth-fade-up auth-mobile-logo"
               style={{
                 display: 'flex',
                 alignItems: 'center',

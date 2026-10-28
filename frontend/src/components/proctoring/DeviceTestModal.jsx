@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import PreExamGate from './PreExamGate';
 import { HIDDEN_VIDEO_STYLE, INFERENCE_MODE, useVisionProctoring } from './useVisionProctoring';
 import ReportProblemModal from '../feedback/ReportProblemModal';
+import flightRecorder from '../../telemetry/flightRecorder';
 
 /**
  * Dashboard "Test my device": the same camera / model / fps / calibration check the
@@ -9,6 +11,19 @@ import ReportProblemModal from '../feedback/ReportProblemModal';
  * WASM runtime and models before exam day.
  */
 const DeviceTestModal = ({ onClose }) => {
+  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
+  const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+
+  useEffect(() => {
+    if (isAuthenticated && getAccessTokenSilently) {
+      flightRecorder.setAccessTokenGetter(() =>
+        getAccessTokenSilently({
+          authorizationParams: { audience: auth0Audience },
+        })
+      );
+    }
+  }, [isAuthenticated, getAccessTokenSilently, auth0Audience]);
+
   const vision = useVisionProctoring({ detectObjects: true, micRequired: true });
   const [showReportProblem, setShowReportProblem] = useState(false);
 

@@ -17,6 +17,10 @@ const mediapipeAudioVersion = JSON.parse(
   readFileSync(new URL('./node_modules/@mediapipe/tasks-audio/package.json', import.meta.url), 'utf8')
 ).version
 
+const pkgVersion = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8')
+).version || '1.0.0'
+
 const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN?.trim()
 const sentryOrg = process.env.SENTRY_ORG?.trim()
 const sentryProject = process.env.SENTRY_PROJECT?.trim()
@@ -68,6 +72,8 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_MEDIAPIPE_VERSION': JSON.stringify(mediapipeVersion),
     'import.meta.env.VITE_MEDIAPIPE_AUDIO_VERSION': JSON.stringify(mediapipeAudioVersion),
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkgVersion),
+    __APP_VERSION__: JSON.stringify(pkgVersion),
   },
 })
 

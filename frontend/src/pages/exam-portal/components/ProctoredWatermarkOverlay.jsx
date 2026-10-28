@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
 const WATERMARK_POSITIONS = [
-  'top-[6%] left-[4%]',
-  'top-[6%] right-[4%]',
-  'top-[48%] left-[2%]',
-  'top-[48%] right-[2%]',
-  'bottom-[6%] left-[4%]',
-  'bottom-[6%] right-[4%]',
+  'top-[6%] left-[4%] sm:left-[6%]',
+  'top-[6%] right-[4%] sm:right-[6%] hidden sm:block',
+  'top-[48%] left-1/2 -translate-x-1/2 sm:translate-x-0 sm:left-[4%]',
+  'top-[48%] right-[4%] hidden sm:block',
+  'bottom-[6%] left-[4%] sm:left-[6%]',
+  'bottom-[6%] right-[4%] sm:right-[6%] hidden sm:block',
 ];
 
 const ProctoredWatermarkOverlay = ({
@@ -42,7 +42,7 @@ const ProctoredWatermarkOverlay = ({
       {WATERMARK_POSITIONS.map((position, index) => (
         <div
           key={`${position}-${index}`}
-          className={`absolute ${position} max-w-[28rem] -rotate-18 rounded-md border border-primary/10 bg-background/5 px-3 py-1.5 text-[8px] font-semibold uppercase tracking-[0.3em] text-primary/12 shadow-none backdrop-blur-[1px] whitespace-nowrap`}
+          className={`absolute ${position} max-w-[85vw] sm:max-w-[28rem] -rotate-18 rounded-md border border-primary/10 bg-background/5 px-2.5 sm:px-3 py-1 sm:py-1.5 text-[8px] font-semibold uppercase tracking-[0.2em] sm:tracking-[0.3em] text-primary/12 shadow-none backdrop-blur-[1px] whitespace-nowrap overflow-hidden text-ellipsis`}
         >
           {watermarkText}
         </div>

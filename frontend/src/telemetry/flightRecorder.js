@@ -8,6 +8,7 @@
  * Must NEVER throw and never block the UI.
  * Recording must not create violations or trigger fullscreen or blur handling.
  */
+import { getPlatformSessionMetadata } from './platformInfo';
 
 const BUFFER_CAP = 500;
 const FLUSH_INTERVAL_MS = 10_000;
@@ -167,8 +168,24 @@ class FlightRecorder {
         this.traceId = generateTraceId();
       }
 
+      const lowerName = String(name).toLowerCase();
+      const isSessionStart = lowerName === 'exam_start' ||
+        lowerName === 'session_start' ||
+        lowerName === 'session-start' ||
+        lowerName === 'resume';
+
+      let enrichedData = data;
+      if (isSessionStart) {
+        const platformMeta = getPlatformSessionMetadata();
+        if (data && typeof data === 'object') {
+          enrichedData = { ...platformMeta, ...data };
+        } else {
+          enrichedData = { ...platformMeta };
+        }
+      }
+
       this.seq += 1;
-      const sanitized = data !== null ? sanitizeData(data) : null;
+      const sanitized = enrichedData !== null ? sanitizeData(enrichedData) : null;
       const event = {
         seq: this.seq,
         client_ts: Date.now(),
@@ -187,6 +204,13 @@ class FlightRecorder {
     } catch {
       // Never throw and never block UI
     }
+  }
+
+  recordSessionStart(data = {}, { name = 'exam_start', category = 'lifecycle' } = {}) {
+    const meta = getPlatformSessionMetadata();
+    const payload = { ...meta, ...data };
+    this.record(category, name, payload);
+    return payload;
   }
 
   async getAuthHeader() {

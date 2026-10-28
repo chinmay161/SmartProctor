@@ -225,6 +225,8 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE violations ADD COLUMN metadata VARCHAR")
         if "evidence_files" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN evidence_files VARCHAR")
+        if "evidence_status" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN evidence_status VARCHAR(32)")
         if "dispute_status" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN dispute_status VARCHAR DEFAULT 'NONE'")
         if "dispute_reason" not in violation_columns:

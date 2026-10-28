@@ -201,7 +201,8 @@ def auto_terminate_on_violation(
     evidence_files: str | None = None,
     reason: str | None = None,
     duration_ms: int | None = None,
-    confidence: float | None = None
+    confidence: float | None = None,
+    evidence_status: str | None = None,
 ) -> ExamSession:
     """
     Increment violation counts, calculate integrity score, log to audit trail, and auto-terminate if thresholds reached.
@@ -260,6 +261,7 @@ def auto_terminate_on_violation(
         count=increment,
         type=violation_type,
         evidence_files=evidence_files,
+        evidence_status=evidence_status,
         reason=reason,
         duration_ms=duration_ms,
         integrity_deduction=applied_deduction,
