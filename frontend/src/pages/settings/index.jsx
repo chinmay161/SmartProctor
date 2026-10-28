@@ -32,7 +32,6 @@ const SettingsPage = () => {
 
     try {
       const result = await AppUpdate.checkForUpdate({ manual: true });
-      console.log('[Settings] Update check result:', result);
 
       if (result?.available) {
         setAvailableRelease(result);

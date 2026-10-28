@@ -10,8 +10,6 @@ function App() {
   const [backgroundRelease, setBackgroundRelease] = useState(null);
 
   useEffect(() => {
-    console.log('SmartProctor App initialized');
-
     // On web preview/client, check for updates asynchronously after launch if not already deferred
     const isDeferred = sessionStorage.getItem('smartproctor_update_deferred') === 'true';
     if (!isDeferred && !isNativeApp()) {
