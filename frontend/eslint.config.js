@@ -5,7 +5,16 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'public/mediapipe']),
+  globalIgnores([
+    'dist/**',
+    'public/mediapipe/**',
+    'android/**',
+    'graphify-out/**',
+    '**/dist/**',
+    '**/public/mediapipe/**',
+    '**/android/**',
+    '**/graphify-out/**',
+  ]),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

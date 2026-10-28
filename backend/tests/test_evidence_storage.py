@@ -12,6 +12,8 @@ from app.schemas.violation import ViolationReportRequest
 from app.services.evidence_storage import (
     EvidenceStorage,
     LocalStorage,
+    StorageEvidenceError,
+    StorageNotConfiguredError,
     delete_evidence_item,
     purge_expired_evidence,
     resolve_evidence_field,
@@ -159,6 +161,10 @@ def test_legacy_passthrough(_reset_storage):
 
 
 def test_oversize_upload_rejected(db):
+    exam = Exam(id="e1", title="Test Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
+
     session = ExamSession(
         exam_id="e1",
         student_id="student_123",
@@ -187,6 +193,10 @@ def test_oversize_upload_rejected(db):
 
 
 def test_non_jpeg_rejected(db):
+    exam = Exam(id="e1", title="Test Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
+
     session = ExamSession(
         exam_id="e1",
         student_id="student_123",
@@ -217,6 +227,10 @@ def test_non_jpeg_rejected(db):
 def test_upload_failure_still_saves_violation(db, _reset_storage):
     storage: FakeMemoryStorage = _reset_storage
     storage.fail_save = True
+
+    exam = Exam(id="e1", title="Test Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
 
     session = ExamSession(
         exam_id="e1",
@@ -399,3 +413,221 @@ def test_timeline_evidence_resolution(db, _reset_storage):
     evidence_list = violation_event[0]["data"]["evidence"]
     assert len(evidence_list) == 1
     assert "signed-storage.example.com" in evidence_list[0]
+
+
+class ConfigurableFakeStorage(EvidenceStorage):
+    def __init__(self, fail_save_error: Exception | None = None, fail_resolve_error: Exception | None = None):
+        self.fail_save_error = fail_save_error
+        self.fail_resolve_error = fail_resolve_error
+        self.saved = {}
+
+    def save(self, data: bytes, key: str) -> str:
+        if self.fail_save_error:
+            raise self.fail_save_error
+        clean_key = key.lstrip("/\\")
+        self.saved[clean_key] = data
+        return clean_key
+
+    def resolve_url(self, stored_value: str | None) -> str | None:
+        if self.fail_resolve_error:
+            raise self.fail_resolve_error
+        if not stored_value:
+            return stored_value
+        return f"https://signed-storage.example.com/{stored_value.lstrip('/\\')}?token=valid_token"
+
+    def delete(self, key: str) -> None:
+        clean_key = key.lstrip("/\\")
+        self.saved.pop(clean_key, None)
+
+
+@pytest.mark.parametrize(
+    "reason_code,storage_exc,use_image",
+    [
+        ("no_image_in_request", None, False),
+        ("invalid_image", StorageEvidenceError("invalid_image", "Invalid image encoding"), True),
+        ("too_large", StorageEvidenceError("too_large", "Evidence payload exceeds 1MB"), True),
+        ("storage_not_configured", StorageNotConfiguredError("Storage backend is unconfigured"), True),
+        ("upload_failed", RuntimeError("Connection reset: secret_access_key=SUPERSECRET"), True),
+    ],
+)
+def test_failing_storage_reason_codes_and_telemetry(db, reason_code, storage_exc, use_image):
+    from app.models.session_event import SessionEvent
+
+    storage = ConfigurableFakeStorage(fail_save_error=storage_exc)
+    set_evidence_storage(storage)
+
+    exam = Exam(title=f"Reason {reason_code} Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
+
+    session = ExamSession(
+        exam_id=exam.id,
+        student_id=f"student_{reason_code}",
+        status=SessionStatus.LIVE,
+    )
+    db.add(session)
+    db.commit()
+
+    image_payload = _make_base64_jpeg(300) if use_image else None
+    payload = ViolationReportRequest(
+        type="LOOK_AWAY",
+        severity="minor",
+        count=1,
+        reason=f"Testing {reason_code}",
+        image=image_payload,
+    )
+    user = {"sub": f"student_{reason_code}", "roles": ["student"]}
+
+    # report_violation should never raise; violation is saved
+    updated = report_violation(session_id=session.id, payload=payload, user=user)
+    assert updated.id == session.id
+
+    v = db.query(Violation).filter_by(session_id=session.id).first()
+    assert v is not None
+    assert v.evidence_files is None
+    assert v.evidence_status == reason_code
+
+    # Verify session event was recorded
+    ev = (
+        db.query(SessionEvent)
+        .filter_by(session_id=session.id, name="evidence_failed")
+        .order_by(SessionEvent.id.desc())
+        .first()
+    )
+    assert ev is not None
+    assert ev.data["reason"] == reason_code
+    # Secrets must be redacted
+    if storage_exc and "SUPERSECRET" in str(storage_exc):
+        assert "SUPERSECRET" not in str(ev.data["message"])
+        assert "[REDACTED]" in str(ev.data["message"])
+
+    # list_violations endpoint should return the evidence_status
+    teacher_user = {"sub": "teacher_1", "roles": ["teacher"]}
+    res = list_violations(session_id=session.id, user=teacher_user)
+    assert len(res) == 1
+    assert res[0]["evidence_status"] == reason_code
+
+
+def test_url_failed_reason_code_and_telemetry(db):
+    from app.models.session_event import SessionEvent
+
+    storage = ConfigurableFakeStorage(
+        fail_resolve_error=RuntimeError("S3 Presign failed: token=SECRET_TOKEN_XYZ&sig=SECRET_SIG")
+    )
+    set_evidence_storage(storage)
+
+    exam = Exam(title="URL Fail Exam", created_by="teacher_1")
+    db.add(exam)
+    db.commit()
+
+    session = ExamSession(
+        exam_id=exam.id,
+        student_id="student_url_fail",
+        status=SessionStatus.LIVE,
+    )
+    db.add(session)
+    db.commit()
+
+    v = Violation(
+        session_id=session.id,
+        student_id="student_url_fail",
+        severity="minor",
+        type="LOOK_AWAY",
+        evidence_files=f"evidence/{exam.id}/{session.id}/frame.jpg",
+        evidence_status="captured",
+    )
+    db.add(v)
+    db.commit()
+
+    teacher_user = {"sub": "teacher_1", "roles": ["teacher"]}
+    res = list_violations(session_id=session.id, user=teacher_user)
+    assert len(res) == 1
+    assert res[0]["evidence_status"] == "url_failed"
+    assert res[0]["evidence_files"] is None
+
+    # Verify telemetry event was recorded
+    ev = (
+        db.query(SessionEvent)
+        .filter_by(session_id=session.id, name="evidence_failed")
+        .order_by(SessionEvent.id.desc())
+        .first()
+    )
+    assert ev is not None
+    assert ev.data["reason"] == "url_failed"
+    assert "SECRET_TOKEN_XYZ" not in str(ev.data["message"])
+
+
+def test_storage_test_endpoint_non_admin_forbidden():
+    from fastapi.testclient import TestClient
+    from app.main import app as main_app
+    from app.auth.dependencies import get_current_user
+
+    client = TestClient(main_app)
+    main_app.dependency_overrides[get_current_user] = lambda: {"sub": "student_1", "roles": ["student"]}
+    try:
+        res = client.post("/admin/diagnostics/storage-test")
+        assert res.status_code == 403
+    finally:
+        main_app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_storage_test_endpoint_not_configured(monkeypatch):
+    from app.routes.admin import storage_test
+
+    monkeypatch.setenv("EVIDENCE_STORAGE", "local")
+    admin_user = {"sub": "admin_1", "roles": ["admin"]}
+    result = storage_test(admin=admin_user)
+
+    assert result["mode"] == "local"
+    assert result["ok"] is False
+    assert result["reason"] == "storage_not_configured"
+
+
+def test_storage_test_endpoint_upload_failure(monkeypatch):
+    from app.routes.admin import storage_test
+
+    monkeypatch.setenv("EVIDENCE_STORAGE", "s3")
+    monkeypatch.setenv("S3_BUCKET", "mock-bucket")
+
+    failing_s3 = ConfigurableFakeStorage(
+        fail_save_error=RuntimeError("S3 PutObject failure: secret_access_key=MYSECRETVALUE")
+    )
+    failing_s3.bucket = "mock-bucket"
+    set_evidence_storage(failing_s3)
+
+    admin_user = {"sub": "admin_1", "roles": ["admin"]}
+    # Endpoint should never raise 500; report failure in body
+    result = storage_test(admin=admin_user)
+
+    assert result["mode"] == "s3"
+    assert result["ok"] is False
+    assert result["step_failed"] == "write"
+    assert result["error_class"] == "RuntimeError"
+    # Secrets must be redacted
+    assert "MYSECRETVALUE" not in result["message"]
+    assert "[REDACTED]" in result["message"]
+
+
+def test_storage_test_endpoint_success(monkeypatch):
+    from app.routes.admin import storage_test
+    import requests
+
+    monkeypatch.setenv("EVIDENCE_STORAGE", "s3")
+    monkeypatch.setenv("S3_BUCKET", "mock-bucket")
+
+    mock_storage = ConfigurableFakeStorage()
+    mock_storage.bucket = "mock-bucket"
+    set_evidence_storage(mock_storage)
+
+    class MockResponse:
+        status_code = 200
+
+    monkeypatch.setattr(requests, "get", lambda url, timeout: MockResponse())
+
+    admin_user = {"sub": "admin_1", "roles": ["admin"]}
+    result = storage_test(admin=admin_user)
+
+    assert result["mode"] == "s3"
+    assert result["ok"] is True
+    assert result["step_failed"] is None
+    assert result["error_class"] is None

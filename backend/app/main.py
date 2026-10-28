@@ -6,17 +6,20 @@ try:
 except ImportError:
     def load_dotenv(*args, **kwargs):  # type: ignore[override]
         return False
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
 import os
 import re
+import uuid
 
 # Load backend/app/.env before importing routers/services that read env vars
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
-from .monitoring import init_sentry, RequestIdAndLoggingMiddleware
+from .monitoring import init_sentry, RequestIdAndLoggingMiddleware, request_id_ctx
 init_sentry()
 
 environment = os.getenv("ENVIRONMENT", "development").strip().lower()
@@ -128,6 +131,43 @@ app.add_middleware(
 )
 app.add_middleware(RequestIdAndLoggingMiddleware)
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    req_id = request_id_ctx.get() or request.headers.get("x-request-id") or str(uuid.uuid4())
+    if isinstance(exc, (HTTPException, StarletteHTTPException)):
+        status_code = exc.status_code
+        detail = exc.detail
+    else:
+        logging.getLogger("uvicorn.error").exception(
+            f"Unhandled exception on {request.method} {request.url.path} [request_id={req_id}]: {exc}"
+        )
+        status_code = 500
+        detail = f"Internal server error (request id: {req_id})"
+
+    origin = request.headers.get("origin")
+    allowed_origin = "*"
+    if cors_origins:
+        if "*" in cors_origins:
+            allowed_origin = "*"
+        elif origin and origin in cors_origins:
+            allowed_origin = origin
+        else:
+            allowed_origin = cors_origins[0]
+
+    headers = {
+        "X-Request-ID": req_id,
+        "Access-Control-Allow-Origin": allowed_origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Expose-Headers": "X-Request-ID, Content-Length, Content-Type",
+    }
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": detail, "requestId": req_id},
+        headers=headers,
+    )
+
+
 # Mount evidence static files only in non-production local storage mode
 evidence_storage_mode = os.getenv("EVIDENCE_STORAGE", "local").strip().lower()
 environment = os.getenv("ENVIRONMENT", "development").strip().lower()
@@ -150,9 +190,10 @@ app.include_router(ws_proctoring.router)
 app.include_router(ws_signaling.router)
 app.include_router(questions.router)
 app.include_router(analytics.router)
-from .routes import profile, telemetry, notifications
+from .routes import profile, telemetry, feedback, notifications
 app.include_router(profile.router)
 app.include_router(telemetry.router)
+app.include_router(feedback.router)
 app.include_router(notifications.router)
 
 

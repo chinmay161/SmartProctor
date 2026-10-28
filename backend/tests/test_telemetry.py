@@ -187,6 +187,11 @@ def test_telemetry_session_ownership_check(client: TestClient):
     db = SessionLocal()
     session_id = f"sess_{uuid.uuid4().hex[:8]}"
     try:
+        exam = db.query(Exam).filter_by(id="exam_owner_test").first()
+        if not exam:
+            exam = Exam(id="exam_owner_test", title="Owner Test Exam", created_by="teacher_owner")
+            db.add(exam)
+            db.commit()
         session = ExamSession(
             id=session_id,
             exam_id="exam_owner_test",
@@ -345,3 +350,297 @@ def test_retention_purge():
         assert remaining[0].trace_id == "new_trace"
     finally:
         db.close()
+
+
+def test_gate_events_in_teacher_timeline(client: TestClient):
+    """Gate and device events are recorded before a session exists.
+    - Teacher of the exam sees the gate events in GET /sessions/{session_id}/events
+    - Another student's events with a different trace are not returned
+    - A teacher of a different exam gets 403
+    """
+    db = SessionLocal()
+    teacher_1 = f"teacher_t1_{uuid.uuid4().hex[:6]}"
+    teacher_2 = f"teacher_t2_{uuid.uuid4().hex[:6]}"
+    student_1 = f"student_s1_{uuid.uuid4().hex[:6]}"
+    student_2 = f"student_s2_{uuid.uuid4().hex[:6]}"
+
+    now = datetime.now(timezone.utc)
+    exam_1_id = f"exam_1_{uuid.uuid4().hex[:6]}"
+    exam_2_id = f"exam_2_{uuid.uuid4().hex[:6]}"
+    exam_1 = Exam(
+        id=exam_1_id,
+        title="Exam 1",
+        created_by=teacher_1,
+        status="ACTIVE",
+        start_time=now - timedelta(minutes=10),
+        end_time=now + timedelta(hours=2),
+        duration_minutes=60,
+    )
+    exam_2 = Exam(
+        id=exam_2_id,
+        title="Exam 2",
+        created_by=teacher_2,
+        status="ACTIVE",
+        start_time=now - timedelta(minutes=10),
+        end_time=now + timedelta(hours=2),
+        duration_minutes=60,
+    )
+
+    trace_s1 = f"trace_s1_{uuid.uuid4().hex[:8]}"
+    trace_s2 = f"trace_s2_{uuid.uuid4().hex[:8]}"
+
+    # Gate events recorded prior to session creation (session_id is None)
+    gate_ev_1 = SessionEvent(
+        trace_id=trace_s1,
+        session_id=None,
+        student_id=student_1,
+        seq=1,
+        category="gate",
+        name="camera_check_passed",
+        data={"fps": 30},
+    )
+    gate_ev_2 = SessionEvent(
+        trace_id=trace_s1,
+        session_id=None,
+        student_id=student_1,
+        seq=2,
+        category="device",
+        name="mic_check_passed",
+        data={"noise": 0.02},
+    )
+
+    # Another student's gate event with a different trace
+    other_student_ev = SessionEvent(
+        trace_id=trace_s2,
+        session_id=None,
+        student_id=student_2,
+        seq=1,
+        category="gate",
+        name="camera_check_passed",
+        data={"fps": 25},
+    )
+
+    db.add_all([exam_1, exam_2, gate_ev_1, gate_ev_2, other_student_ev])
+    db.commit()
+    db.close()
+
+    try:
+        # Student 1 starts session passing trace_id
+        app.dependency_overrides[get_current_user] = lambda: {
+            "sub": student_1,
+            "roles": ["student"],
+            "email": "s1@test.com",
+        }
+        start_res = client.post(f"/sessions/{exam_1_id}/start", json={"trace_id": trace_s1})
+        assert start_res.status_code == 200
+        session_id = start_res.json()["session_id"]
+
+        # 1. Teacher 1 (creator of exam 1) sees the gate events
+        app.dependency_overrides[get_current_user] = lambda: {
+            "sub": teacher_1,
+            "roles": ["teacher"],
+            "email": "t1@test.com",
+        }
+        events_res = client.get(f"/sessions/{session_id}/events")
+        assert events_res.status_code == 200
+        events = events_res.json()
+        event_names = [e["name"] for e in events]
+        assert "camera_check_passed" in event_names
+        assert "mic_check_passed" in event_names
+        assert "session_started" in event_names
+
+        # 2. Another student's events with a different trace are NOT returned
+        traces = {e["trace_id"] for e in events}
+        assert trace_s2 not in traces
+        students = {e["student_id"] for e in events}
+        assert student_2 not in students
+        assert all(e["student_id"] == student_1 for e in events)
+
+        # 3. Teacher 2 (of a different exam) gets 403 Forbidden
+        app.dependency_overrides[get_current_user] = lambda: {
+            "sub": teacher_2,
+            "roles": ["teacher"],
+            "email": "t2@test.com",
+        }
+        forbidden_res = client.get(f"/sessions/{session_id}/events")
+        assert forbidden_res.status_code == 403
+        assert "Not assigned as proctor" in forbidden_res.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_telemetry_trace_volume_cap(client: TestClient, monkeypatch):
+    """Enforce at most 5000 stored events per trace_id. Extra events are skipped and counted in skipped."""
+    import app.routes.telemetry as tel_routes
+    monkeypatch.setattr(tel_routes, "MAX_EVENTS_PER_TRACE", 5)
+
+    user_sub = f"student_trace_cap_{uuid.uuid4().hex[:6]}"
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": user_sub,
+        "roles": ["student"],
+        "email": "cap@test.com",
+    }
+
+    try:
+        trace_id = f"trace_cap_{uuid.uuid4().hex[:8]}"
+
+        # Batch 1: 7 events with cap = 5 -> 5 stored, 2 skipped
+        batch_1 = {
+            "trace_id": trace_id,
+            "kind": "exam",
+            "events": [{"seq": i, "category": "lifecycle", "name": f"ev_{i}"} for i in range(1, 8)],
+        }
+        res_1 = client.post("/telemetry/events", json=batch_1)
+        assert res_1.status_code == 200
+        data_1 = res_1.json()
+        assert data_1["received"] == 7
+        assert data_1["stored"] == 5
+        assert data_1["skipped"] == 2
+
+        # Batch 2: 3 more events on the same trace -> 0 stored, 3 skipped
+        batch_2 = {
+            "trace_id": trace_id,
+            "kind": "exam",
+            "events": [{"seq": i, "category": "lifecycle", "name": f"ev_next_{i}"} for i in range(8, 11)],
+        }
+        res_2 = client.post("/telemetry/events", json=batch_2)
+        assert res_2.status_code == 200
+        data_2 = res_2.json()
+        assert data_2["received"] == 3
+        assert data_2["stored"] == 0
+        assert data_2["skipped"] == 3
+
+        # Confirm DB only has 5 stored events for this trace
+        db = SessionLocal()
+        try:
+            count = db.query(SessionEvent).filter(SessionEvent.trace_id == trace_id).count()
+            assert count == 5
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_telemetry_daily_student_volume_cap(client: TestClient, monkeypatch):
+    """Enforce at most 20000 per student per day. Extra events are skipped and counted in skipped."""
+    import app.routes.telemetry as tel_routes
+    monkeypatch.setattr(tel_routes, "MAX_EVENTS_PER_STUDENT_PER_DAY", 5)
+
+    user_sub = f"student_daily_cap_{uuid.uuid4().hex[:6]}"
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": user_sub,
+        "roles": ["student"],
+        "email": "daily_cap@test.com",
+    }
+
+    try:
+        # Insert 1 event from yesterday for this student; should not count against today's cap
+        db = SessionLocal()
+        yesterday_ev = SessionEvent(
+            trace_id=f"yesterday_trace_{uuid.uuid4().hex[:6]}",
+            student_id=user_sub,
+            seq=1,
+            category="gate",
+            name="gate_yesterday",
+            server_ts=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        db.add(yesterday_ev)
+        db.commit()
+        db.close()
+
+        # Batch 1 on trace_a: 4 events -> all 4 stored
+        trace_a = f"trace_daily_a_{uuid.uuid4().hex[:8]}"
+        res_1 = client.post(
+            "/telemetry/events",
+            json={
+                "trace_id": trace_a,
+                "kind": "exam",
+                "events": [{"seq": i, "category": "gate", "name": f"step_a_{i}"} for i in range(1, 5)],
+            },
+        )
+        assert res_1.status_code == 200
+        assert res_1.json()["received"] == 4
+        assert res_1.json()["stored"] == 4
+        assert res_1.json()["skipped"] == 0
+
+        # Batch 2 on trace_b: 3 events -> only 1 stored (reaching 5), 2 skipped
+        trace_b = f"trace_daily_b_{uuid.uuid4().hex[:8]}"
+        res_2 = client.post(
+            "/telemetry/events",
+            json={
+                "trace_id": trace_b,
+                "kind": "exam",
+                "events": [{"seq": i, "category": "gate", "name": f"step_b_{i}"} for i in range(1, 4)],
+            },
+        )
+        assert res_2.status_code == 200
+        assert res_2.json()["received"] == 3
+        assert res_2.json()["stored"] == 1
+        assert res_2.json()["skipped"] == 2
+
+        # Another batch when limit is reached -> all skipped
+        res_3 = client.post(
+            "/telemetry/events",
+            json={
+                "trace_id": trace_b,
+                "kind": "exam",
+                "events": [{"seq": 10, "category": "gate", "name": "step_overflow"}],
+            },
+        )
+        assert res_3.status_code == 200
+        assert res_3.json()["received"] == 1
+        assert res_3.json()["stored"] == 0
+        assert res_3.json()["skipped"] == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_telemetry_cap_query_budget(client: TestClient):
+    """Confirm cap checks cost at most two COUNT queries per batch, and empty batches skip daily-cap queries."""
+    from sqlalchemy import event
+
+    user_sub = f"student_budget_{uuid.uuid4().hex[:6]}"
+    app.dependency_overrides[get_current_user] = lambda: {
+        "sub": user_sub,
+        "roles": ["student"],
+        "email": "budget@test.com",
+    }
+
+    count_queries = []
+
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        if "count(" in statement.lower():
+            count_queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", before_cursor_execute)
+
+    try:
+        # Case 1: Empty batch -> exactly 0 count queries executed
+        count_queries.clear()
+        res_empty = client.post(
+            "/telemetry/events",
+            json={"trace_id": "trace_empty_batch", "kind": "exam", "events": []},
+        )
+        assert res_empty.status_code == 200
+        assert len(count_queries) == 0
+
+        # Case 2: Batch with events -> at most 2 COUNT queries executed
+        count_queries.clear()
+        res_batch = client.post(
+            "/telemetry/events",
+            json={
+                "trace_id": "trace_with_events",
+                "kind": "exam",
+                "events": [{"seq": 1, "category": "gate", "name": "step_1"}],
+            },
+        )
+        assert res_batch.status_code == 200
+        assert len(count_queries) <= 2
+        # Check that count queries target session_events
+        for q in count_queries:
+            assert "session_events" in q.lower()
+    finally:
+        event.remove(engine, "before_cursor_execute", before_cursor_execute)
+        app.dependency_overrides.pop(get_current_user, None)
+
+

@@ -63,6 +63,7 @@ const defaultExamData = {
   browserLockdown: true,
   detectTabSwitch: true,
   enableProctoredWatermark: false,
+  pilotMode: false,
   detectMultipleFaces: true,
   detectNoFace: true,
   detectMobilePhone: false,

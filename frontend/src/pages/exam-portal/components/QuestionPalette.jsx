@@ -11,7 +11,7 @@ const QuestionPalette = ({
   reviewCount,
   unansweredCount
 }) => {
-  const getQuestionStatus = (question, index) => {
+  const getQuestionStatus = (question) => {
     if (answers?.[question?.id]) return 'answered';
     if (markedForReview?.has(question?.id)) return 'review';
     return 'unanswered';
@@ -62,7 +62,7 @@ const QuestionPalette = ({
               <button
                 key={question?.id}
                 onClick={() => onQuestionSelect(index)}
-                className={`aspect-square rounded-lg border-2 flex items-center justify-center text-sm font-semibold transition-all hover:scale-105 ${
+                className={`aspect-square min-h-[44px] min-w-[44px] rounded-lg border-2 flex items-center justify-center text-sm font-semibold transition-all hover:scale-105 touch-target ${
                   getStatusColor(status, isCurrent)
                 }`}
               >

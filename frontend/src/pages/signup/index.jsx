@@ -24,6 +24,7 @@ const Signup = () => {
       <NeonGridBackground />
 
       <div
+        className="min-h-dvh auth-scroll-panel"
         style={{
           flex: 1,
           background: 'transparent',
@@ -38,7 +39,7 @@ const Signup = () => {
         <div style={{ width: '100%', maxWidth: '580px' }}>
           {/* Brand Logo & Home Link */}
           <div
-            className="auth-fade-up"
+            className="auth-fade-up auth-mobile-logo"
             style={{
               display: 'flex',
               alignItems: 'center',

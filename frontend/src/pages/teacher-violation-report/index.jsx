@@ -10,6 +10,13 @@ import AppFooter from '../../components/ui/AppFooter';
 const RAW_API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 const API_BASE = RAW_API_BASE.replace(/\/+$/, '');
 
+const REVIEW_BADGES = {
+  CONFIRMED: { label: 'Confirmed', bg: 'bg-destructive/15 text-destructive border-destructive/30' },
+  FALSE_POSITIVE: { label: 'False Alarm', bg: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
+  UNSURE: { label: 'Unsure', bg: 'bg-amber-500/15 text-amber-500 border-amber-500/30' },
+  NONE: { label: 'Not Reviewed', bg: 'bg-muted text-muted-foreground border-border' },
+};
+
 const TeacherViolationReportPage = () => {
   const navigate = useNavigate();
   const { examId } = useParams();
@@ -20,6 +27,9 @@ const TeacherViolationReportPage = () => {
   const [downloading, setDownloading] = useState('');
   const [error, setError] = useState('');
   const [report, setReport] = useState(null);
+  const [expandedStudents, setExpandedStudents] = useState({});
+  const [savingViolationId, setSavingViolationId] = useState(null);
+  const [violationNotes, setViolationNotes] = useState({});
 
   const callApi = ({ path, method = 'GET', body = null }) =>
     authAwareCall({
@@ -58,6 +68,56 @@ const TeacherViolationReportPage = () => {
       mounted = false;
     };
   }, [examId, auth0Authenticated]);
+
+  const toggleExpand = (studentId) => {
+    setExpandedStudents((prev) => ({
+      ...prev,
+      [studentId]: !prev[studentId],
+    }));
+  };
+
+  const handleViolationReview = async (studentId, violationId, nextStatus) => {
+    const currentNote = (violationNotes[violationId] !== undefined
+      ? violationNotes[violationId]
+      : '')?.trim();
+
+    setSavingViolationId(violationId);
+    try {
+      const res = await callApi({
+        path: `/violations/${encodeURIComponent(violationId)}/review`,
+        method: 'PATCH',
+        body: {
+          review_status: nextStatus,
+          review_note: currentNote,
+        },
+      });
+
+      // Update in state
+      setReport((prev) => {
+        if (!prev) return prev;
+        const nextRows = (prev.rows || []).map((row) => {
+          if (row.student_id !== studentId) return row;
+          const updatedViols = (row.violations || []).map((v) =>
+            v.id === violationId
+              ? { ...v, review_status: res.review_status, review_note: res.review_note }
+              : v
+          );
+          // If all or any reviewed, update student level row if appropriate
+          return {
+            ...row,
+            review_status: res.review_status,
+            review_note: res.review_note || row.review_note,
+            violations: updatedViols,
+          };
+        });
+        return { ...prev, rows: nextRows };
+      });
+    } catch (err) {
+      alert(err?.detail || err?.message || 'Failed to update review');
+    } finally {
+      setSavingViolationId(null);
+    }
+  };
 
   const downloadReport = async (format) => {
     setDownloading(format);
@@ -164,33 +224,150 @@ const TeacherViolationReportPage = () => {
                 </p>
               </div>
             ) : (
-              <div className="bg-card border border-border rounded-lg overflow-x-auto">
-                <table className="w-full min-w-[900px]">
+              <div className="bg-card border border-border rounded-lg overflow-x-auto shadow-sm">
+                <table className="w-full min-w-[950px]">
                   <thead className="bg-muted/40 border-b border-border">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Student</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Violations</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Minor</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Major</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Severe</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Severity (M/Maj/S)</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Flagged</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">First</th>
-                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Last</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Review Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Review Note</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {report.rows.map((row) => (
-                      <tr key={row.student_id} className="border-b border-border/60 last:border-b-0">
-                        <td className="px-4 py-3 text-sm text-foreground">{row.student_id}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{row.violation_count}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{row.minor_count}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{row.major_count}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{row.severe_count}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{row.flagged ? 'Yes' : 'No'}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{formatDate(row.first_violation_at)}</td>
-                        <td className="px-4 py-3 text-sm text-foreground">{formatDate(row.last_violation_at)}</td>
-                      </tr>
-                    ))}
+                    {report.rows.map((row) => {
+                      const isExpanded = Boolean(expandedStudents[row.student_id]);
+                      const badgeInfo = REVIEW_BADGES[row.review_status] || REVIEW_BADGES.NONE;
+                      const hasViolations = Boolean(row.violations && row.violations.length > 0);
+
+                      return (
+                        <React.Fragment key={row.student_id}>
+                          <tr className="border-b border-border/60 hover:bg-muted/20 transition-colors">
+                            <td className="px-4 py-3 text-sm font-medium text-foreground">{row.student_id}</td>
+                            <td className="px-4 py-3 text-sm text-foreground">{row.violation_count}</td>
+                            <td className="px-4 py-3 text-sm text-muted-foreground">
+                              {row.minor_count} / {row.major_count} / {row.severe_count}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-foreground">{row.flagged ? 'Yes' : 'No'}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`px-2 py-0.5 text-[11px] font-semibold border rounded-md whitespace-nowrap ${badgeInfo.bg}`}>
+                                {badgeInfo.label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate" title={row.review_note || ''}>
+                              {row.review_note || '-'}
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {hasViolations ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleExpand(row.student_id)}
+                                  className="text-xs text-primary font-medium hover:underline flex items-center gap-1"
+                                >
+                                  {isExpanded ? 'Hide Details' : `Review (${row.violations.length})`}
+                                  <Icon name={isExpanded ? 'ChevronUp' : 'ChevronDown'} size={14} />
+                                </button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              )}
+                            </td>
+                          </tr>
+
+                          {/* Expanded violation review list */}
+                          {isExpanded && hasViolations && (
+                            <tr className="bg-muted/30 border-b border-border/80">
+                              <td colSpan={7} className="p-4">
+                                <div className="space-y-3">
+                                  <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider">
+                                    Student Violations ({row.violations.length})
+                                  </h4>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {row.violations.map((v) => {
+                                      const vBadge = REVIEW_BADGES[v.review_status] || REVIEW_BADGES.NONE;
+                                      const noteVal = violationNotes[v.id] !== undefined ? violationNotes[v.id] : (v.review_note || '');
+                                      const isSaving = savingViolationId === v.id;
+
+                                      return (
+                                        <div key={v.id} className="p-3 bg-card border border-border rounded-lg shadow-xs space-y-2.5">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <div>
+                                              <span className="text-xs font-semibold text-foreground">{v.type}</span>
+                                              <span className="text-[10px] text-muted-foreground ml-2">
+                                                {formatDate(v.timestamp)}
+                                              </span>
+                                            </div>
+                                            <span className={`px-2 py-0.5 text-[10px] font-semibold border rounded-md ${vBadge.bg}`}>
+                                              {vBadge.label}
+                                            </span>
+                                          </div>
+
+                                          <input
+                                            type="text"
+                                            maxLength={300}
+                                            placeholder="Review note (max 300 chars)..."
+                                            value={noteVal}
+                                            onChange={(e) =>
+                                              setViolationNotes((prev) => ({
+                                                ...prev,
+                                                [v.id]: e.target.value.slice(0, 300),
+                                              }))
+                                            }
+                                            disabled={isSaving}
+                                            className="w-full px-2.5 py-1 text-xs rounded bg-muted border border-border text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
+                                          />
+
+                                          <div className="flex items-center gap-2">
+                                            <button
+                                              type="button"
+                                              disabled={isSaving}
+                                              onClick={() => handleViolationReview(row.student_id, v.id, 'CONFIRMED')}
+                                              className={`flex-1 py-1 px-2 rounded text-xs font-medium border transition-colors ${
+                                                v.review_status === 'CONFIRMED'
+                                                  ? 'bg-destructive text-white border-destructive'
+                                                  : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                                              }`}
+                                            >
+                                              Confirm
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={isSaving}
+                                              onClick={() => handleViolationReview(row.student_id, v.id, 'FALSE_POSITIVE')}
+                                              className={`flex-1 py-1 px-2 rounded text-xs font-medium border transition-colors ${
+                                                v.review_status === 'FALSE_POSITIVE'
+                                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                                  : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                                              }`}
+                                            >
+                                              False alarm
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={isSaving}
+                                              onClick={() => handleViolationReview(row.student_id, v.id, 'UNSURE')}
+                                              className={`flex-1 py-1 px-2 rounded text-xs font-medium border transition-colors ${
+                                                v.review_status === 'UNSURE'
+                                                  ? 'bg-amber-600 text-white border-amber-600'
+                                                  : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                                              }`}
+                                            >
+                                              Unsure
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
+import { authAwareCall } from '../../../services/authAwareCall';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
 import { formatViolationType, getViolationIcon } from '../../../utils/violationSeverity';
@@ -35,9 +37,30 @@ const normalizeEvidencePaths = (rawValue) => {
   return [String(rawValue)];
 };
 
+const EVIDENCE_STATUS_LABELS = {
+  no_image_in_request: 'No image sent',
+  invalid_image: 'Invalid image',
+  too_large: 'Image too large',
+  storage_not_configured: 'Storage not configured',
+  upload_failed: 'Upload failed',
+  url_failed: 'Link failed',
+};
+
+const REVIEW_BADGES = {
+  CONFIRMED: { label: 'Confirmed', bg: 'bg-destructive/15 text-destructive border-destructive/30' },
+  FALSE_POSITIVE: { label: 'False Alarm', bg: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
+  UNSURE: { label: 'Unsure', bg: 'bg-amber-500/15 text-amber-500 border-amber-500/30' },
+  NONE: { label: 'Not Reviewed', bg: 'bg-muted text-muted-foreground border-border' },
+};
+
 const EvidenceGallery = ({ evidenceData, onClose }) => {
+  const { isAuthenticated: auth0Authenticated, getAccessTokenSilently } = useAuth0();
+  const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+
   const [filterStudent, setFilterStudent] = useState('ALL');
   const [filterType, setFilterType] = useState('ALL');
+  const [reviews, setReviews] = useState({});
+  const [savingId, setSavingId] = useState(null);
   const backendOrigin = getBackendOrigin();
   
   const allViolations = [];
@@ -60,6 +83,55 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
       const matchType = filterType === 'ALL' || v.type === filterType;
       return matchStudent && matchType;
   });
+
+  const getReviewState = (v) => {
+    return reviews[v.id] || {
+      status: v.review_status || 'NONE',
+      note: v.review_note || '',
+    };
+  };
+
+  const handleNoteChange = (violationId, note) => {
+    setReviews((prev) => ({
+      ...prev,
+      [violationId]: {
+        ...(prev[violationId] || {}),
+        note: note.slice(0, 300),
+      },
+    }));
+  };
+
+  const handleUpdateReview = async (violationId, nextStatus) => {
+    const current = reviews[violationId] || {};
+    const note = (current.note !== undefined ? current.note : '').trim();
+
+    setSavingId(violationId);
+    try {
+      const res = await authAwareCall({
+        path: `/violations/${encodeURIComponent(violationId)}/review`,
+        method: 'PATCH',
+        body: {
+          review_status: nextStatus,
+          review_note: note,
+        },
+        auth0Authenticated,
+        getAccessTokenSilently,
+        auth0Audience,
+      });
+
+      setReviews((prev) => ({
+        ...prev,
+        [violationId]: {
+          status: res?.review_status || nextStatus,
+          note: res?.review_note ?? note,
+        },
+      }));
+    } catch (err) {
+      alert(err?.detail || err?.message || 'Failed to update review status');
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
@@ -119,9 +191,13 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
                       : `${backendOrigin}${primaryEvidence}`)
                    : null;
 
+                 const reviewState = getReviewState(v);
+                 const badgeInfo = REVIEW_BADGES[reviewState.status] || REVIEW_BADGES.NONE;
+                 const isSaving = savingId === v.id;
+
                  return (
-                 <div key={v.id} className="bg-card border border-border rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                   <div className="h-48 bg-black flex items-center justify-center relative group">
+                 <div key={v.id} className="bg-card border border-border rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col">
+                   <div className="h-44 bg-black flex items-center justify-center relative group">
                       {imageSrc ? (
                         <img 
                           src={imageSrc}
@@ -130,7 +206,10 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
                           onError={(e) => e.target.style.display = 'none'}
                         />
                       ) : (
-                        <div className="text-xs text-muted-foreground">No snapshot</div>
+                        <div className="flex flex-col items-center justify-center text-xs text-muted-foreground p-2 text-center gap-1">
+                          <Icon name="CameraOff" size={20} className="opacity-50" />
+                          <span>{EVIDENCE_STATUS_LABELS[v.evidence_status] || 'No snapshot captured'}</span>
+                        </div>
                       )}
                       <div className="absolute top-2 right-2 flex gap-1">
                          <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded shadow-sm ${v.severity === 'severe' ? 'bg-destructive/90 text-white' : v.severity === 'major' ? 'bg-warning/90 text-white' : 'bg-primary/90 text-white'}`}>
@@ -143,14 +222,74 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
                          )}
                       </div>
                    </div>
-                   <div className="p-3">
-                     <h3 className="font-semibold text-sm truncate" title={v.student_name}>{v.student_name}</h3>
-                     <div className="flex justify-between items-center mt-1">
-                       <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                         <Icon name={getViolationIcon(v.type)} size={13} className="shrink-0" />
-                         {formatViolationType(v.type)}
-                       </span>
-                       <span className="text-[10px] text-muted-foreground">{v.timestamp ? new Date(v.timestamp).toLocaleString() : ''}</span>
+
+                   <div className="p-3 flex-1 flex flex-col justify-between gap-2.5">
+                     <div>
+                       <div className="flex items-center justify-between gap-1 mb-1">
+                         <h3 className="font-semibold text-sm truncate" title={v.student_name}>{v.student_name}</h3>
+                         <span className={`px-2 py-0.5 text-[10px] font-semibold border rounded-md whitespace-nowrap ${badgeInfo.bg}`}>
+                           {badgeInfo.label}
+                         </span>
+                       </div>
+                       <div className="flex justify-between items-center text-xs text-muted-foreground">
+                         <span className="font-medium flex items-center gap-1 truncate">
+                           <Icon name={getViolationIcon(v.type)} size={13} className="shrink-0" />
+                           {formatViolationType(v.type)}
+                         </span>
+                         <span className="text-[10px] shrink-0">{v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : ''}</span>
+                       </div>
+                     </div>
+
+                     {/* Review Note & Buttons */}
+                     <div className="pt-2 border-t border-border/60 space-y-2">
+                       <input
+                         type="text"
+                         maxLength={300}
+                         placeholder="Review note (max 300 chars)..."
+                         value={reviewState.note}
+                         onChange={(e) => handleNoteChange(v.id, e.target.value)}
+                         disabled={isSaving}
+                         className="w-full px-2 py-1 text-xs rounded bg-muted/50 border border-border text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
+                       />
+
+                       <div className="flex items-center gap-1.5">
+                         <button
+                           type="button"
+                           disabled={isSaving}
+                           onClick={() => handleUpdateReview(v.id, 'CONFIRMED')}
+                           className={`flex-1 py-1 px-1.5 rounded text-[11px] font-medium border transition-colors ${
+                             reviewState.status === 'CONFIRMED'
+                               ? 'bg-destructive text-white border-destructive'
+                               : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                           }`}
+                         >
+                           Confirm
+                         </button>
+                         <button
+                           type="button"
+                           disabled={isSaving}
+                           onClick={() => handleUpdateReview(v.id, 'FALSE_POSITIVE')}
+                           className={`flex-1 py-1 px-1.5 rounded text-[11px] font-medium border transition-colors ${
+                             reviewState.status === 'FALSE_POSITIVE'
+                               ? 'bg-emerald-600 text-white border-emerald-600'
+                               : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                           }`}
+                         >
+                           False alarm
+                         </button>
+                         <button
+                           type="button"
+                           disabled={isSaving}
+                           onClick={() => handleUpdateReview(v.id, 'UNSURE')}
+                           className={`flex-1 py-1 px-1.5 rounded text-[11px] font-medium border transition-colors ${
+                             reviewState.status === 'UNSURE'
+                               ? 'bg-amber-600 text-white border-amber-600'
+                               : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                           }`}
+                         >
+                           Unsure
+                         </button>
+                       </div>
                      </div>
                    </div>
                  </div>
@@ -164,3 +303,4 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
 };
 
 export default EvidenceGallery;
+

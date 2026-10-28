@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import { probeCameraPermission } from './useVisionProctoring';
 import { SCREEN_SHARE_HELP, shareEntireScreen } from './screenShare';
 import { requestExamFullscreen } from './fullscreen';
+import { isNativeApp } from '../../utils/platform';
 import flightRecorder from '../../telemetry/flightRecorder';
 import { getDeviceSnapshot } from '../../telemetry/deviceSnapshot';
 
@@ -156,6 +157,7 @@ const PreExamGate = ({
   requireScreenShare = false,
   requireFullscreen = false,
   onScreenStream,
+  onRequestReportProblem,
 }) => {
   const visionSteps = !cameraRequired
     ? []
@@ -165,11 +167,12 @@ const PreExamGate = ({
   const audioSteps = (micRequired || variant === 'device-test') && variant !== 'permission-only'
     ? ['mic', 'noise', 'speech']
     : [];
+  const isNative = isNativeApp();
   const stepIds = [
     ...visionSteps,
     ...audioSteps,
-    ...(requireScreenShare && variant !== 'device-test' ? ['screen'] : []),
-    ...(requireFullscreen && variant !== 'device-test' ? ['fullscreen'] : []),
+    ...(!isNative && requireScreenShare && variant !== 'device-test' ? ['screen'] : []),
+    ...(!isNative && requireFullscreen && variant !== 'device-test' ? ['fullscreen'] : []),
   ];
 
   const [steps, setSteps] = useState(() => Object.fromEntries(stepIds.map((id) => [id, { status: 'pending', detail: '' }])));
@@ -531,11 +534,24 @@ const PreExamGate = ({
   const m = summary?.measure;
 
   return (
-    <div className="fixed inset-0 z-[130] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-card border border-border rounded-2xl shadow-2xl p-6 md:p-8">
-        <div className="flex items-center gap-3 mb-1">
-          <Icon name="ShieldCheck" size={24} className="text-primary" />
-          <h2 className="text-lg md:text-xl font-semibold text-foreground">{title}</h2>
+    <div className="gate-modal-overlay fixed inset-0 z-[130] bg-background/95 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div className="gate-modal-card w-full max-w-2xl bg-card border border-border rounded-2xl shadow-2xl p-6 md:p-8">
+        <div className="gate-modal-header flex items-center justify-between gap-3 mb-1">
+          <div className="gate-modal-title flex items-center gap-3 min-w-0">
+            <Icon name="ShieldCheck" size={24} className="text-primary shrink-0" />
+            <h2 className="text-lg md:text-xl font-semibold text-foreground truncate">{title}</h2>
+          </div>
+          {onRequestReportProblem && (
+            <Button
+              variant="outline"
+              size="xs"
+              iconName="AlertCircle"
+              onClick={onRequestReportProblem}
+              className="text-xs gate-modal-report-btn shrink-0"
+            >
+              Report a problem
+            </Button>
+          )}
         </div>
         <p className="text-sm text-muted-foreground mb-6">
           {variant === 'device-test'
@@ -545,8 +561,8 @@ const PreExamGate = ({
               : 'Your exam timer has not started yet. It starts after these checks pass.'}
         </p>
 
-        <div className={`grid gap-6 ${showPreview ? 'md:grid-cols-[1fr_240px]' : ''}`}>
-          <ol className="space-y-3">
+        <div className={`gate-modal-body grid gap-6 ${showPreview ? 'md:grid-cols-[1fr_240px]' : ''}`}>
+          <ol className="space-y-3 min-w-0">
             {stepIds.map((id) => {
               const s = steps[id];
               const icon = statusIcon[s.status];
@@ -563,7 +579,7 @@ const PreExamGate = ({
           </ol>
 
           {showPreview && (
-            <div>
+            <div className="gate-preview-container min-w-0">
               <div className={`aspect-video bg-black rounded-lg overflow-hidden relative ring-2 ${calibrating ? 'ring-primary' : 'ring-transparent'}`}>
                 <video ref={previewRef} autoPlay muted playsInline className="w-full h-full object-cover -scale-x-100" />
                 {calibrating && (
@@ -653,8 +669,13 @@ const PreExamGate = ({
             <ul className="list-disc pl-5 space-y-1 text-sm text-muted-foreground mb-4">
               {failure.steps.map((line) => <li key={line}>{line}</li>)}
             </ul>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 gate-modal-actions">
               <Button iconName="RotateCw" onClick={() => void run(failure.index)}>Retry</Button>
+              {onRequestReportProblem && (
+                <Button variant="outline" iconName="AlertCircle" onClick={onRequestReportProblem}>
+                  Report a problem
+                </Button>
+              )}
               {onCancel && <Button variant="outline" onClick={onCancel}>{cancelLabel}</Button>}
             </div>
           </div>
@@ -667,27 +688,27 @@ const PreExamGate = ({
             </p>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
               <dt className="text-muted-foreground">Camera</dt>
-              <dd className="text-foreground">OK{summary.camera?.width ? ` (${summary.camera.width}×${summary.camera.height})` : ''}</dd>
+              <dd className="text-foreground min-w-0 break-words">OK{summary.camera?.width ? ` (${summary.camera.width}×${summary.camera.height})` : ''}</dd>
               <dt className="text-muted-foreground">Models</dt>
-              <dd className="text-foreground">Loaded in {fmtMs(summary.timings.models)} (face {summary.models?.delegates?.face}{summary.models?.delegates?.objects ? `, objects ${summary.models.delegates.objects}` : ''})</dd>
+              <dd className="text-foreground min-w-0 break-words">Loaded in {fmtMs(summary.timings.models)} (face {summary.models?.delegates?.face}{summary.models?.delegates?.objects ? `, objects ${summary.models.delegates.objects}` : ''})</dd>
               <dt className="text-muted-foreground">Face detection</dt>
-              <dd className="text-foreground">{m?.faceFps} fps ({fmtMs(m?.faceMs)}/frame)</dd>
+              <dd className="text-foreground min-w-0 break-words">{m?.faceFps} fps ({fmtMs(m?.faceMs)}/frame)</dd>
               {m?.objectFps != null && (<>
                 <dt className="text-muted-foreground">Object detection</dt>
-                <dd className="text-foreground">{m.objectFps} fps ({fmtMs(m.objectMs)}/frame)</dd>
+                <dd className="text-foreground min-w-0 break-words">{m.objectFps} fps ({fmtMs(m.objectMs)}/frame)</dd>
               </>)}
               <dt className="text-muted-foreground">Calibration</dt>
-              <dd className="text-foreground">Passed</dd>
+              <dd className="text-foreground min-w-0 break-words">Passed</dd>
               {summary.mic && (
                 <>
                   <dt className="text-muted-foreground">Microphone</dt>
-                  <dd className="text-foreground">{summary.mic.ok ? 'OK' : 'Error'}</dd>
+                  <dd className="text-foreground min-w-0 break-words">{summary.mic.ok ? 'OK' : 'Error'}</dd>
                   <dt className="text-muted-foreground">Ambient noise</dt>
-                  <dd className="text-foreground">
+                  <dd className="text-foreground min-w-0 break-words">
                     {summary.mic.noisyEnvironment ? 'Noisy room' : 'Quiet room'} ({Math.round((summary.mic.noiseLevel || 0) * 100)}% level)
                   </dd>
                   <dt className="text-muted-foreground">Speech detected</dt>
-                  <dd className="text-foreground">{summary.mic.speechDetected ? 'Yes' : 'No (check microphone)'}</dd>
+                  <dd className="text-foreground min-w-0 break-words">{summary.mic.speechDetected ? 'Yes' : 'No (check microphone)'}</dd>
                 </>
               )}
             </dl>
@@ -695,7 +716,7 @@ const PreExamGate = ({
         )}
 
         {(summary || (!failure && onCancel && variant === 'device-test')) && (
-          <div className="mt-6 flex justify-end gap-2">
+          <div className="mt-6 flex justify-end gap-2 gate-modal-actions">
             {summary && (
               <Button variant="outline" iconName="RotateCw" onClick={() => {
                 setSummary(null);

@@ -19,6 +19,15 @@ const getBackendOrigin = () => {
   return window.location.origin.replace(/\/$/, '');
 };
 
+const EVIDENCE_STATUS_LABELS = {
+  no_image_in_request: 'No image sent',
+  invalid_image: 'Invalid image',
+  too_large: 'Image too large',
+  storage_not_configured: 'Storage not configured',
+  upload_failed: 'Upload failed',
+  url_failed: 'Link failed',
+};
+
 const TeacherMonitoringPage = () => {
   const { examId } = useParams();
   const navigate = useNavigate();
@@ -29,6 +38,7 @@ const TeacherMonitoringPage = () => {
   const [sessions, setSessions] = useState([]);
   const [studentStates, setStudentStates] = useState({});
   const [loading, setLoading] = useState(true);
+  const [socketConnecting, setSocketConnecting] = useState(false);
   const [socketReconnecting, setSocketReconnecting] = useState(false);
   const [error, setError] = useState('');
   const { toast } = useToast();
@@ -163,12 +173,21 @@ const TeacherMonitoringPage = () => {
       onStateChange: (state) => {
         if (!mountedRef.current) return;
         if (state === 'open') {
+          setSocketConnecting(false);
           setSocketReconnecting(false);
-        } else if (state === 'reconnecting' || state === 'connecting') {
+        } else if (state === 'connecting') {
+          setSocketConnecting(true);
+          setSocketReconnecting(false);
+        } else if (state === 'reconnecting') {
+          setSocketConnecting(false);
           setSocketReconnecting(true);
         } else if (state === 'failed') {
+          setSocketConnecting(false);
           setSocketReconnecting(false);
           showToast('Live monitoring connection could not be established', 'error');
+        } else {
+          setSocketConnecting(false);
+          setSocketReconnecting(false);
         }
       },
       onOpen: async () => {
@@ -444,6 +463,12 @@ const TeacherMonitoringPage = () => {
                 <span>Live updates reconnecting…</span>
               </div>
             )}
+            {socketConnecting && !socketReconnecting && (
+              <div role="status" className="mt-2 inline-flex items-center gap-2 px-2.5 py-1 bg-primary/10 border border-primary/20 rounded text-xs text-primary font-medium">
+                <Icon name="Loader2" size={13} className="animate-spin shrink-0" />
+                <span>Connecting live updates…</span>
+              </div>
+            )}
           </div>
           <div className="mt-4 md:mt-0">
             <Button variant="outline" iconName="ArrowLeft" onClick={() => navigate('/teacher-dashboard')}>
@@ -640,8 +665,9 @@ const TeacherMonitoringPage = () => {
                           ))}
                         </div>
                       ) : (
-                        <div className="w-full md:w-1/3 bg-muted flex items-center justify-center h-32 text-xs text-muted-foreground text-center px-4">
-                          No snapshot<br/>captured
+                        <div className="w-full md:w-1/3 bg-muted flex flex-col items-center justify-center h-32 text-xs text-muted-foreground text-center px-4 gap-1">
+                          <Icon name="CameraOff" size={20} className="opacity-50" />
+                          <span className="font-medium">{EVIDENCE_STATUS_LABELS[ev.evidence_status] || 'No snapshot captured'}</span>
                         </div>
                       )}
                       <div className="p-4 flex-1">

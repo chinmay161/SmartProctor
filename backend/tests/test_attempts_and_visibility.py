@@ -5,10 +5,12 @@ from fastapi import HTTPException
 
 from app.models.enrollment import ExamEnrollment
 from app.models.exam import Exam, ExamStatus
+from app.models.exam_answer import ExamAnswer
 from app.models.exam_attempt import AttemptStatus, ExamAttempt
 from app.models.exam_question import ExamQuestion
 from app.models.exam_session import ExamSession, SessionStatus
 from app.models.question import Question
+from app.routes.attempts import resume_exam_attempt
 from app.routes.exams import _collect_completed_exam_metrics, _serialize_exam
 from app.services.analytics_service import get_exam_analytics
 from app.services.attempt_service import (
@@ -17,6 +19,8 @@ from app.services.attempt_service import (
     build_attempt_review_payload_for_student,
     check_result_visibility,
     list_available_exams_for_student,
+    resume_attempt,
+    save_answer,
     start_exam_attempt,
     submit_attempt,
     utcnow,
@@ -284,3 +288,80 @@ def test_teacher_analytics_counts_latest_attempt_no_double_count(db):
     assert metrics["submitted_count"] == 1
     # Average score must reflect latest attempt (90%), not (50+90)/2 = 70%
     assert metrics["average_score_percent"] == 90.0
+
+
+def test_save_answers_resume_submit_and_check_score(db):
+    """Verify end-to-end exam flow with SQLite PRAGMA foreign_keys=ON:
+    1. Start attempt
+    2. Save answers using bank IDs (source_question_id)
+    3. Verify answers written to DB respect FK constraint to exam_questions.id
+    4. Resume attempt: verify saved_answers are properly restored and mapped to bank IDs
+    5. Submit attempt: verify auto-grading grades correctly and updates score
+    6. Verify student review payload reflects restored answers and final score
+    """
+    exam = _make_exam(db, title="FK Validation & Scoring Exam", status=ExamStatus.ACTIVE, results_visible=True)
+    student_id = "student_fk_test"
+
+    # Create exam questions with bank IDs (source_question_id)
+    eq1 = ExamQuestion(
+        id="eq_canonical_001",
+        exam_id=exam.id,
+        source_question_id="bank_q101",
+        question_text="What is 2 + 2?",
+        type="mcq",
+        options=json.dumps(["1", "2", "3", "4"]),
+        correct_answer="4",
+        marks=5,
+    )
+    eq2 = ExamQuestion(
+        id="eq_canonical_002",
+        exam_id=exam.id,
+        source_question_id="bank_q102",
+        question_text="What is the capital of France?",
+        type="mcq",
+        options=json.dumps(["London", "Paris", "Berlin", "Madrid"]),
+        correct_answer="Paris",
+        marks=5,
+    )
+    db.add_all([eq1, eq2])
+    db.commit()
+
+    # 1. Start attempt
+    attempt = start_exam_attempt(db, exam.id, student_id)
+    assert attempt.status == AttemptStatus.IN_PROGRESS
+
+    # 2. Save answers using bank IDs ("bank_q101", "bank_q102")
+    ans1 = save_answer(db, attempt, "bank_q101", "4")
+    ans2 = save_answer(db, attempt, "bank_q102", "Paris")
+
+    # 3. Enforce FK: verify DB rows have question_id equal to exam_questions.id
+    assert ans1.question_id == eq1.id
+    assert ans2.question_id == eq2.id
+
+    db_ans1 = db.query(ExamAnswer).filter_by(attempt_id=attempt.id, question_id=eq1.id).first()
+    db_ans2 = db.query(ExamAnswer).filter_by(attempt_id=attempt.id, question_id=eq2.id).first()
+    assert db_ans1 is not None and str(db_ans1.answer) == "4"
+    assert db_ans2 is not None and db_ans2.answer == "Paris"
+
+    # 4. Resume attempt: verify saved_answers are restored and mapped to bank IDs
+    resume_res = resume_exam_attempt(exam.id, user={"sub": student_id, "roles": ["student"]})
+    assert resume_res.attempt_id == attempt.id
+    saved = {item["question_id"]: item["answer"] for item in resume_res.saved_answers}
+    assert str(saved.get("bank_q101")) == "4"
+    assert saved.get("bank_q102") == "Paris"
+
+    # 5. Submit attempt: verify score auto-graded
+    submitted = submit_attempt(db, attempt)
+    assert submitted.status == AttemptStatus.EVALUATED
+    assert submitted.score == 10  # 5 + 5
+    assert submitted.max_score_total == 10
+    assert submitted.auto_score_total == 10
+
+    # 6. Check student review payload
+    review = build_attempt_review_payload_for_student(db, exam.id, student_id)
+    assert review["score"] == 10
+    assert len(review["questions"]) == 2
+    rev_q1 = next(q for q in review["questions"] if q["question_id"] == "bank_q101")
+    assert str(rev_q1["student_answer"]) == "4"
+    assert rev_q1["final_score"] == 5
+

@@ -14,6 +14,8 @@ from app.models.exam_rules import ExamRules
 from app.models.exam_session import ExamSession
 from app.models.proctor import ProctorAssignment
 from app.models.question import Question
+from app.models.problem_report import ProblemReport
+from app.models.session_event import SessionEvent
 from app.models.snapshot import Snapshot
 from app.models.user_profile import UserProfile
 from app.models.violation import Violation

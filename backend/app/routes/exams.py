@@ -18,6 +18,7 @@ from ..models.enrollment import ExamEnrollment
 from ..models.exam_attempt import AttemptStatus, ExamAttempt
 from ..models.exam_session import ExamSession
 from ..models.violation import Violation
+from ..models.question import Question
 from ..permissions.exam_permissions import require_exam_owner
 from ..services.email_service import send_exam_completion_digest
 from ..schemas.exam import (
@@ -95,10 +96,64 @@ def _ensure_exam_is_not_already_over(exam: Exam) -> None:
     sync_exam_status_for_now(exam, utcnow())
 
 
+MCQ_TF_TYPES = {
+    "multiple-choice",
+    "mcq",
+    "multiple_choice",
+    "true-false",
+    "true_false",
+    "boolean",
+}
+
+
+def compute_is_mcq_only_for_exams(db, exams: list[Exam]) -> dict[str, bool]:
+    """
+    Computes whether each exam in the given list contains only MCQ or True/False questions.
+    Returns True only if the exam has at least one question and EVERY question type is
+    multiple-choice or true-false.
+    Executes exactly ONE database query across all questions for the entire batch of exams
+    to eliminate N+1 query overhead.
+    """
+    if not exams or db is None:
+        return {}
+
+    exam_question_map: dict[str, list[str]] = {}
+    all_question_ids: set[str] = set()
+
+    for exam in exams:
+        qids = _load_question_ids(exam.question_ids)
+        exam_question_map[exam.id] = qids
+        all_question_ids.update(qids)
+
+    if not all_question_ids:
+        return {exam.id: False for exam in exams}
+
+    questions = db.query(Question.id, Question.type).filter(Question.id.in_(all_question_ids)).all()
+    qtype_by_id = {str(qid): str(qtype or "").strip().lower() for qid, qtype in questions}
+
+    result = {}
+    for exam in exams:
+        qids = exam_question_map.get(exam.id, [])
+        if not qids:
+            result[exam.id] = False
+            continue
+
+        is_mcq = True
+        for qid in qids:
+            qtype = qtype_by_id.get(str(qid))
+            if not qtype or qtype not in MCQ_TF_TYPES:
+                is_mcq = False
+                break
+        result[exam.id] = is_mcq
+
+    return result
+
+
 def _serialize_exam(
     exam: Exam,
     completed_metrics: dict[str, Any] | None = None,
     student_id: str | None = None,
+    is_mcq_only: bool | None = None,
 ) -> ExamResponse:
     question_ids = []
     wizard_config = None
@@ -116,6 +171,12 @@ def _serialize_exam(
 
     db = object_session(exam)
     rules = db.query(ExamRules).filter_by(exam_id=exam.id).first() if db is not None else None
+
+    if is_mcq_only is None and db is not None:
+        mcq_map = compute_is_mcq_only_for_exams(db, [exam])
+        is_mcq_only = mcq_map.get(exam.id, False)
+    elif is_mcq_only is None:
+        is_mcq_only = False
 
     attempts_used = None
     has_in_progress = None
@@ -141,6 +202,8 @@ def _serialize_exam(
         wizard_config=wizard_config,
         camera_required=exam_requires_camera(wizard_config, rules),
         mic_required=exam_requires_mic(wizard_config, rules),
+        is_mcq_only=bool(is_mcq_only),
+        pilot_mode=bool(wizard_config.get("pilotMode") or wizard_config.get("pilot_mode")) if isinstance(wizard_config, dict) else False,
         start_time=_as_utc_timestamp(exam.start_time),
         end_time=_as_utc_timestamp(exam.end_time),
         status=exam.status,
@@ -280,6 +343,7 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
                 "minor_count": 0,
                 "major_count": 0,
                 "severe_count": 0,
+                "violations": [],
             }
 
         row = row_map[student_id]
@@ -294,6 +358,20 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
         elif sev == "severe":
             row["severe_count"] += unit_count
 
+        v_status = getattr(violation, "review_status", None) or "NONE"
+        v_note = getattr(violation, "review_note", None) or ""
+        row["violations"].append({
+            "id": str(violation.id),
+            "type": violation.type or "unknown",
+            "severity": sev,
+            "timestamp": violation.timestamp.isoformat() if violation.timestamp else None,
+            "review_status": v_status,
+            "review_note": v_note,
+            "reviewed_by": getattr(violation, "reviewed_by", None),
+            "reviewed_at": violation.reviewed_at.isoformat() if getattr(violation, "reviewed_at", None) else None,
+            "evidence_files": getattr(violation, "evidence_files", None),
+        })
+
         event_ts = violation.timestamp
         if row["first_violation_at"] is None or (event_ts and event_ts < row["first_violation_at"]):
             row["first_violation_at"] = event_ts
@@ -302,6 +380,13 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
 
     rows = []
     for student_id, row in row_map.items():
+        v_list = row.get("violations", [])
+        statuses = [v["review_status"] for v in v_list if v["review_status"] != "NONE"]
+        distinct_statuses = list(dict.fromkeys(statuses))
+        summary_status = ", ".join(distinct_statuses) if distinct_statuses else "NONE"
+        notes = [v["review_note"] for v in v_list if v.get("review_note")]
+        summary_note = "; ".join(notes) if notes else None
+
         rows.append(
             {
                 "student_id": student_id,
@@ -313,6 +398,9 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
                 "minor_count": row["minor_count"],
                 "major_count": row["major_count"],
                 "severe_count": row["severe_count"],
+                "review_status": summary_status,
+                "review_note": summary_note,
+                "violations": v_list,
             }
         )
     rows.sort(key=lambda item: (-item["violation_count"], item["student_id"]))
@@ -497,14 +585,29 @@ def list_exams(user=Depends(get_current_user)):
                 dirty = sync_exam_status_for_now(exam, now_utc) or dirty
             if dirty:
                 db.commit()
+            is_mcq_map = compute_is_mcq_only_for_exams(db, exams)
             response = []
             for exam in exams:
                 completed_metrics = _collect_completed_exam_metrics(db, exam) if exam.status == "ENDED" else None
-                response.append(_serialize_exam(exam, completed_metrics=completed_metrics))
+                response.append(
+                    _serialize_exam(
+                        exam,
+                        completed_metrics=completed_metrics,
+                        is_mcq_only=is_mcq_map.get(exam.id, False),
+                    )
+                )
             return response
         if "student" in roles:
             exams = list_available_exams_for_student(db, user["sub"])
-            return [_serialize_exam(exam, student_id=user["sub"]) for exam in exams]
+            is_mcq_map = compute_is_mcq_only_for_exams(db, exams)
+            return [
+                _serialize_exam(
+                    exam,
+                    student_id=user["sub"],
+                    is_mcq_only=is_mcq_map.get(exam.id, False),
+                )
+                for exam in exams
+            ]
         deny_access(user, ["teacher", "student"])
     finally:
         db.close()
@@ -515,7 +618,15 @@ def list_available_exams(user=Depends(require_role("student"))):
     db = SessionLocal()
     try:
         exams = list_available_exams_for_student(db, user["sub"])
-        return [_serialize_exam(exam, student_id=user["sub"]) for exam in exams]
+        is_mcq_map = compute_is_mcq_only_for_exams(db, exams)
+        return [
+            _serialize_exam(
+                exam,
+                student_id=user["sub"],
+                is_mcq_only=is_mcq_map.get(exam.id, False),
+            )
+            for exam in exams
+        ]
     finally:
         db.close()
 
@@ -538,8 +649,15 @@ def get_exam(exam_id: str, user=Depends(get_current_user)):
             db.commit()
             db.refresh(exam)
 
+        is_mcq_map = compute_is_mcq_only_for_exams(db, [exam])
         completed_metrics = _collect_completed_exam_metrics(db, exam) if exam.status == "ENDED" else None
-        return _serialize_exam(exam, completed_metrics=completed_metrics)
+        student_id = user["sub"] if "student" in roles else None
+        return _serialize_exam(
+            exam,
+            completed_metrics=completed_metrics,
+            student_id=student_id,
+            is_mcq_only=is_mcq_map.get(exam.id, False),
+        )
     finally:
         db.close()
 
@@ -616,6 +734,8 @@ def get_violation_report(
                     "minor_count",
                     "major_count",
                     "severe_count",
+                    "review_status",
+                    "review_note",
                 ]
             )
             for row in report_payload.rows:
@@ -630,6 +750,8 @@ def get_violation_report(
                         row.minor_count,
                         row.major_count,
                         row.severe_count,
+                        row.review_status,
+                        row.review_note or "",
                     ]
                 )
 

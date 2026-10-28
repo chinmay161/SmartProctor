@@ -13,6 +13,7 @@ class SessionEvent(Base):
     __table_args__ = (
         Index("ix_session_events_trace_id_seq", "trace_id", "seq"),
         Index("ix_session_events_session_id_server_ts", "session_id", "server_ts"),
+        Index("ix_session_events_student_id_server_ts", "student_id", "server_ts"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

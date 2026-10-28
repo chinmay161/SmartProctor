@@ -4,6 +4,7 @@ import Button from '../../../components/ui/Button';
 import Input from '../../../components/ui/Input';
 import Select from '../../../components/ui/Select';
 import { Checkbox } from '../../../components/ui/Checkbox';
+import DiagnosticsSection from './DiagnosticsSection';
 
 const SystemSettingsPanel = () => {
   const [examDuration, setExamDuration] = useState('120');
@@ -176,6 +177,7 @@ const SystemSettingsPanel = () => {
           </div>
         </div>
       </div>
+      <DiagnosticsSection />
       <div className="flex justify-end space-x-3">
         <Button variant="outline">Reset to Defaults</Button>
         <Button variant="default" iconName="Save" onClick={handleSaveSettings}>

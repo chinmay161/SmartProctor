@@ -153,3 +153,16 @@ def purge_expired_events(db: Session, retention_days: Optional[int] = None) -> i
     db.commit()
     logger.info("Purged %d expired session events older than %d days", count, retention_days)
     return count
+
+
+def purge_expired_problem_reports(db: Session, retention_days: int = 30) -> int:
+    """Deletes problem reports older than retention_days (default 30).
+    Logs counts only.
+    """
+    from ..models.problem_report import ProblemReport
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    count = db.query(ProblemReport).filter(ProblemReport.created_at < cutoff).delete(synchronize_session=False)
+    db.commit()
+    logger.info("Purged %d expired problem reports older than %d days", count, retention_days)
+    return count
+

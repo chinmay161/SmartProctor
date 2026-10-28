@@ -28,13 +28,19 @@ class Violation(Base):
     reason = Column(String, nullable=True)
     duration_ms = Column(Integer, nullable=True)
 
-    # Store in the DB column named 'metadata' but expose it on the instance as `metadata_`.
     metadata_ = Column('metadata', String, nullable=True)
     evidence_files = Column(String, nullable=True) # JSON wrapper for array
+    evidence_status = Column(String(32), nullable=True) # captured | no_image_in_request | invalid_image | too_large | storage_not_configured | upload_failed | url_failed
     
     dispute_status = Column(String, default="NONE") # NONE, PENDING, ACCEPTED, REJECTED
     dispute_reason = Column(String, nullable=True)
     integrity_deduction = Column(Integer, nullable=True)
+
+    # Teacher Review Labels (NONE | CONFIRMED | FALSE_POSITIVE | UNSURE)
+    review_status = Column(String, default="NONE", nullable=False)
+    reviewed_by = Column(String, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_note = Column(String(300), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

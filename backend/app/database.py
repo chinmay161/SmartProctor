@@ -79,6 +79,7 @@ if DATABASE_URL.startswith("sqlite"):
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON;")
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA busy_timeout=5000;")
         cursor.execute("PRAGMA synchronous=NORMAL;")
@@ -224,6 +225,8 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE violations ADD COLUMN metadata VARCHAR")
         if "evidence_files" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN evidence_files VARCHAR")
+        if "evidence_status" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN evidence_status VARCHAR(32)")
         if "dispute_status" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN dispute_status VARCHAR DEFAULT 'NONE'")
         if "dispute_reason" not in violation_columns:
@@ -232,6 +235,33 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE violations ADD COLUMN integrity_deduction INTEGER")
         if "created_at" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
+        if "review_status" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN review_status VARCHAR DEFAULT 'NONE'")
+        if "reviewed_by" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN reviewed_by VARCHAR")
+        if "reviewed_at" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN reviewed_at DATETIME")
+        if "review_note" not in violation_columns:
+            statements.append("ALTER TABLE violations ADD COLUMN review_note VARCHAR(300)")
+
+    if "problem_reports" not in tables:
+        statements.append(
+            """
+            CREATE TABLE IF NOT EXISTS problem_reports (
+                id VARCHAR(36) PRIMARY KEY,
+                student_id VARCHAR(128) NOT NULL,
+                trace_id VARCHAR(64),
+                session_id VARCHAR(36),
+                exam_id VARCHAR(36),
+                category VARCHAR(32) NOT NULL,
+                text VARCHAR(500) NOT NULL,
+                page_path VARCHAR(255) NOT NULL,
+                app_version VARCHAR(32),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status VARCHAR(16) NOT NULL DEFAULT 'OPEN'
+            )
+            """
+        )
 
     with engine.begin() as connection:
         for statement in statements:
@@ -388,6 +418,9 @@ def ensure_schema_compatibility() -> None:
             )
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_trace_id_seq ON session_events (trace_id, seq)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_session_id_server_ts ON session_events (session_id, server_ts)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_student_id_server_ts ON session_events (student_id, server_ts)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_trace_id ON session_events (trace_id)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_session_id ON session_events (session_id)"))
+        else:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_student_id_server_ts ON session_events (student_id, server_ts)"))
 

@@ -311,3 +311,182 @@ def trace_test(admin=Depends(require_role("admin"))):
     """Deliberate exception for verifying Sentry error tracking."""
     raise RuntimeError("Deliberate diagnostic exception for Sentry trace testing")
 
+
+@router.post("/diagnostics/storage-test")
+def storage_test(admin=Depends(require_role("admin"))):
+    """Diagnose S3 storage readiness by writing, signing, fetching, and deleting a test object."""
+    import os
+    mode = os.getenv("EVIDENCE_STORAGE", "local").strip().lower()
+    if mode != "s3":
+        return {
+            "mode": mode,
+            "ok": False,
+            "reason": "storage_not_configured",
+        }
+
+    from ..services.evidence_storage import get_evidence_storage, S3Storage, redact_sensitive_info
+    import uuid
+    import requests
+
+    test_key = f"diagnostics/test_{uuid.uuid4().hex}.txt"
+    test_data = b"smartproctor_storage_test"
+    step = "init"
+    storage = None
+
+    try:
+        try:
+            storage = get_evidence_storage()
+        except Exception:
+            storage = None
+        if storage is None:
+            storage = S3Storage()
+
+        bucket = getattr(storage, "bucket", "")
+        if not bucket:
+            return {
+                "mode": "s3",
+                "ok": False,
+                "step_failed": "config",
+                "error_class": "MissingBucketError",
+                "message": "S3_BUCKET is empty or not configured",
+            }
+
+        # Step 1: Write tiny test object
+        step = "write"
+        storage.save(test_data, test_key)
+
+        # Step 2: Presign URL
+        step = "presign"
+        signed_url = storage.resolve_url(test_key)
+        if not signed_url or not (signed_url.startswith("http://") or signed_url.startswith("https://")):
+            return {
+                "mode": "s3",
+                "ok": False,
+                "step_failed": "presign",
+                "error_class": "PresignError",
+                "message": "Generated signed URL is missing or invalid",
+            }
+
+        # Step 3: Fetch with short timeout
+        step = "fetch"
+        res = requests.get(signed_url, timeout=5.0)
+        if res.status_code != 200:
+            try:
+                storage.delete(test_key)
+            except Exception:
+                pass
+            return {
+                "mode": "s3",
+                "ok": False,
+                "step_failed": "fetch",
+                "error_class": "HTTPStatusError",
+                "message": f"Fetching signed URL returned status {res.status_code}",
+            }
+
+        # Step 4: Delete the object
+        step = "delete"
+        storage.delete(test_key)
+
+        return {
+            "mode": "s3",
+            "ok": True,
+            "step_failed": None,
+            "error_class": None,
+            "message": "Storage write, presign, fetch, and delete succeeded",
+        }
+
+    except Exception as exc:
+        try:
+            if storage and hasattr(storage, "delete"):
+                storage.delete(test_key)
+        except Exception:
+            pass
+        return {
+            "mode": "s3",
+            "ok": False,
+            "step_failed": step,
+            "error_class": type(exc).__name__,
+            "message": redact_sensitive_info(str(exc)),
+        }
+
+
+class ProblemReportStatusUpdate(BaseModel):
+    status: str
+
+
+@router.get("/problem-reports")
+def list_problem_reports(
+    status: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    admin=Depends(require_role("admin")),
+):
+    from ..models.problem_report import ProblemReport
+
+    db = SessionLocal()
+    try:
+        query = db.query(ProblemReport)
+        if status and status.upper() != "ALL":
+            query = query.filter(ProblemReport.status == status.upper())
+
+        total = query.count()
+        reports = (
+            query.order_by(ProblemReport.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return {
+            "items": [
+                {
+                    "id": r.id,
+                    "student_id": r.student_id,
+                    "trace_id": r.trace_id,
+                    "session_id": r.session_id,
+                    "exam_id": r.exam_id,
+                    "category": r.category,
+                    "text": r.text,
+                    "page_path": r.page_path,
+                    "app_version": r.app_version,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "status": r.status,
+                }
+                for r in reports
+            ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    finally:
+        db.close()
+
+
+@router.patch("/problem-reports/{report_id}")
+def update_problem_report_status(
+    report_id: str,
+    payload: ProblemReportStatusUpdate,
+    admin=Depends(require_role("admin")),
+):
+    from ..models.problem_report import ProblemReport
+
+    db = SessionLocal()
+    try:
+        report = db.query(ProblemReport).filter_by(id=report_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Problem report not found")
+
+        new_status = payload.status.strip().upper()
+        if new_status not in {"OPEN", "RESOLVED"}:
+            raise HTTPException(status_code=400, detail="status must be OPEN or RESOLVED")
+
+        report.status = new_status
+        db.commit()
+        db.refresh(report)
+        return {
+            "id": report.id,
+            "status": report.status,
+            "message": f"Problem report marked as {report.status}",
+        }
+    finally:
+        db.close()
+

@@ -19,8 +19,10 @@ import app.models.exam_attempt  # noqa: F401
 import app.models.exam_question  # noqa: F401
 import app.models.exam_rules  # noqa: F401
 import app.models.exam_session  # noqa: F401
+import app.models.problem_report  # noqa: F401
 import app.models.proctor  # noqa: F401
 import app.models.question  # noqa: F401
+import app.models.session_event  # noqa: F401
 import app.models.snapshot  # noqa: F401
 import app.models.user_profile  # noqa: F401
 import app.models.violation  # noqa: F401

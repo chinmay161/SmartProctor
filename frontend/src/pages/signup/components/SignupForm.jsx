@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { Link } from 'react-router-dom';
+import { isNativeApp, openUrl } from '../../../utils/platform';
 
 /* ─────────────── helpers ─────────────── */
 
@@ -60,6 +61,7 @@ const AuthField = ({ label, id, error, children }) => (
   <div className="auth-input-wrap" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
     <label
       htmlFor={id}
+      className="auth-field-label"
       style={{
         fontFamily: 'var(--auth-font-body)',
         fontSize: '0.76rem',
@@ -72,7 +74,7 @@ const AuthField = ({ label, id, error, children }) => (
     </label>
     {children}
     {error && (
-      <p style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.7rem', color: 'var(--auth-error)', marginTop: '1px' }}>
+      <p className="auth-field-error" style={{ fontFamily: 'var(--auth-font-body)', fontSize: '0.7rem', color: 'var(--auth-error)', marginTop: '1px' }}>
         {error}
       </p>
     )}
@@ -131,7 +133,11 @@ const SignupForm = () => {
     if (!validateForm()) { triggerShake(); return; }
     try {
       setIsLoading(true);
-      await loginWithRedirect({ screen_hint: 'signup', appState: { returnTo: '/student-dashboard' } });
+      await loginWithRedirect({
+        appState: { returnTo: '/student-dashboard' },
+        authorizationParams: { screen_hint: 'signup' },
+        ...(isNativeApp() ? { openUrl } : {}),
+      });
     } catch {
       setErrors({ submit: 'Unable to open signup. Please try again.' });
       setIsLoading(false);
@@ -141,7 +147,11 @@ const SignupForm = () => {
   const handleGoogleSignup = async () => {
     try {
       setIsLoading(true);
-      await loginWithRedirect({ connection: 'google-oauth2', screen_hint: 'signup', appState: { returnTo: '/student-dashboard' } });
+      await loginWithRedirect({
+        appState: { returnTo: '/student-dashboard' },
+        authorizationParams: { connection: 'google-oauth2', screen_hint: 'signup' },
+        ...(isNativeApp() ? { openUrl } : {}),
+      });
     } catch {
       setIsLoading(false);
       setErrors({ submit: 'Failed to sign up with Google. Please try again.' });
@@ -180,7 +190,7 @@ const SignupForm = () => {
         type="button"
         onClick={handleGoogleSignup}
         disabled={isLoading}
-        className="auth-fade-up-1"
+        className="auth-fade-up-1 auth-touch-btn touch-target"
         style={{
           width: '100%',
           padding: '9px 12px',
@@ -231,11 +241,12 @@ const SignupForm = () => {
       )}
 
       {/* Row 1: First + Last Name */}
-      <div className="auth-fade-up-2 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+      <div className="auth-fade-up-2 signup-names-grid grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <AuthField label="First Name" id="signup-first-name" error={errors.firstName}>
           <input
             id="signup-first-name"
             type="text"
+            autoComplete="given-name"
             placeholder="Jane"
             value={formData.firstName}
             onChange={e => handleInputChange('firstName', e.target.value)}
@@ -248,6 +259,7 @@ const SignupForm = () => {
           <input
             id="signup-last-name"
             type="text"
+            autoComplete="family-name"
             placeholder="Doe"
             value={formData.lastName}
             onChange={e => handleInputChange('lastName', e.target.value)}
@@ -264,6 +276,8 @@ const SignupForm = () => {
           <input
             id="signup-email"
             type="email"
+            autoComplete="email"
+            inputMode="email"
             placeholder="you@institution.edu"
             value={formData.email}
             onChange={e => handleInputChange('email', e.target.value)}
@@ -276,6 +290,7 @@ const SignupForm = () => {
           <input
             id="signup-institution"
             type="text"
+            autoComplete="organization"
             placeholder="MIT, Harvard, Coursera…"
             value={formData.institution}
             onChange={e => handleInputChange('institution', e.target.value)}
@@ -294,6 +309,7 @@ const SignupForm = () => {
               <input
                 id="signup-password"
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
                 placeholder="At least 8 chars · mixed"
                 value={formData.password}
                 onChange={e => handleInputChange('password', e.target.value)}
@@ -301,17 +317,19 @@ const SignupForm = () => {
                 className="auth-input"
                 style={{
                   ...inputBase,
-                  paddingRight: '38px',
+                  paddingRight: '48px',
                   borderColor: errors.password ? 'var(--auth-error)' : undefined,
                 }}
               />
               <button
                 type="button"
+                className="auth-eye-btn touch-target"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
                 onClick={() => setShowPassword(v => !v)}
                 style={{
-                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)',
                   background: 'none', border: 'none', color: 'var(--auth-text-secondary)',
-                  cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center',
+                  cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
                 <EyeIcon open={showPassword} />
@@ -349,6 +367,7 @@ const SignupForm = () => {
               <input
                 id="signup-confirm-password"
                 type={showConfirmPassword ? 'text' : 'password'}
+                autoComplete="new-password"
                 placeholder="Re-enter password"
                 value={formData.confirmPassword}
                 onChange={e => handleInputChange('confirmPassword', e.target.value)}
@@ -356,17 +375,19 @@ const SignupForm = () => {
                 className="auth-input"
                 style={{
                   ...inputBase,
-                  paddingRight: '38px',
+                  paddingRight: '48px',
                   borderColor: errors.confirmPassword ? 'var(--auth-error)' : undefined,
                 }}
               />
               <button
                 type="button"
+                className="auth-eye-btn touch-target"
+                aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
                 onClick={() => setShowConfirmPassword(v => !v)}
                 style={{
-                  position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                  position: 'absolute', right: '4px', top: '50%', transform: 'translateY(-50%)',
                   background: 'none', border: 'none', color: 'var(--auth-text-secondary)',
-                  cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center',
+                  cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
                 <EyeIcon open={showConfirmPassword} />
@@ -382,7 +403,7 @@ const SignupForm = () => {
         type="button"
         onClick={handleSubmit}
         disabled={isLoading}
-        className="auth-cta-btn auth-fade-up-5"
+        className="auth-cta-btn auth-fade-up-5 auth-touch-btn touch-target"
         style={{
           width: '100%',
           padding: '10px',
@@ -413,7 +434,7 @@ const SignupForm = () => {
 
       {/* Already have account */}
       <p
-        className="auth-fade-up-5"
+        className="auth-fade-up-5 auth-helper-text"
         style={{ textAlign: 'center', fontFamily: 'var(--auth-font-body)', fontSize: '0.82rem', color: 'var(--auth-text-secondary)' }}
       >
         Already have an account?{' '}

@@ -21,6 +21,7 @@ def record_violation(
     confidence: float | None = None,
     evidence_path: str | None = None,
     event_id: str | None = None,
+    evidence_status: str | None = None,
 ) -> tuple[ExamSession, dict]:
     """Persist the violation (score deduction, audit, thresholds) and build the proctor message."""
     updated = exam_service.auto_terminate_on_violation(
@@ -33,6 +34,7 @@ def record_violation(
         reason=reason,
         duration_ms=duration_ms,
         confidence=confidence,
+        evidence_status=evidence_status,
     )
 
     integrity_score = 100

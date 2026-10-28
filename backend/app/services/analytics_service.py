@@ -225,14 +225,32 @@ def get_exam_evidence(db: Session, exam_id: str):
         violations = db.query(Violation).filter_by(session_id=s.id).all()
         student_violations = []
         for v in violations:
+            ev_files = None
+            ev_status = getattr(v, "evidence_status", None)
             if v.evidence_files:
-                student_violations.append({
-                    "id": str(v.id),
-                    "type": v.type or "UNKNOWN",
-                    "severity": v.severity,
-                    "evidence_file": resolve_evidence_field(v.evidence_files),
-                    "timestamp": v.timestamp.isoformat() if v.timestamp else None
-                })
+                try:
+                    ev_files = resolve_evidence_field(v.evidence_files)
+                    if ev_files:
+                        ev_status = ev_status or "captured"
+                    else:
+                        ev_status = "url_failed"
+                except Exception:
+                    ev_status = "url_failed"
+            elif not ev_status:
+                ev_status = "no_image_in_request"
+
+            student_violations.append({
+                "id": str(v.id),
+                "type": v.type or "UNKNOWN",
+                "severity": v.severity,
+                "evidence_file": ev_files,
+                "evidence_status": ev_status,
+                "timestamp": v.timestamp.isoformat() if v.timestamp else None,
+                "review_status": getattr(v, "review_status", None) or "NONE",
+                "review_note": getattr(v, "review_note", None) or "",
+                "reviewed_by": getattr(v, "reviewed_by", None),
+                "reviewed_at": v.reviewed_at.isoformat() if getattr(v, "reviewed_at", None) else None,
+            })
         
         if student_violations:
             evidence_data.append({

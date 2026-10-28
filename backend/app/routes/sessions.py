@@ -1,7 +1,9 @@
+import logging
 from datetime import timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import and_
+from pydantic import BaseModel
+from sqlalchemy import and_, or_
 
 from typing import Optional
 
@@ -42,8 +44,20 @@ def _serialize_session(session: ExamSession) -> dict:
     }
 
 
+class StartSessionPayload(BaseModel):
+    trace_id: Optional[str] = None
+
+
 @router.post("/{exam_id}/start")
-def start_exam_session(exam_id: str, user=Depends(require_role("student"))):
+def start_exam_session(
+    exam_id: str,
+    payload: Optional[StartSessionPayload] = Body(default=None),
+    user=Depends(require_role("student")),
+):
+    from ..models.session_event import SessionEvent
+
+    trace_id = payload.trace_id.strip() if payload and payload.trace_id else None
+
     db = SessionLocal()
     try:
         exam = db.query(Exam).filter_by(id=exam_id).first()
@@ -66,8 +80,20 @@ def start_exam_session(exam_id: str, user=Depends(require_role("student"))):
         if existing_live:
             if not existing_live.attempt_id:
                 existing_live.attempt_id = attempt.id
-                db.commit()
-                db.refresh(existing_live)
+            if trace_id:
+                db.query(SessionEvent).filter(
+                    SessionEvent.trace_id == trace_id,
+                    SessionEvent.student_id == user["sub"],
+                    SessionEvent.session_id.is_(None),
+                ).update(
+                    {
+                        SessionEvent.session_id: existing_live.id,
+                        SessionEvent.exam_id: exam_id,
+                    },
+                    synchronize_session=False,
+                )
+            db.commit()
+            db.refresh(existing_live)
             return _serialize_session(existing_live)
 
         session = ExamSession(
@@ -82,8 +108,25 @@ def start_exam_session(exam_id: str, user=Depends(require_role("student"))):
         db.add(session)
         db.commit()
         db.refresh(session)
+
+        # Backfill gate/device events matching trace_id and student_id
+        if trace_id:
+            db.query(SessionEvent).filter(
+                SessionEvent.trace_id == trace_id,
+                SessionEvent.student_id == user["sub"],
+                SessionEvent.session_id.is_(None),
+            ).update(
+                {
+                    SessionEvent.session_id: session.id,
+                    SessionEvent.exam_id: exam_id,
+                },
+                synchronize_session=False,
+            )
+            db.commit()
+
         record_event(
             db,
+            trace_id=trace_id,
             session_id=session.id,
             exam_id=exam_id,
             student_id=user["sub"],
@@ -195,29 +238,136 @@ def report_violation(
         )
             
         evidence_path = None
-        if payload.image:
+        evidence_status = None
+
+        if not payload.image or not payload.image.strip():
+            evidence_status = "no_image_in_request"
+            err_class = "MissingImage"
+            err_msg = "No image sent in violation request"
+            logging.getLogger(__name__).error("Evidence failure [%s]: %s: %s", evidence_status, err_class, err_msg)
+            record_event(
+                db,
+                session_id=session.id,
+                exam_id=session.exam_id,
+                student_id=session.student_id,
+                category="violation",
+                name="evidence_failed",
+                data={"reason": evidence_status, "error_class": err_class, "message": err_msg},
+            )
+        else:
             header, encoded = payload.image.split(",", 1) if "," in payload.image else ("", payload.image)
+            image_data = None
+            from ..services.evidence_storage import get_evidence_storage, StorageNotConfiguredError, redact_sensitive_info
+
             try:
                 image_data = base64.b64decode(encoded)
-            except Exception:
-                raise HTTPException(400, "Invalid base64 image data")
-
-            if len(image_data) > 1 * 1024 * 1024:
-                raise HTTPException(400, "Evidence image exceeds 1MB limit")
-
-            if not image_data.startswith(b"\xff\xd8\xff"):
-                raise HTTPException(400, "Evidence image must be a valid JPEG")
-
-            from ..services.evidence_storage import get_evidence_storage
-            storage = get_evidence_storage()
-            exam_id_segment = session.exam_id or "unknown"
-            key = f"evidence/{exam_id_segment}/{session_id}/{uuid.uuid4().hex}.jpg"
-            try:
-                evidence_path = storage.save(image_data, key)
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning("Failed to save evidence snapshot: %s", type(e).__name__)
-                evidence_path = None
+                evidence_status = "invalid_image"
+                err_class = type(e).__name__
+                err_msg = redact_sensitive_info(str(e))
+                logging.getLogger(__name__).error("Evidence failure [%s]: %s: %s", evidence_status, err_class, err_msg)
+                record_event(
+                    db,
+                    session_id=session.id,
+                    exam_id=session.exam_id,
+                    student_id=session.student_id,
+                    category="violation",
+                    name="evidence_failed",
+                    data={"reason": evidence_status, "error_class": err_class, "message": err_msg},
+                )
+
+            if image_data is not None:
+                if len(image_data) > 1 * 1024 * 1024:
+                    evidence_status = "too_large"
+                    err_class = "PayloadTooLarge"
+                    err_msg = f"Evidence image size {len(image_data)} exceeds 1MB limit"
+                    logging.getLogger(__name__).error("Evidence failure [%s]: %s: %s", evidence_status, err_class, err_msg)
+                    record_event(
+                        db,
+                        session_id=session.id,
+                        exam_id=session.exam_id,
+                        student_id=session.student_id,
+                        category="violation",
+                        name="evidence_failed",
+                        data={"reason": evidence_status, "error_class": err_class, "message": err_msg},
+                    )
+                    raise HTTPException(400, "Evidence image exceeds 1MB limit")
+                elif not image_data.startswith(b"\xff\xd8\xff"):
+                    evidence_status = "invalid_image"
+                    err_class = "InvalidImageFormat"
+                    err_msg = "Evidence image must be a valid JPEG (missing magic SOI bytes)"
+                    logging.getLogger(__name__).error("Evidence failure [%s]: %s: %s", evidence_status, err_class, err_msg)
+                    record_event(
+                        db,
+                        session_id=session.id,
+                        exam_id=session.exam_id,
+                        student_id=session.student_id,
+                        category="violation",
+                        name="evidence_failed",
+                        data={"reason": evidence_status, "error_class": err_class, "message": err_msg},
+                    )
+                    raise HTTPException(400, "Evidence image must be a valid JPEG")
+                else:
+                    exam_id_segment = session.exam_id or "unknown"
+                    key = f"evidence/{exam_id_segment}/{session_id}/{uuid.uuid4().hex}.jpg"
+                    from ..services.evidence_storage import StorageEvidenceError
+                    try:
+                        storage = get_evidence_storage()
+                        evidence_path = storage.save(image_data, key)
+                        evidence_status = "captured"
+                    except StorageEvidenceError as e:
+                        evidence_status = e.reason
+                        err_class = type(e).__name__
+                        err_msg = redact_sensitive_info(str(e))
+                        logging.getLogger(__name__).error("Evidence failure [%s]: %s: %s", evidence_status, err_class, err_msg)
+                        record_event(
+                            db,
+                            session_id=session.id,
+                            exam_id=session.exam_id,
+                            student_id=session.student_id,
+                            category="violation",
+                            name="evidence_failed",
+                            data={"reason": evidence_status, "error_class": err_class, "message": err_msg},
+                        )
+                        evidence_path = None
+                    except StorageNotConfiguredError as e:
+                        evidence_status = "storage_not_configured"
+                        err_class = type(e).__name__
+                        err_msg = redact_sensitive_info(str(e))
+                        logging.getLogger(__name__).error("Evidence failure [%s]: %s: %s", evidence_status, err_class, err_msg)
+                        record_event(
+                            db,
+                            session_id=session.id,
+                            exam_id=session.exam_id,
+                            student_id=session.student_id,
+                            category="violation",
+                            name="evidence_failed",
+                            data={"reason": evidence_status, "error_class": err_class, "message": err_msg},
+                        )
+                        evidence_path = None
+                    except Exception as e:
+                        err_class = type(e).__name__
+                        err_msg = redact_sensitive_info(str(e))
+                        msg_lower = err_msg.lower()
+                        if "not configured" in msg_lower or "storage_not_configured" in msg_lower:
+                            evidence_status = "storage_not_configured"
+                        elif "too_large" in msg_lower or "too large" in msg_lower:
+                            evidence_status = "too_large"
+                        elif "invalid_image" in msg_lower or "invalid image" in msg_lower:
+                            evidence_status = "invalid_image"
+                        else:
+                            evidence_status = "upload_failed"
+                        logging.getLogger(__name__).error("Evidence failure [%s]: %s: %s", evidence_status, err_class, err_msg)
+                        record_event(
+                            db,
+                            session_id=session.id,
+                            exam_id=session.exam_id,
+                            student_id=session.student_id,
+                            category="violation",
+                            name="evidence_failed",
+                            data={"reason": evidence_status, "error_class": err_class, "message": err_msg},
+                        )
+                        evidence_path = None
 
         updated, message = record_violation(
             db,
@@ -230,6 +380,7 @@ def report_violation(
             confidence=payload.confidence,
             evidence_path=evidence_path,
             event_id=payload.event_id,
+            evidence_status=evidence_status,
         )
         notify_proctors_from_thread(session.exam_id, message)
 
@@ -355,7 +506,30 @@ def get_session_events(
         if not roles.intersection({"admin", "school_admin"}):
             require_proctor(db, session.exam_id, user["sub"])
 
-        query = db.query(SessionEvent).filter_by(session_id=session_id)
+        # Find any trace_ids associated with this session's events to also surface
+        # pre-session gate/device events for this student
+        session_traces = [
+            t[0]
+            for t in db.query(SessionEvent.trace_id)
+            .filter(SessionEvent.session_id == session_id)
+            .distinct()
+            .all()
+            if t[0]
+        ]
+
+        if session_traces:
+            query = db.query(SessionEvent).filter(
+                or_(
+                    SessionEvent.session_id == session_id,
+                    and_(
+                        SessionEvent.trace_id.in_(session_traces),
+                        SessionEvent.student_id == session.student_id,
+                    ),
+                )
+            )
+        else:
+            query = db.query(SessionEvent).filter_by(session_id=session_id)
+
         if category:
             query = query.filter(SessionEvent.category == category.lower().strip())
 

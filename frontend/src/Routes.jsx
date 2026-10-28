@@ -4,6 +4,7 @@ import ScrollToTop from './components/ScrollToTop';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ProtectedRoute, PublicRoute } from './components/ProtectedRoute';
 import { DashboardSkeleton } from './components/ui/Skeleton';
+import NativeAuthHandler from './components/auth/NativeAuthHandler';
 
 // Lazy-loaded route components for chunk splitting
 const LandingPage = lazy(() => import('./pages/landing'));
@@ -22,14 +23,40 @@ const TeacherViolationReportPage = lazy(() => import('./pages/teacher-violation-
 const ExamPortal = lazy(() => import('./pages/exam-portal'));
 const TeacherMonitoringPage = lazy(() => import('./pages/exam-monitoring'));
 const HeadPoseDiagnosticPage = lazy(() => import('./pages/headpose-diagnostic'));
+const AppSpikeBenchmark = lazy(() => import('./pages/app-spike'));
+const ExamLockSpikePage = lazy(() => import('./pages/app-spike/ExamLockSpikePage'));
+const UseWebVersionPage = lazy(() => import('./pages/native-guard/UseWebVersionPage'));
+
+const isAppSpike = import.meta.env.VITE_APP_SPIKE === 'true' || import.meta.env.DEV;
 
 const Routes = () => {
   return (
     <BrowserRouter>
+      <NativeAuthHandler />
       <ErrorBoundary>
         <ScrollToTop />
         <Suspense fallback={<DashboardSkeleton />}>
           <RouterRoutes>
+            {/* Native Guard Route */}
+            <Route
+              path="/use-web-version"
+              element={<UseWebVersionPage />}
+            />
+
+            {/* App Spike & Lockdown Benchmark */}
+            {isAppSpike && (
+              <>
+                <Route
+                  path="/app-spike"
+                  element={<AppSpikeBenchmark />}
+                />
+                <Route
+                  path="/app-spike/lock"
+                  element={<ExamLockSpikePage />}
+                />
+              </>
+            )}
+
             {/* Public Routes */}
             <Route
               path="/"

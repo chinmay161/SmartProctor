@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useSession } from '../context/SessionContext';
@@ -7,6 +8,7 @@ import {
   dashboardForRoles,
   hasAnyRequiredRole,
 } from '../utils/roleUtils';
+import { isNativeApp } from '../utils/platform';
 
 /**
  * ProtectedRoute Component
@@ -48,6 +50,16 @@ export const ProtectedRoute = ({
   // Not authenticated
   if (!effectiveIsAuthenticated) {
     return <Navigate to={loginPath} state={{ from: location }} replace />;
+  }
+
+  // Native guard: If user's role is teacher/admin or route requires teacher/admin,
+  // redirect every teacher/admin route to the full-screen "Use the web version" page.
+  if (isNativeApp()) {
+    const isTeacherOrAdminUser = effectiveRoles.some((r) => r === 'teacher' || r === 'admin');
+    const isTeacherOrAdminRoute = requiredRoles.some((r) => r === 'teacher' || r === 'admin');
+    if (isTeacherOrAdminUser || isTeacherOrAdminRoute) {
+      return <Navigate to="/use-web-version" replace />;
+    }
   }
 
   // Enforce role-based access
@@ -105,6 +117,9 @@ export const PublicRoute = ({
   if (effectiveIsAuthenticated) {
     if (forceLogin) {
       return <Component {...rest} />;
+    }
+    if (isNativeApp() && effectiveRoles.some((r) => r === 'teacher' || r === 'admin')) {
+      return <Navigate to="/use-web-version" replace />;
     }
     const rolePath = dashboardForRoles(effectiveRoles);
     if (rolePath === '/login') {
