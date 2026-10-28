@@ -433,7 +433,8 @@ class ConfigurableFakeStorage(EvidenceStorage):
             raise self.fail_resolve_error
         if not stored_value:
             return stored_value
-        return f"https://signed-storage.example.com/{stored_value.lstrip('/\\')}?token=valid_token"
+        clean_val = stored_value.lstrip("/\\")
+        return f"https://signed-storage.example.com/{clean_val}?token=valid_token"
 
     def delete(self, key: str) -> None:
         clean_key = key.lstrip("/\\")

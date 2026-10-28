@@ -595,7 +595,7 @@ def save_answer(db: Session, attempt: ExamAttempt, question_id: str, answer: Any
 
     questions, question_lookup = _question_lookup_for_attempt(db, attempt)
     question = question_lookup.get(str(question_id)) if questions else None
-target_question_id = str(question.id) if question else str(question_id)
+    target_question_id = str(question.id) if question else str(question_id)
     target_marks = int(question.marks or 1) if question else 1
 
     existing = (
