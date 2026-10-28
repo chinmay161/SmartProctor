@@ -190,4 +190,84 @@ pytest
 
 # AI Worker diagnostic verification
 python -c "from inference.diagnostics import get_environment_diagnostics; print(get_environment_diagnostics())"
+
+# Frontend unit tests
+cd frontend
+npm test
+
+# Android native unit tests
+cd frontend/android
+./gradlew testDebugUnitTest
 ```
+
+---
+
+# 📱 SmartProctor Android Application
+
+The SmartProctor native Android app provides a secure kiosk environment tailored for examination delivery.
+
+### 📥 Download Latest APK
+Download the latest production release directly from [GitHub Releases](https://github.com/chinmay161/SmartProctor/releases/latest):
+* **Release Asset**: `SmartProctor-v1.0.0-release.apk` (or `app-release.apk`)
+* **Minimum Android Version**: Android 7.0 (Nougat, API level 24)
+* **Target Android Version**: Android 16 (API level 36)
+
+### 🛡️ Native Security & Proctoring Features
+* **Kiosk Window Pinning (`startLockTask()`)**: Locks the application into a foreground kiosk session, detecting pinning exits and task switching.
+* **Anti-Screen Capture (`FLAG_SECURE`)**: Prevents screenshots, screen recording capture, and conceals window contents in the Android recent apps list.
+* **Android 14+ Screenshot Callback Detection**: Real-time violation event signaling when hardware screenshot combinations are triggered.
+* **Strict HTTPS Only**: Cleartext HTTP traffic is disabled globally via `network_security_config.xml`.
+* **Backup Extraction Protection**: `android:allowBackup="false"` prevents arbitrary extraction of exam state or authentication cache via ADB or cloud backups.
+
+### 🔄 In-App Updater System
+The Android application features a self-updating pipeline directly powered by GitHub Releases:
+* **Cryptographic APK Signature Verification**: Before handing any downloaded package to the Android Package Installer, the app verifies the candidate APK's signing certificate against the installed app's SHA-256 certificate fingerprint. If a signature mismatch or corrupted package is detected, installation is blocked and the malicious/corrupted file is deleted.
+* **ETag HTTP Caching**: Uses `If-None-Match` and `304 Not Modified` headers to eliminate unnecessary data consumption.
+* **Frequency Gating & Rate-Limit Resilience**: Automatic background update checks occur at most once every 12 hours (configurable via `UpdateConfig`), while gracefully respecting GitHub `X-RateLimit-*` headers without interrupting the student's exam.
+* **Deterministic Asset Selection**: Prioritizes production release APKs (`release` > `universal` > standard) while strictly rejecting debug and test builds.
+* **Download Deduplication**: Monitors existing active download tasks via Android's `DownloadManager` to prevent duplicate downloads.
+
+---
+
+# 🏗️ Building the Production Android APK
+
+### 1. Build Web Assets
+```bash
+cd frontend
+# Ensure .env.production exists or set VITE_API_BASE to your HTTPS backend
+npm run build:android
+```
+
+### 2. Configure Release Signing
+Configure your release signing credentials using either `keystore.properties` or environment variables:
+
+**Option A: keystore.properties** (see `frontend/android/keystore.properties.example`):
+```properties
+storeFile=/path/to/smartproctor-release.jks
+storePassword=your-keystore-password
+keyAlias=smartproctor
+keyPassword=your-key-password
+```
+
+**Option B: Environment Variables**:
+```bash
+export SMARTPROCTOR_KEYSTORE_PATH="/path/to/smartproctor-release.jks"
+export SMARTPROCTOR_KEYSTORE_PASSWORD="your-keystore-password"
+export SMARTPROCTOR_KEY_ALIAS="smartproctor"
+export SMARTPROCTOR_KEY_PASSWORD="your-key-password"
+```
+
+### 3. Assemble Release APK
+```bash
+cd frontend/android
+./gradlew assembleRelease
+```
+The signed APK will be generated at:
+`frontend/android/app/build/outputs/apk/release/app-release.apk`
+
+---
+
+# 📄 License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
