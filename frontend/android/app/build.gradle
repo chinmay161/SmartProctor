@@ -9,7 +9,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -17,6 +17,33 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    signingConfigs {
+        release {
+            // Best practice: Load release keystore credentials from keystore.properties or environment variables
+            def keystoreFile = rootProject.file("keystore.properties")
+            def keystoreProperties = new Properties()
+            if (keystoreFile.exists()) {
+                keystoreFile.withInputStream { keystoreProperties.load(it) }
+            }
+
+            def storeFilePath = System.getenv("SMARTPROCTOR_KEYSTORE_PATH") ?: keystoreProperties['storeFile']
+            def storePasswordVal = System.getenv("SMARTPROCTOR_KEYSTORE_PASSWORD") ?: keystoreProperties['storePassword']
+            def keyAliasVal = System.getenv("SMARTPROCTOR_KEY_ALIAS") ?: keystoreProperties['keyAlias']
+            def keyPasswordVal = System.getenv("SMARTPROCTOR_KEY_PASSWORD") ?: keystoreProperties['keyPassword']
+
+            if (storeFilePath) {
+                def resolvedFile = rootProject.file(storeFilePath).exists() ? rootProject.file(storeFilePath) : file(storeFilePath)
+                if (resolvedFile.exists()) {
+                    storeFile resolvedFile
+                    storePassword storePasswordVal
+                    keyAlias keyAliasVal
+                    keyPassword keyPasswordVal
+                }
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
@@ -31,6 +58,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+
+            def releaseSigning = signingConfigs.findByName("release")
+            if (releaseSigning?.storeFile?.exists()) {
+                signingConfig releaseSigning
+            }
         }
     }
 }

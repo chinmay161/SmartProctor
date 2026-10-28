@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Strictly disallow all cleartext (HTTP) traffic for production security -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Pinned domain rules for updater and backend -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">smartproctor-backend.onrender.com</domain>
+        <domain includeSubdomains="true">github.com</domain>
+        <domain includeSubdomains="true">api.github.com</domain>
+        <domain includeSubdomains="true">objects.githubusercontent.com</domain>
+        <domain includeSubdomains="true">auth0.com</domain>
+    </domain-config>
+</network-security-config>
