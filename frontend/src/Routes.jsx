@@ -22,6 +22,7 @@ import AIDiagnosticsDashboard from './pages/ai-diagnostics';
 import AppSpikeBenchmark from './pages/app-spike';
 import ExamLockSpikePage from './pages/app-spike/ExamLockSpikePage';
 import UseWebVersionPage from './pages/native-guard/UseWebVersionPage';
+import SettingsPage from './pages/settings';
 
 import NativeAuthHandler from './components/auth/NativeAuthHandler';
 
@@ -50,6 +51,11 @@ const Routes = () => {
           <Route
             path="/use-web-version"
             element={<UseWebVersionPage />}
+          />
+          {/* Settings & Update Screen */}
+          <Route
+            path="/settings"
+            element={<SettingsPage />}
           />
           {/* Public Routes */}
           <Route 

@@ -194,9 +194,15 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
                       <Icon name="User" size={16} />
                       <span>Profile Settings</span>
                     </button>
-                    <button className="w-full px-4 py-2 text-left text-sm text-foreground hover:bg-muted transition-smooth flex items-center space-x-3">
+                    <button
+                      onClick={() => {
+                        setIsProfileMenuOpen(false);
+                        navigate('/settings');
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-foreground hover:bg-muted transition-smooth flex items-center space-x-3"
+                    >
                       <Icon name="Settings" size={16} />
-                      <span>Preferences</span>
+                      <span>Settings</span>
                     </button>
                     <button className="w-full px-4 py-2 text-left text-sm text-foreground hover:bg-muted transition-smooth flex items-center space-x-3">
                       <Icon name="HelpCircle" size={16} />
@@ -242,6 +248,20 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
                 <span className="text-sm font-medium">{item?.label}</span>
               </button>
             ))}
+            <button
+              onClick={() => {
+                setIsMobileMenuOpen(false);
+                navigate('/settings');
+              }}
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-md transition-smooth ${
+                isActivePath('/settings')
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              <Icon name="Settings" size={20} />
+              <span className="text-sm font-medium">Settings & Updates</span>
+            </button>
           </nav>
         </div>
       )}
