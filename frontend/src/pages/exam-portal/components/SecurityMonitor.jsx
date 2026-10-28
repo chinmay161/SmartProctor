@@ -135,11 +135,16 @@ const SecurityMonitor = forwardRef(({
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (video.videoWidth === 0 || video.videoHeight === 0) return null;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL('image/jpeg', 0.8);
+      try {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Failed to get 2d context');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', 0.8);
+      } catch (err) {
+        throw new Error(`canvas error: ${err?.message || 'draw failed'}`);
+      }
     }
   }), [cameraStatus]);
 

@@ -13,6 +13,40 @@ const DiagnosticsSection = () => {
   const [backendMessage, setBackendMessage] = useState('');
   const [frontendMessage, setFrontendMessage] = useState('');
 
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageResult, setStorageResult] = useState(null);
+
+  const handleTestStorage = async () => {
+    setStorageLoading(true);
+    setStorageResult(null);
+
+    try {
+      let token = null;
+      try {
+        if (typeof getAccessTokenSilently === 'function') {
+          token = await getAccessTokenSilently({
+            authorizationParams: { audience: auth0Audience },
+          });
+        }
+      } catch {
+        // Continue even if token acquisition encounters an issue
+      }
+
+      const res = await apiRequest('/admin/diagnostics/storage-test', 'POST', null, token);
+      setStorageResult(res);
+    } catch (err) {
+      setStorageResult({
+        ok: false,
+        mode: 'unknown',
+        step_failed: 'request',
+        error_class: err?.name || 'NetworkError',
+        message: err?.message || 'Failed to call storage-test endpoint',
+      });
+    } finally {
+      setStorageLoading(false);
+    }
+  };
+
   const handleSendTestErrors = async () => {
     setLoading(true);
     setBackendMessage('');
@@ -77,47 +111,113 @@ const DiagnosticsSection = () => {
         <div>
           <h3 className="text-lg font-heading font-semibold text-foreground">Diagnostics</h3>
           <p className="text-sm text-muted-foreground">
-            Test error tracking, request correlation, and Sentry integration
+            Test error tracking, request correlation, Sentry integration, and evidence storage
           </p>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Send intentional backend and frontend test errors to verify error logging and correlation across services.
-        </p>
+      <div className="space-y-6">
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Send intentional backend and frontend test errors to verify error logging and correlation across services.
+          </p>
 
-        <div>
-          <Button
-            variant="outline"
-            onClick={handleSendTestErrors}
-            disabled={loading}
-            data-testid="send-test-errors-btn"
-          >
-            {loading ? 'Sending test errors...' : 'Send test errors'}
-          </Button>
+          <div>
+            <Button
+              variant="outline"
+              onClick={handleSendTestErrors}
+              disabled={loading}
+              data-testid="send-test-errors-btn"
+            >
+              {loading ? 'Sending test errors...' : 'Send test errors'}
+            </Button>
+          </div>
+
+          {(backendMessage || frontendMessage) && (
+            <div className="mt-4 p-3 rounded-md bg-muted/40 border border-border space-y-2 text-sm">
+              {backendMessage && (
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold text-foreground">Backend:</span>
+                  <span className="text-muted-foreground font-mono" data-testid="backend-test-status">
+                    {backendMessage}
+                  </span>
+                </div>
+              )}
+              {frontendMessage && (
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold text-foreground">Frontend:</span>
+                  <span className="text-muted-foreground" data-testid="frontend-sentry-status">
+                    {frontendMessage}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {(backendMessage || frontendMessage) && (
-          <div className="mt-4 p-3 rounded-md bg-muted/40 border border-border space-y-2 text-sm">
-            {backendMessage && (
-              <div className="flex items-start gap-2">
-                <span className="font-semibold text-foreground">Backend:</span>
-                <span className="text-muted-foreground font-mono" data-testid="backend-test-status">
-                  {backendMessage}
-                </span>
-              </div>
-            )}
-            {frontendMessage && (
-              <div className="flex items-start gap-2">
-                <span className="font-semibold text-foreground">Frontend:</span>
-                <span className="text-muted-foreground" data-testid="frontend-sentry-status">
-                  {frontendMessage}
-                </span>
-              </div>
-            )}
+        {/* Evidence Storage Testing */}
+        <div className="pt-4 border-t border-border space-y-4">
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">Evidence Storage (S3 / Supabase)</h4>
+            <p className="text-sm text-muted-foreground">
+              Test object storage write, signed URL generation, HTTP fetch, and deletion without raising 500 errors.
+            </p>
           </div>
-        )}
+
+          <div>
+            <Button
+              variant="outline"
+              onClick={handleTestStorage}
+              disabled={storageLoading}
+              data-testid="test-storage-btn"
+            >
+              {storageLoading ? 'Testing storage...' : 'Test storage'}
+            </Button>
+          </div>
+
+          {storageResult && (
+            <div
+              className="mt-4 p-3 rounded-md bg-muted/40 border border-border space-y-2 text-sm"
+              data-testid="storage-test-status"
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-foreground">Status:</span>
+                <span
+                  className={`px-2 py-0.5 text-xs font-semibold rounded ${
+                    storageResult.ok ? 'bg-emerald-500/20 text-emerald-500' : 'bg-destructive/20 text-destructive'
+                  }`}
+                >
+                  {storageResult.ok ? 'PASS' : 'FAIL'}
+                </span>
+                <span className="text-xs text-muted-foreground font-mono">mode: {storageResult.mode}</span>
+              </div>
+              {storageResult.reason && (
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold text-foreground">Reason:</span>
+                  <span className="text-muted-foreground font-mono">{storageResult.reason}</span>
+                </div>
+              )}
+              {storageResult.step_failed && (
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold text-foreground">Failed Step:</span>
+                  <span className="text-destructive font-mono">{storageResult.step_failed}</span>
+                </div>
+              )}
+              {storageResult.error_class && (
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold text-foreground">Error Class:</span>
+                  <span className="text-muted-foreground font-mono">{storageResult.error_class}</span>
+                </div>
+              )}
+              {storageResult.message && (
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold text-foreground">Message:</span>
+                  <span className="text-muted-foreground font-mono">{storageResult.message}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

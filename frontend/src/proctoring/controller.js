@@ -546,11 +546,17 @@ export function createVisionController({
     const scale = Math.min(1, cfg.evidenceMaxWidth / video.videoWidth);
     const width = Math.round(video.videoWidth * scale);
     const height = Math.round(video.videoHeight * scale);
-    if (!evidenceCanvas) evidenceCanvas = document.createElement('canvas');
-    evidenceCanvas.width = width;
-    evidenceCanvas.height = height;
-    evidenceCanvas.getContext('2d').drawImage(video, 0, 0, width, height);
-    return evidenceCanvas.toDataURL('image/jpeg', cfg.evidenceQuality);
+    try {
+      if (!evidenceCanvas) evidenceCanvas = document.createElement('canvas');
+      evidenceCanvas.width = width;
+      evidenceCanvas.height = height;
+      const ctx = evidenceCanvas.getContext('2d');
+      if (!ctx) throw new Error('Failed to get 2d context');
+      ctx.drawImage(video, 0, 0, width, height);
+      return evidenceCanvas.toDataURL('image/jpeg', cfg.evidenceQuality);
+    } catch (err) {
+      throw new Error(`canvas error: ${err?.message || 'draw failed'}`);
+    }
   }
 
   function handleEvents(events) {

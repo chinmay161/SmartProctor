@@ -18,6 +18,15 @@ const getBackendOrigin = () => {
   return window.location.origin.replace(/\/$/, '');
 };
 
+const EVIDENCE_STATUS_LABELS = {
+  no_image_in_request: 'No image sent',
+  invalid_image: 'Invalid image',
+  too_large: 'Image too large',
+  storage_not_configured: 'Storage not configured',
+  upload_failed: 'Upload failed',
+  url_failed: 'Link failed',
+};
+
 const TeacherMonitoringPage = () => {
   const { examId } = useParams();
   const navigate = useNavigate();
@@ -655,8 +664,9 @@ const TeacherMonitoringPage = () => {
                           ))}
                         </div>
                       ) : (
-                        <div className="w-full md:w-1/3 bg-muted flex items-center justify-center h-32 text-xs text-muted-foreground text-center px-4">
-                          No snapshot<br/>captured
+                        <div className="w-full md:w-1/3 bg-muted flex flex-col items-center justify-center h-32 text-xs text-muted-foreground text-center px-4 gap-1">
+                          <Icon name="CameraOff" size={20} className="opacity-50" />
+                          <span className="font-medium">{EVIDENCE_STATUS_LABELS[ev.evidence_status] || 'No snapshot captured'}</span>
                         </div>
                       )}
                       <div className="p-4 flex-1">

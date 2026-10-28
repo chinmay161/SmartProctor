@@ -232,6 +232,7 @@ const ExamPortal = () => {
   const [micRequired, setMicRequired] = useState(false);
   const clientVision = (cameraRequired || micRequired) && INFERENCE_MODE === 'client';
   const visionViolationRef = useRef(null);
+  const lastEvidenceCaptureTimeRef = useRef(0);
   const vision = useVisionProctoring({
     detectObjects: Boolean(securityConfig?.detectMobilePhone),
     micRequired,
@@ -1041,10 +1042,34 @@ const ExamPortal = () => {
     
     // Evidence: the vision frame that triggered it, else a current camera frame.
     let snapshotImage = extras.image || null;
-    if (!snapshotImage && clientVision && !document.hidden) {
-      snapshotImage = vision.captureEvidence();
-    } else if (!snapshotImage && securityMonitorRef.current?.captureImage) {
-      snapshotImage = securityMonitorRef.current.captureImage();
+    let evidenceNotCapturedReason = extras.evidenceReason || extras.evidenceNotCapturedReason || null;
+
+    if (!snapshotImage) {
+      const now = Date.now();
+      const minIntervalMs = 1000;
+      if (lastEvidenceCaptureTimeRef.current && (now - lastEvidenceCaptureTimeRef.current < minIntervalMs)) {
+        evidenceNotCapturedReason = evidenceNotCapturedReason || 'rate limit';
+      } else {
+        let captureResult = null;
+        try {
+          if (clientVision && !document.hidden && vision?.captureEvidence) {
+            captureResult = vision.captureEvidence();
+          } else if (securityMonitorRef.current?.captureImage && !document.hidden) {
+            captureResult = securityMonitorRef.current.captureImage();
+          }
+        } catch {
+          evidenceNotCapturedReason = 'canvas error';
+        }
+
+        if (captureResult) {
+          snapshotImage = captureResult;
+          lastEvidenceCaptureTimeRef.current = now;
+        } else if (!evidenceNotCapturedReason) {
+          evidenceNotCapturedReason = 'video not ready';
+        }
+      }
+    } else {
+      lastEvidenceCaptureTimeRef.current = Date.now();
     }
 
     setViolations((prev) => {
@@ -1078,6 +1103,14 @@ const ExamPortal = () => {
       reason: extras.reason || message,
       duration_ms: Number.isFinite(extras.durationMs) ? Math.round(extras.durationMs) : null,
     };
+
+    if (!snapshotImage) {
+      flightRecorder.record('violation', 'evidence_not_captured', {
+        type: type || 'UNKNOWN',
+        reason: evidenceNotCapturedReason || 'video not ready',
+        event_id,
+      });
+    }
 
     flightRecorder.record('violation', 'violation_reported', {
       type: type || 'UNKNOWN',
