@@ -29,6 +29,8 @@ const ExamInterruptionOverlays = ({
   onEnterFullscreen,
   violationLock,
   isNative = false,
+  pinningLost = false,
+  onRePin,
 }) => {
   return (
     <>
@@ -165,6 +167,30 @@ const ExamInterruptionOverlays = ({
               className="w-full touch-target"
             >
               Enter Fullscreen
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Native lockdown screen pinning lost sheet */}
+      {isNative && pinningLost && (
+        <div className="fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 sm:p-6 overflow-y-auto min-h-dvh">
+          <div className="max-w-md w-full bg-card border border-border rounded-2xl shadow-2xl p-5 sm:p-6 text-center my-auto">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-full bg-destructive/15 flex items-center justify-center mb-4">
+              <Icon name="Lock" size={26} className="text-destructive" />
+            </div>
+            <h2 className="text-base sm:text-lg font-semibold text-foreground mb-2">Screen Pinning Required</h2>
+            <p className="text-xs sm:text-sm text-muted-foreground mb-5">
+              Screen pinning stopped. Turn it back on to continue.
+            </p>
+            <Button
+              variant="default"
+              size="lg"
+              iconName="Lock"
+              onClick={onRePin}
+              className="w-full touch-target"
+            >
+              Turn on screen pinning
             </Button>
           </div>
         </div>

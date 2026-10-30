@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Icon from '../AppIcon';
 import Button from '../ui/Button';
 import { probeCameraPermission } from './useVisionProctoring';
@@ -7,6 +7,7 @@ import { requestExamFullscreen } from './fullscreen';
 import { isNativeApp } from '../../utils/platform';
 import flightRecorder from '../../telemetry/flightRecorder';
 import { getDeviceSnapshot } from '../../telemetry/deviceSnapshot';
+import ExamLock from '../../plugins/examLock';
 
 export const MIN_FACE_FPS = 2;
 
@@ -110,6 +111,8 @@ const STEP_LABELS = {
   speech: 'Voice check (say: "I am ready")',
   screen: 'Share your entire screen',
   fullscreen: 'Enter fullscreen',
+  dnd: 'Silence interruptions (Do Not Disturb)',
+  screenLock: 'Lock your screen',
 };
 
 const FULLSCREEN_HELP = {
@@ -168,12 +171,22 @@ const PreExamGate = ({
     ? ['mic', 'noise', 'speech']
     : [];
   const isNative = isNativeApp();
-  const stepIds = [
+  const nativeSteps = isNative && variant !== 'device-test' && variant !== 'permission-only'
+    ? ['dnd', 'screenLock']
+    : [];
+  const webSteps = !isNative && variant !== 'device-test'
+    ? [
+        ...(requireScreenShare ? ['screen'] : []),
+        ...(requireFullscreen ? ['fullscreen'] : []),
+      ]
+    : [];
+  const stepIds = useMemo(() => [
     ...visionSteps,
     ...audioSteps,
-    ...(!isNative && requireScreenShare && variant !== 'device-test' ? ['screen'] : []),
-    ...(!isNative && requireFullscreen && variant !== 'device-test' ? ['fullscreen'] : []),
-  ];
+    ...nativeSteps,
+    ...webSteps,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [cameraRequired, variant, skipFps, micRequired, isNative, requireScreenShare, requireFullscreen]);
 
   const [steps, setSteps] = useState(() => Object.fromEntries(stepIds.map((id) => [id, { status: 'pending', detail: '' }])));
   const [failure, setFailure] = useState(null); // { step, title, steps[] }
@@ -182,11 +195,27 @@ const PreExamGate = ({
   const [calibrating, setCalibrating] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [dndPrompt, setDndPrompt] = useState(false);
+  const [dndSelfConfirmed, setDndSelfConfirmed] = useState(false);
+  const [dndOfferSelfConfirm, setDndOfferSelfConfirm] = useState(false);
+  const [pinningPrompt, setPinningPrompt] = useState(null); // { attempt }
   const resultsRef = useRef({ timings: {} });
   const runningRef = useRef(false);
   const continueRef = useRef(null);
   const previewRef = useRef(null);
   const startedRef = useRef(false);
+  const dndResolveRef = useRef(null);
+  const dndIntervalRef = useRef(null);
+  const pinRetryResolveRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (dndIntervalRef.current) {
+        clearInterval(dndIntervalRef.current);
+        dndIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let unsubLevel = null;
@@ -501,6 +530,154 @@ const PreExamGate = ({
           flightRecorder.record('gate', 'gate_step_end', { step: id, status: 'ok' });
           setStep(id, 'ok', 'Fullscreen on');
         }
+
+        if (id === 'dnd') {
+          setStep(id, 'running', 'Checking Do Not Disturb…');
+          const checkDnd = async () => {
+            try {
+              return await ExamLock.getState();
+            } catch {
+              return { interruptionFilter: 0 };
+            }
+          };
+
+          let dndState = await checkDnd();
+          let filter = dndState?.interruptionFilter;
+
+          // Any value other than ALL (1) counts as on (e.g. PRIORITY=2, NONE=3, ALARMS=4).
+          if (filter !== 1 && filter !== 0 && filter !== -1 && filter != null) {
+            flightRecorder.record('lockdown', 'dnd_check', { filter, status: 'active' });
+            setStep(id, 'ok', `Do Not Disturb is on (${dndState?.interruptionFilterName || 'Active'})`);
+          } else {
+            flightRecorder.record('lockdown', 'dnd_check', { filter, status: filter === 1 ? 'all' : 'unknown' });
+            const isUnknownFromStart = filter === 0 || filter === -1 || filter == null;
+            if (isUnknownFromStart) {
+              setDndOfferSelfConfirm(true);
+            }
+            setDndPrompt(true);
+
+            await new Promise((resolve) => {
+              let pollCount = 0;
+              const initialFilter = filter;
+
+              dndResolveRef.current = (confirmedViaCheckbox) => {
+                if (dndIntervalRef.current) {
+                  clearInterval(dndIntervalRef.current);
+                  dndIntervalRef.current = null;
+                }
+                if (confirmedViaCheckbox) {
+                  flightRecorder.record('lockdown', 'dnd_self_confirmed', { confirmed: true, filter });
+                }
+                setDndPrompt(false);
+                resolve();
+              };
+
+              dndIntervalRef.current = setInterval(async () => {
+                pollCount += 1;
+                const curr = await checkDnd();
+                filter = curr?.interruptionFilter;
+                if (filter !== 1 && filter !== 0 && filter !== -1 && filter != null) {
+                  flightRecorder.record('lockdown', 'dnd_check', { filter, status: 'active', poll_count: pollCount });
+                  dndResolveRef.current?.(false);
+                } else if (pollCount >= 2 && filter === initialFilter) {
+                  setDndOfferSelfConfirm(true);
+                }
+              }, 2000);
+            });
+
+            flightRecorder.record('gate', 'gate_step_end', { step: id, status: 'ok' });
+            setStep(id, 'ok', 'Do Not Disturb on');
+          }
+        }
+
+        if (id === 'screenLock') {
+          setStep(id, 'running', 'Locking screen…');
+          let pinAttempts = 0;
+          let pinned = false;
+          let confirmedMode = 'pinned';
+
+          const executePinningAttempt = async () => {
+            pinAttempts += 1;
+            try {
+              await ExamLock.enableSecure();
+              await ExamLock.keepAwake({ enabled: true });
+            } catch (err) {
+              console.warn('[PreExamGate] enableSecure / keepAwake failed:', err);
+            }
+
+            return new Promise((resolve) => {
+              let startedHandle = null;
+              let failedHandle = null;
+              let timerId = null;
+
+              const cleanup = () => {
+                startedHandle?.remove?.();
+                failedHandle?.remove?.();
+                if (timerId) clearTimeout(timerId);
+              };
+
+              timerId = setTimeout(() => {
+                cleanup();
+                resolve({ ok: false, reason: 'js_timeout' });
+              }, 21000);
+
+              ExamLock.addListener('pinningStarted', (data) => {
+                cleanup();
+                resolve({ ok: true, data });
+              }).then((h) => { startedHandle = h; }).catch(() => {});
+
+              ExamLock.addListener('pinningFailed', (data) => {
+                cleanup();
+                resolve({ ok: false, reason: data?.reason || 'timeout' });
+              }).then((h) => { failedHandle = h; }).catch(() => {});
+
+              ExamLock.startPinning().catch((err) => {
+                cleanup();
+                resolve({ ok: false, reason: err?.message || 'startPinning_error' });
+              });
+            });
+          };
+
+          let result = await executePinningAttempt();
+          if (result.ok) {
+            pinned = true;
+            confirmedMode = result.data?.lockTaskMode || 'pinned';
+          } else {
+            while (!pinned && pinAttempts < 3) {
+              flightRecorder.record('lockdown', 'pinning_failed_prompt', {
+                attempt: pinAttempts,
+                reason: String(result.reason || 'failed'),
+              });
+              setPinningPrompt({ attempt: pinAttempts });
+
+              await new Promise((resolve) => {
+                pinRetryResolveRef.current = resolve;
+              });
+              setPinningPrompt(null);
+
+              result = await executePinningAttempt();
+              if (result.ok) {
+                pinned = true;
+                confirmedMode = result.data?.lockTaskMode || 'pinned';
+                break;
+              }
+            }
+          }
+
+          if (!pinned) {
+            flightRecorder.record('lockdown', 'pinning_unavailable', { attempts: pinAttempts });
+            setStep(id, 'error', 'Screen lock unavailable');
+            setFailure({
+              index: i,
+              title: 'This phone cannot lock the screen for exams.',
+              steps: ['Please use the web version.'],
+            });
+            return;
+          }
+
+          flightRecorder.record('gate', 'gate_step_end', { step: id, status: 'ok', mode: confirmedMode });
+          setStep(id, 'ok', 'Screen locked (pinned)');
+        }
       }
 
       const summaryData = {
@@ -640,6 +817,87 @@ const PreExamGate = ({
               The exam runs in fullscreen. Leaving fullscreen during the exam is recorded as a violation.
             </p>
             <Button iconName="Maximize" onClick={() => void onFullscreenClick()}>Enter fullscreen and start</Button>
+          </div>
+        )}
+
+        {dndPrompt && (
+          <div className="mt-6 p-4 rounded-lg bg-warning/15 border border-warning/30">
+            <div className="flex items-center gap-2 mb-2 text-warning">
+              <Icon name="BellOff" size={20} className="shrink-0" />
+              <p className="text-sm font-semibold text-foreground">Silence interruptions (Do Not Disturb)</p>
+            </div>
+            <p className="text-sm text-foreground font-medium mb-1">
+              Swipe down from the top of the screen and turn on Do Not Disturb. You cannot do this once the exam is locked.
+            </p>
+            <p className="text-xs text-muted-foreground mb-4">
+              Checking status automatically every 2 seconds…
+            </p>
+
+            {dndOfferSelfConfirm && (
+              <div className="mb-4 p-3 bg-card border border-border rounded-lg flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id="dnd-self-confirm-check"
+                  checked={dndSelfConfirmed}
+                  onChange={(e) => setDndSelfConfirmed(e.target.checked)}
+                  className="mt-0.5 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                />
+                <label htmlFor="dnd-self-confirm-check" className="text-xs sm:text-sm text-foreground cursor-pointer font-medium">
+                  I have turned on Do Not Disturb
+                </label>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                iconName="RefreshCw"
+                onClick={async () => {
+                  try {
+                    const s = await ExamLock.getState();
+                    if (s?.interruptionFilter !== 1 && s?.interruptionFilter !== 0 && s?.interruptionFilter !== -1 && s?.interruptionFilter != null) {
+                      dndResolveRef.current?.(false);
+                    } else if (s?.interruptionFilter === 0 || s?.interruptionFilter === -1) {
+                      setDndOfferSelfConfirm(true);
+                    }
+                  } catch {
+                    setDndOfferSelfConfirm(true);
+                  }
+                }}
+              >
+                Check again
+              </Button>
+              {dndOfferSelfConfirm && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={!dndSelfConfirmed}
+                  onClick={() => dndResolveRef.current?.(true)}
+                >
+                  Continue
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {pinningPrompt && (
+          <div className="mt-6 p-4 rounded-lg bg-primary/10 border border-primary/30">
+            <div className="flex items-center gap-2 mb-2 text-primary">
+              <Icon name="Lock" size={20} className="shrink-0" />
+              <p className="text-sm font-semibold text-foreground">Lock your screen</p>
+            </div>
+            <p className="text-sm text-foreground mb-3">
+              If your phone asks for confirmation, tap OK / Start / Got it.
+            </p>
+            <Button
+              variant="default"
+              iconName="RotateCw"
+              onClick={() => pinRetryResolveRef.current?.()}
+            >
+              Retry locking screen ({pinningPrompt.attempt}/3)
+            </Button>
           </div>
         )}
 
