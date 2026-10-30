@@ -40,3 +40,12 @@ def require_role(required_role: str | list[str]):
         return user
 
     return role_checker
+
+
+def require_teacher_or_admin(user=Depends(get_current_user)):
+    """Allows teachers, admins, and school admins."""
+    required = ["teacher", "admin", "school_admin"]
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    if not roles.intersection(required):
+        deny_access(user, required)
+    return user
