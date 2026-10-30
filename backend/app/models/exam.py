@@ -35,5 +35,6 @@ class Exam(Base):
     status = Column(String, nullable=False, default=ExamStatus.DRAFT)
     is_template = Column(Boolean, nullable=False, default=False)
     results_visible = Column(Boolean, nullable=False, default=False)
+    digest_sent_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(String, nullable=False)  # teacher user_id
     created_at = Column(DateTime(timezone=True), server_default=func.now())
