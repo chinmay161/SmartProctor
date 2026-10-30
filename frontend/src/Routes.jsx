@@ -5,6 +5,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { ProtectedRoute, PublicRoute } from './components/ProtectedRoute';
 import { DashboardSkeleton } from './components/ui/Skeleton';
 import NativeAuthHandler from './components/auth/NativeAuthHandler';
+import AuthRedirectHandler from './components/auth/AuthRedirectHandler';
 import { isNativeApp } from './utils/platform';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 
@@ -37,6 +38,7 @@ const Routes = () => {
   return (
     <BrowserRouter>
       <NativeAuthHandler />
+      <AuthRedirectHandler />
       <ErrorBoundary>
         <ScrollToTop />
         <Suspense fallback={<DashboardSkeleton />}>

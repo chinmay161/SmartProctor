@@ -133,12 +133,22 @@ const SignupForm = () => {
     if (!validateForm()) { triggerShake(); return; }
     try {
       setIsLoading(true);
+      try {
+        sessionStorage.setItem('auth_redirect_to_dashboard', 'true');
+      } catch {
+        // Ignore storage exceptions in private mode
+      }
       await loginWithRedirect({
-        appState: { returnTo: '/student-dashboard' },
+        appState: { returnTo: '/login' },
         authorizationParams: { screen_hint: 'signup' },
         ...(isNativeApp() ? { openUrl } : {}),
       });
     } catch {
+      try {
+        sessionStorage.removeItem('auth_redirect_to_dashboard');
+      } catch {
+        // Ignore storage exceptions
+      }
       setErrors({ submit: 'Unable to open signup. Please try again.' });
       setIsLoading(false);
     }
@@ -147,12 +157,22 @@ const SignupForm = () => {
   const handleGoogleSignup = async () => {
     try {
       setIsLoading(true);
+      try {
+        sessionStorage.setItem('auth_redirect_to_dashboard', 'true');
+      } catch {
+        // Ignore storage exceptions in private mode
+      }
       await loginWithRedirect({
-        appState: { returnTo: '/student-dashboard' },
+        appState: { returnTo: '/login' },
         authorizationParams: { connection: 'google-oauth2', screen_hint: 'signup' },
         ...(isNativeApp() ? { openUrl } : {}),
       });
     } catch {
+      try {
+        sessionStorage.removeItem('auth_redirect_to_dashboard');
+      } catch {
+        // Ignore storage exceptions
+      }
       setIsLoading(false);
       setErrors({ submit: 'Failed to sign up with Google. Please try again.' });
     }
