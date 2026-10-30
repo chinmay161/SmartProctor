@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 
 const features = [
   {
@@ -82,30 +83,21 @@ const FeatureHighlights = () => (
 
     {/* Top — Logo & tagline */}
     <div className="auth-fade-up-1" style={{ position: 'relative', zIndex: 1 }}>
-      {/* Logo mark */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '2.5rem' }}>
-        <div
-          style={{
-            width: '44px',
-            height: '44px',
-            borderRadius: '10px',
-            background: 'rgba(59,130,246,0.15)',
-            border: '1px solid rgba(59,130,246,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="var(--auth-accent)" strokeWidth="2" style={{ width: '22px', height: '22px' }}>
-            <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-            <path d="M6 12v5c3 3 9 3 12 0v-5" />
-          </svg>
-        </div>
-        <span style={{ fontFamily: 'var(--auth-font-display)', fontSize: '1.5rem', color: 'var(--auth-text-primary)', fontWeight: 600 }}>
+      {/* Brand mark with route / */}
+      <Link
+        to="/"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          marginBottom: '2.5rem',
+          textDecoration: 'none',
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ fontFamily: 'var(--auth-font-display)', fontSize: '1.6rem', color: 'var(--auth-text-primary)', fontWeight: 600 }}>
           SmartProctor
         </span>
-      </div>
+      </Link>
 
       {/* Hero text */}
       <div style={{ marginBottom: '2.5rem' }}>

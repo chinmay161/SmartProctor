@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useSession, useCurrentUser } from '../../../context/SessionContext';
 import { authAwareCall } from '../../../services/authAwareCall';
@@ -644,25 +644,17 @@ const StudentDashboardExample = () => {
       >
         <div className="dashboard-header-inner" style={{ maxWidth: '1200px', margin: '0 auto', height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
           {/* Logo + greeting */}
-          <div className="dashboard-brand-row" style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0, flex: '1 1 auto' }}>
-            <div style={{
-              width: '36px', height: '36px', borderRadius: '9px',
-              background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="var(--sp-accent)" strokeWidth="2" width="18" height="18">
-                <path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" />
-              </svg>
-            </div>
+          {/* Brand header with route / */}
+          <Link to="/" className="dashboard-brand-row" style={{ display: 'flex', alignItems: 'center', minWidth: 0, flex: '1 1 auto', textDecoration: 'none', cursor: 'pointer' }}>
             <div style={{ minWidth: 0, overflow: 'hidden' }}>
-              <p className="dashboard-brand-title" style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', color: 'var(--color-foreground)', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <p className="dashboard-brand-title" style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', color: 'var(--color-foreground)', fontWeight: 600, lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 SmartProctor
               </p>
-              <p className="dashboard-brand-subtitle" style={{ fontFamily: 'var(--font-body)', fontSize: '0.72rem', color: 'var(--color-muted-foreground)', marginTop: '1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <p className="dashboard-brand-subtitle" style={{ fontFamily: 'var(--font-body)', fontSize: '0.72rem', color: 'var(--color-muted-foreground)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 Welcome back, <strong style={{ color: 'var(--sp-accent)' }}>{displayName}</strong>
               </p>
             </div>
-          </div>
+          </Link>
 
           {/* Nav tabs (desktop) */}
           <nav className="dashboard-desktop-nav hidden md:flex" style={{ gap: '4px' }}>

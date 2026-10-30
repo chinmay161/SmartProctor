@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import Icon from '../AppIcon';
-import SmartProctorLogo from './SmartProctorLogo';
 import ThemeToggle from './ThemeToggle';
 import ProfileSettingsModal from './ProfileSettingsModal';
 import PreferencesModal from './PreferencesModal';
@@ -91,15 +90,12 @@ const RoleBasedHeader = ({ userRole = 'student', userName = 'User', onLogout }) 
         <div className="mx-auto px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-8">
-              <div
-                className="flex items-center space-x-3 cursor-pointer"
-                onClick={() => handleNavigation(currentNavItems[0]?.path || '/')}
+              <Link
+                to="/"
+                className="flex items-center text-xl font-heading font-semibold text-foreground hover:text-primary transition-smooth cursor-pointer"
               >
-                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center transition-smooth hover:bg-primary/20">
-                  <SmartProctorLogo size={24} />
-                </div>
-                <span className="text-xl font-heading font-semibold text-foreground">SmartProctor</span>
-              </div>
+                SmartProctor
+              </Link>
 
               <nav className="hidden lg:flex items-center space-x-1">
                 {currentNavItems?.map((item) => (
