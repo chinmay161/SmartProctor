@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 class SnapshotInferenceRequest(BaseModel):
     image: str = Field(min_length=1)
     timestamp: str | None = None
-    modules: list[str] | None = None
 
 
 class PhoneDetectionResult(BaseModel):

@@ -131,29 +131,3 @@ def get_worker_health() -> dict:
         "ai_worker": worker_health,
     }
 
-
-def get_worker_diagnostics_env() -> dict:
-    return _get_json("/infer/diagnostic/env")
-
-
-def diagnose_headpose_snapshot(*, session_id: str = "debug_session", student_id: str = "debug_user", image_base64: str) -> dict:
-    return _post_json(
-        "/infer/diagnostic/headpose",
-        {
-            "session_id": session_id,
-            "student_id": student_id,
-            "image_base64": image_base64,
-        },
-    )
-
-
-def diagnose_unified_snapshot(*, session_id: str = "debug_session", student_id: str = "debug_user", image_base64: str, modules: list[str] | None = None) -> dict:
-    payload = {
-        "session_id": session_id,
-        "student_id": student_id,
-        "image_base64": image_base64,
-    }
-    if modules:
-        payload["modules"] = modules
-    return _post_json("/infer/diagnostic", payload)
-
