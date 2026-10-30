@@ -136,10 +136,10 @@ const UserManagementTable = () => {
       );
       const successCount = Array.isArray(resp?.updated) ? resp.updated.length : 0;
       const failureCount = Array.isArray(resp?.failed) ? resp.failed.length : 0;
-      setActionMessage(`Bulk update complete. Updated: ${successCount}, Failed: ${failureCount}.`);
+      setActionMessage(`Bulk status update complete. Updated: ${successCount}, Failed: ${failureCount}.`);
       await fetchUsers();
     } catch (err) {
-      setActionMessage(String(err?.message || 'Bulk update failed.'));
+      setActionMessage(String(err?.message || 'Bulk status update failed.'));
     } finally {
       setIsBulkLoading(false);
     }
@@ -155,13 +155,17 @@ const UserManagementTable = () => {
     window.location.href = mailto;
   };
 
-  const handleSingleSoftDelete = async (user) => {
+  const handleToggleUserStatus = async (user) => {
     if (!user?.user_id) return;
-    if (user.user_id === auth0User?.sub) {
+    const willBlock = !user.blocked;
+    if (willBlock && user.user_id === auth0User?.sub) {
       setActionMessage('You cannot suspend your own account.');
       return;
     }
-    const confirmed = window.confirm('This will suspend the account (soft delete). Continue?');
+    const promptMsg = willBlock
+      ? `Suspend user ${user.email || user.name || user.user_id}?`
+      : `Re-activate user ${user.email || user.name || user.user_id}?`;
+    const confirmed = window.confirm(promptMsg);
     if (!confirmed) return;
     try {
       const token = await getAccessTokenSilently({
@@ -170,13 +174,13 @@ const UserManagementTable = () => {
       await apiRequest(
         `/admin/users/${encodeURIComponent(user.user_id)}/status`,
         'PATCH',
-        { blocked: true },
+        { blocked: willBlock },
         token
       );
-      setActionMessage('User suspended successfully.');
+      setActionMessage(willBlock ? 'User suspended successfully.' : 'User activated successfully.');
       await fetchUsers();
     } catch (err) {
-      setActionMessage(String(err?.message || 'Failed to suspend user.'));
+      setActionMessage(String(err?.message || 'Failed to update user status.'));
     }
   };
 
@@ -184,11 +188,17 @@ const UserManagementTable = () => {
   const tableEnd = Math.min(totalUsers, page * pageSize);
 
   return (
-    <div className="bg-card border border-border rounded-lg shadow-md overflow-hidden">
+    <div className="bg-card border border-border rounded-lg shadow-md overflow-hidden" data-testid="user-management-table">
       <div className="p-4 md:p-6 border-b border-border">
         {fetchError && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-sm text-red-700">{fetchError}</p>
+          <div className="mb-4 p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg flex items-center justify-between flex-wrap gap-2" data-testid="users-error-banner">
+            <div>
+              <p className="text-sm font-semibold text-red-700 dark:text-red-300">Failed to load users</p>
+              <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">{fetchError}</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={fetchUsers} iconName="RefreshCw" data-testid="users-retry-btn">
+              Retry
+            </Button>
           </div>
         )}
         {actionMessage && (
@@ -227,8 +237,8 @@ const UserManagementTable = () => {
         </div>
 
         {selectedUsers.length > 0 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="text-sm text-muted-foreground">{selectedUsers.length} selected</span>
+          <div className="mt-4 flex flex-wrap items-center gap-2 p-3 bg-muted/40 rounded-lg border border-border" data-testid="bulk-actions-bar">
+            <span className="text-sm font-medium text-foreground">{selectedUsers.length} selected</span>
             <Button variant="outline" size="sm" iconName="Mail" onClick={handleSendEmail}>
               Send Email
             </Button>
@@ -242,13 +252,13 @@ const UserManagementTable = () => {
               Suspend
             </Button>
             <Button
-              variant="destructive"
+              variant="outline"
               size="sm"
-              iconName="Trash2"
+              iconName="UserCheck"
               loading={isBulkLoading}
-              onClick={() => runBulkStatusUpdate(true, 'Soft delete selected users? This will suspend their accounts.')}
+              onClick={() => runBulkStatusUpdate(false, 'Activate selected users?')}
             >
-              Delete
+              Activate
             </Button>
           </div>
         )}
@@ -275,82 +285,105 @@ const UserManagementTable = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {users.map((user) => (
-              <tr key={user?.user_id} className="hover:bg-muted/30 transition-smooth">
-                <td className="px-4 py-4">
-                  <input
-                    type="checkbox"
-                    checked={selectedUsers.includes(user?.user_id)}
-                    onChange={() => toggleUserSelection(user?.user_id)}
-                    className="w-4 h-4 rounded border-border"
-                  />
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center shrink-0">
-                      <Icon name="User" size={20} className="text-primary" />
+            {isLoading ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i} data-testid="user-skeleton-row">
+                  <td className="px-4 py-4"><div className="w-4 h-4 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-4 py-4">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-muted rounded-full animate-pulse shrink-0" />
+                      <div className="space-y-1">
+                        <div className="w-24 h-4 bg-muted rounded animate-pulse" />
+                        <div className="w-32 h-3 bg-muted rounded animate-pulse" />
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">{user?.name || 'Unnamed User'}</p>
-                      <p className="text-xs text-muted-foreground truncate">{user?.email || 'No email'}</p>
+                  </td>
+                  <td className="px-4 py-4"><div className="w-16 h-5 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-4 py-4"><div className="w-20 h-4 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-4 py-4"><div className="w-16 h-5 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-4 py-4"><div className="w-28 h-4 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-4 py-4"><div className="w-14 h-6 bg-muted rounded animate-pulse" /></td>
+                </tr>
+              ))
+            ) : (
+              users.map((user) => (
+                <tr key={user?.user_id} className="hover:bg-muted/30 transition-smooth">
+                  <td className="px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedUsers.includes(user?.user_id)}
+                      onChange={() => toggleUserSelection(user?.user_id)}
+                      className="w-4 h-4 rounded border-border"
+                    />
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center shrink-0">
+                        <Icon name="User" size={20} className="text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground">{user?.name || 'Unnamed User'}</p>
+                        <p className="text-xs text-muted-foreground truncate">{user?.email || 'No email'}</p>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex flex-wrap items-center gap-1">
-                    {(user?.roles || []).length === 0 && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground">
-                        No roles
-                      </span>
-                    )}
-                    {(user?.roles || []).map((role) => (
-                      <span
-                        key={`${user.user_id}-${role}`}
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium ${roleBadgeClass(role)}`}
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {(user?.roles || []).length === 0 && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-muted text-muted-foreground">
+                          No roles
+                        </span>
+                      )}
+                      {(user?.roles || []).map((role) => (
+                        <span
+                          key={`${user.user_id}-${role}`}
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium ${roleBadgeClass(role)}`}
+                        >
+                          {role}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4">
+                    <p className="text-sm text-foreground">{user?.institution || 'N/A'}</p>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-xs font-medium ${user?.blocked ? 'bg-error/20 text-error' : 'bg-success/20 text-success'}`}>
+                      <Icon name={user?.blocked ? 'XCircle' : 'CheckCircle'} size={12} />
+                      <span>{user?.blocked ? 'Suspended' : 'Active'}</span>
+                    </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <p className="text-sm text-muted-foreground font-caption">{formatTimestamp(user?.last_login)}</p>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex items-center space-x-2">
+                      <button
+                        className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-smooth"
+                        onClick={() => setDrawerUserId(user?.user_id)}
+                        title="Edit user roles and status"
                       >
-                        {role}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <p className="text-sm text-foreground">{user?.institution || 'N/A'}</p>
-                </td>
-                <td className="px-4 py-4">
-                  <span className={`inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-xs font-medium ${user?.blocked ? 'bg-error/20 text-error' : 'bg-success/20 text-success'}`}>
-                    <Icon name={user?.blocked ? 'XCircle' : 'CheckCircle'} size={12} />
-                    <span>{user?.blocked ? 'Suspended' : 'Active'}</span>
-                  </span>
-                </td>
-                <td className="px-4 py-4">
-                  <p className="text-sm text-muted-foreground font-caption">{formatTimestamp(user?.last_login)}</p>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex items-center space-x-2">
-                    <button
-                      className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-smooth"
-                      onClick={() => setDrawerUserId(user?.user_id)}
-                      title="Edit user"
-                    >
-                      <Icon name="Edit" size={16} />
-                    </button>
-                    <button
-                      className="p-1.5 text-muted-foreground hover:text-error hover:bg-error/10 rounded transition-smooth"
-                      onClick={() => handleSingleSoftDelete(user)}
-                      title="Soft delete (suspend) user"
-                    >
-                      <Icon name="Trash2" size={16} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                        <Icon name="Edit" size={16} />
+                      </button>
+                      <button
+                        className={`p-1.5 rounded transition-smooth ${user?.blocked ? 'text-success hover:bg-success/10' : 'text-warning hover:bg-warning/10'}`}
+                        onClick={() => handleToggleUserStatus(user)}
+                        title={user?.blocked ? 'Re-activate user' : 'Suspend user'}
+                        data-testid={`toggle-status-${user?.user_id}`}
+                      >
+                        <Icon name={user?.blocked ? 'CheckCircle' : 'UserX'} size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
-      {users.length === 0 && !isLoading && (
-        <div className="p-8 text-center">
+      {users.length === 0 && !isLoading && !fetchError && (
+        <div className="p-8 text-center" data-testid="users-empty-state">
           <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
             <Icon name="Users" size={32} className="text-muted-foreground" />
           </div>

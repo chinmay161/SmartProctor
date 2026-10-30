@@ -1,251 +1,301 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import Icon from '../../../components/AppIcon';
 import Button from '../../../components/ui/Button';
-import Select from '../../../components/ui/Select';
-import Input from '../../../components/ui/Input';
+import { apiRequest } from '../../../services/api';
+
+const DATE_RANGE_OPTIONS = [
+  { value: 7, label: 'Last 7 Days' },
+  { value: 30, label: 'Last 30 Days' },
+  { value: 90, label: 'Last 90 Days' },
+  { value: 365, label: 'Last Year' },
+];
 
 const ReportsSection = () => {
-  const [dateRange, setDateRange] = useState('last-30-days');
-  const [institutionFilter, setInstitutionFilter] = useState('all');
-  const [reportType, setReportType] = useState('overview');
+  const { getAccessTokenSilently } = useAuth0();
+  const auth0Audience = import.meta.env.VITE_AUTH0_AUDIENCE;
 
-  const dateRangeOptions = [
-    { value: 'today', label: 'Today' },
-    { value: 'last-7-days', label: 'Last 7 Days' },
-    { value: 'last-30-days', label: 'Last 30 Days' },
-    { value: 'last-90-days', label: 'Last 90 Days' },
-    { value: 'custom', label: 'Custom Range' }
-  ];
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const institutionOptions = [
-    { value: 'all', label: 'All Institutions' },
-    { value: 'mit', label: 'MIT' },
-    { value: 'stanford', label: 'Stanford University' },
-    { value: 'harvard', label: 'Harvard University' },
-    { value: 'yale', label: 'Yale University' }
-  ];
-
-  const reportTypeOptions = [
-    { value: 'overview', label: 'System Overview' },
-    { value: 'violations', label: 'Violation Reports' },
-    { value: 'performance', label: 'Performance Analytics' },
-    { value: 'user-activity', label: 'User Activity' }
-  ];
-
-  const reports = [
-    {
-      id: 1,
-      title: 'Monthly System Performance Report',
-      description: 'Comprehensive analysis of system performance metrics for January 2026',
-      date: '2026-01-20',
-      type: 'Performance',
-      size: '2.4 MB',
-      format: 'PDF'
-    },
-    {
-      id: 2,
-      title: 'Violation Trends Analysis',
-      description: 'Detailed breakdown of violation patterns across all institutions',
-      date: '2026-01-19',
-      type: 'Security',
-      size: '1.8 MB',
-      format: 'Excel'
-    },
-    {
-      id: 3,
-      title: 'User Activity Summary',
-      description: 'Active users, exam participation, and engagement metrics',
-      date: '2026-01-18',
-      type: 'Analytics',
-      size: '3.1 MB',
-      format: 'PDF'
-    },
-    {
-      id: 4,
-      title: 'Institution Comparison Report',
-      description: 'Comparative analysis of exam performance across institutions',
-      date: '2026-01-17',
-      type: 'Analytics',
-      size: '2.7 MB',
-      format: 'Excel'
+  const fetchReports = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await getAccessTokenSilently({
+        authorizationParams: { audience: auth0Audience },
+      });
+      const res = await apiRequest(`/admin/reports/summary?days=${days}`, 'GET', null, token);
+      setData(res);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
     }
-  ];
+  }, [auth0Audience, days, getAccessTokenSilently]);
 
-  const getReportIcon = (format) => {
-    switch (format) {
-      case 'PDF':
-        return { name: 'FileText', color: 'text-error' };
-      case 'Excel':
-        return { name: 'FileSpreadsheet', color: 'text-success' };
-      default:
-        return { name: 'File', color: 'text-muted-foreground' };
-    }
+  useEffect(() => {
+    fetchReports();
+  }, [fetchReports]);
+
+  const violationsList = data?.violations_by_type || [];
+  const totalViolations = violationsList.reduce((acc, curr) => acc + (curr.count || 0), 0);
+  const maxViolationCount = Math.max(...violationsList.map((v) => v.count), 1);
+
+  const reviewLabels = data?.violations_by_review_label || {
+    confirmed: 0,
+    false_alarm: 0,
+    unsure: 0,
+    unreviewed: 0,
   };
 
+  const problemReports = data?.problem_reports_by_status || {};
+  const problemEntries = Object.entries(problemReports);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="reports-section">
+      {/* Header filter banner */}
       <div className="bg-card border border-border rounded-lg p-4 md:p-6 shadow-md">
-        <div className="flex items-center space-x-3 mb-6">
-          <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
-            <Icon name="BarChart3" size={20} className="text-primary" />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
+              <Icon name="BarChart3" size={20} className="text-primary" />
+            </div>
+            <div>
+              <h3 className="text-lg font-heading font-semibold text-foreground">Integrity & Activity Reports</h3>
+              <p className="text-sm text-muted-foreground">Aggregated exam performance, review labels, and incident statistics</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-heading font-semibold text-foreground">Report Filters</h3>
-            <p className="text-sm text-muted-foreground">Customize your analytics and export data</p>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground font-medium">Period:</span>
+            {DATE_RANGE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setDays(opt.value)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-smooth ${
+                  days === opt.value
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'bg-muted hover:bg-muted/80 text-muted-foreground'
+                }`}
+                data-testid={`range-btn-${opt.value}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              iconName="RefreshCw"
+              onClick={fetchReports}
+              disabled={loading}
+              title="Refresh reports"
+              data-testid="reports-refresh-btn"
+            >
+              Refresh
+            </Button>
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <Select
-            label="Date Range"
-            options={dateRangeOptions}
-            value={dateRange}
-            onChange={setDateRange}
-          />
-
-          <Select
-            label="Institution"
-            options={institutionOptions}
-            value={institutionFilter}
-            onChange={setInstitutionFilter}
-          />
-
-          <Select
-            label="Report Type"
-            options={reportTypeOptions}
-            value={reportType}
-            onChange={setReportType}
-          />
-        </div>
-
-        {dateRange === 'custom' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <Input
-              label="Start Date"
-              type="date"
-            />
-            <Input
-              label="End Date"
-              type="date"
-            />
-          </div>
-        )}
-
-        <div className="flex flex-wrap gap-3">
-          <Button variant="default" iconName="Download">
-            Export PDF
-          </Button>
-          <Button variant="outline" iconName="FileSpreadsheet">
-            Export Excel
-          </Button>
-          <Button variant="outline" iconName="FileJson">
-            Export JSON
-          </Button>
         </div>
       </div>
-      <div className="bg-card border border-border rounded-lg p-4 md:p-6 shadow-md">
-        <div className="flex items-center justify-between mb-6">
+
+      {/* Error State with Retry Button and Request ID */}
+      {error && !loading && (
+        <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg flex items-center justify-between flex-wrap gap-3" data-testid="reports-error-banner">
           <div>
-            <h3 className="text-lg font-heading font-semibold text-foreground">Generated Reports</h3>
-            <p className="text-sm text-muted-foreground">Download previously generated reports</p>
+            <p className="text-sm font-semibold text-red-700 dark:text-red-300">Failed to load reports summary</p>
+            <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">
+              {error.message || 'Error occurred while contacting backend.'}{' '}
+              {error.requestId ? `(Request ID: ${error.requestId})` : ''}
+            </p>
           </div>
-          <Button variant="default" size="sm" iconName="RefreshCw">
-            Refresh
+          <Button variant="outline" size="sm" onClick={fetchReports} iconName="RefreshCw" data-testid="reports-retry-btn">
+            Retry
           </Button>
         </div>
+      )}
 
-        <div className="space-y-3">
-          {reports?.map((report) => {
-            const iconConfig = getReportIcon(report?.format);
+      {/* Metric Cards Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Exams Created */}
+        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
+          <div className="flex items-center space-x-3 mb-2">
+            <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center text-primary">
+              <Icon name="FileText" size={20} />
+            </div>
+            <div>
+              {loading ? (
+                <div className="w-16 h-7 bg-muted rounded animate-pulse" />
+              ) : (
+                <p className="text-2xl font-heading font-semibold text-foreground" data-testid="stat-exams-created">
+                  {data?.exams_created !== undefined ? data.exams_created : '—'}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">Exams Created</p>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Past {days} days</p>
+        </div>
 
-            return (
-              <div
-                key={report?.id}
-                className="flex items-center justify-between p-4 bg-muted/30 rounded-lg hover:bg-muted/50 transition-smooth"
-              >
-                <div className="flex items-center space-x-4 flex-1 min-w-0">
-                  <div className={`w-12 h-12 ${iconConfig?.color?.replace('text-', 'bg-')}/20 rounded-lg flex items-center justify-center shrink-0`}>
-                    <Icon name={iconConfig?.name} size={24} className={iconConfig?.color} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-medium text-foreground mb-1">{report?.title}</h4>
-                    <p className="text-xs text-muted-foreground mb-2">{report?.description}</p>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                      <span className="flex items-center space-x-1">
-                        <Icon name="Calendar" size={12} />
-                        <span>{new Date(report.date)?.toLocaleDateString()}</span>
-                      </span>
-                      <span className="flex items-center space-x-1">
-                        <Icon name="Tag" size={12} />
-                        <span>{report?.type}</span>
-                      </span>
-                      <span className="flex items-center space-x-1">
-                        <Icon name="HardDrive" size={12} />
-                        <span>{report?.size}</span>
-                      </span>
+        {/* Attempts Submitted */}
+        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
+          <div className="flex items-center space-x-3 mb-2">
+            <div className="w-10 h-10 bg-success/20 rounded-lg flex items-center justify-center text-success">
+              <Icon name="CheckCircle" size={20} />
+            </div>
+            <div>
+              {loading ? (
+                <div className="w-16 h-7 bg-muted rounded animate-pulse" />
+              ) : (
+                <p className="text-2xl font-heading font-semibold text-foreground" data-testid="stat-attempts-submitted">
+                  {data?.attempts_submitted !== undefined ? data.attempts_submitted : '—'}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">Attempts Submitted</p>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Completed exam submissions</p>
+        </div>
+
+        {/* Average Integrity Score */}
+        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
+          <div className="flex items-center space-x-3 mb-2">
+            <div className="w-10 h-10 bg-accent/20 rounded-lg flex items-center justify-center text-accent">
+              <Icon name="Shield" size={20} />
+            </div>
+            <div>
+              {loading ? (
+                <div className="w-16 h-7 bg-muted rounded animate-pulse" />
+              ) : (
+                <p className="text-2xl font-heading font-semibold text-foreground" data-testid="stat-avg-integrity">
+                  {data?.average_integrity_score !== null && data?.average_integrity_score !== undefined
+                    ? `${data.average_integrity_score}%`
+                    : 'N/A'}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">Avg Integrity Score</p>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Across evaluated attempts</p>
+        </div>
+
+        {/* Total Active Violations */}
+        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
+          <div className="flex items-center space-x-3 mb-2">
+            <div className="w-10 h-10 bg-warning/20 rounded-lg flex items-center justify-center text-warning">
+              <Icon name="AlertTriangle" size={20} />
+            </div>
+            <div>
+              {loading ? (
+                <div className="w-16 h-7 bg-muted rounded animate-pulse" />
+              ) : (
+                <p className="text-2xl font-heading font-semibold text-foreground" data-testid="stat-total-violations">
+                  {totalViolations}
+                </p>
+              )}
+              <p className="text-xs text-muted-foreground">Flagged Violations</p>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Excludes false positives</p>
+        </div>
+      </div>
+
+      {/* Review Labels Breakdown Card */}
+      <div className="bg-card border border-border rounded-lg p-4 md:p-6 shadow-md">
+        <h4 className="text-sm font-semibold text-foreground mb-4">Violations by Teacher Review Status</h4>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="p-3 rounded-lg border border-border bg-error/10">
+            <span className="text-xs font-medium text-error block mb-1">Confirmed Cheating</span>
+            <span className="text-xl font-bold text-foreground" data-testid="review-confirmed">{reviewLabels.confirmed}</span>
+          </div>
+          <div className="p-3 rounded-lg border border-border bg-success/10">
+            <span className="text-xs font-medium text-success block mb-1">False Alarm</span>
+            <span className="text-xl font-bold text-foreground" data-testid="review-false-alarm">{reviewLabels.false_alarm}</span>
+          </div>
+          <div className="p-3 rounded-lg border border-border bg-warning/10">
+            <span className="text-xs font-medium text-warning block mb-1">Unsure / Reviewing</span>
+            <span className="text-xl font-bold text-foreground" data-testid="review-unsure">{reviewLabels.unsure}</span>
+          </div>
+          <div className="p-3 rounded-lg border border-border bg-muted/40">
+            <span className="text-xs font-medium text-muted-foreground block mb-1">Unreviewed</span>
+            <span className="text-xl font-bold text-foreground" data-testid="review-unreviewed">{reviewLabels.unreviewed}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Two columns: Violations by Type & Problem Reports by Status */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Violations by Type with simple bars */}
+        <div className="bg-card border border-border rounded-lg p-4 md:p-6 shadow-md">
+          <h4 className="text-sm font-semibold text-foreground mb-4">Violations by Incident Type</h4>
+          {loading ? (
+            <div className="space-y-3">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-9 bg-muted rounded animate-pulse" />
+              ))}
+            </div>
+          ) : violationsList.length === 0 ? (
+            <div className="p-8 text-center" data-testid="violations-empty">
+              <Icon name="CheckCircle" size={28} className="text-success mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">No violations recorded in the selected period.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {violationsList.map((item) => {
+                const pct = Math.round((item.count / maxViolationCount) * 100);
+                return (
+                  <div key={item.type} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-medium text-foreground">{item.type.replace(/_/g, ' ')}</span>
+                      <span className="text-muted-foreground font-mono">{item.count}</span>
+                    </div>
+                    <div className="w-full bg-muted h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-warning h-full rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
                   </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Problem Reports by Status */}
+        <div className="bg-card border border-border rounded-lg p-4 md:p-6 shadow-md">
+          <h4 className="text-sm font-semibold text-foreground mb-4">Problem Reports by Status</h4>
+          {loading ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-9 bg-muted rounded animate-pulse" />
+              ))}
+            </div>
+          ) : problemEntries.length === 0 ? (
+            <div className="p-8 text-center" data-testid="problem-reports-empty">
+              <Icon name="Inbox" size={28} className="text-muted-foreground mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">No problem reports submitted in the selected period.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {problemEntries.map(([statusKey, count]) => (
+                <div key={statusKey} className="py-2.5 flex items-center justify-between text-sm">
+                  <span className="font-medium text-foreground">{statusKey}</span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      statusKey === 'RESOLVED'
+                        ? 'bg-success/20 text-success'
+                        : 'bg-warning/20 text-warning'
+                    }`}
+                  >
+                    {count} reports
+                  </span>
                 </div>
-                <div className="flex items-center space-x-2 shrink-0 ml-4">
-                  <Button variant="outline" size="sm" iconName="Download">
-                    Download
-                  </Button>
-                  <button className="p-2 text-muted-foreground hover:text-error hover:bg-error/10 rounded transition-smooth">
-                    <Icon name="Trash2" size={16} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
-              <Icon name="FileText" size={20} className="text-primary" />
+              ))}
             </div>
-            <div>
-              <p className="text-2xl font-heading font-semibold text-foreground">1,247</p>
-              <p className="text-xs text-muted-foreground">Total Exams</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 bg-success/20 rounded-lg flex items-center justify-center">
-              <Icon name="Users" size={20} className="text-success" />
-            </div>
-            <div>
-              <p className="text-2xl font-heading font-semibold text-foreground">15,892</p>
-              <p className="text-xs text-muted-foreground">Active Students</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 bg-warning/20 rounded-lg flex items-center justify-center">
-              <Icon name="AlertTriangle" size={20} className="text-warning" />
-            </div>
-            <div>
-              <p className="text-2xl font-heading font-semibold text-foreground">342</p>
-              <p className="text-xs text-muted-foreground">Total Violations</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-card border border-border rounded-lg p-4 shadow-md">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 bg-accent/20 rounded-lg flex items-center justify-center">
-              <Icon name="TrendingUp" size={20} className="text-accent" />
-            </div>
-            <div>
-              <p className="text-2xl font-heading font-semibold text-foreground">98.7%</p>
-              <p className="text-xs text-muted-foreground">System Uptime</p>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

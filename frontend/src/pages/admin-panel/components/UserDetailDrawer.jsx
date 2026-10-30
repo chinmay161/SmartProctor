@@ -163,11 +163,17 @@ const UserDetailDrawer = ({ userId, open, onClose, onSaved }) => {
             <>
               <section className="rounded-lg border border-border p-4">
                 <div className="mb-3 flex items-center gap-3">
-                  <img
-                    src={userDetail?.picture || 'https://via.placeholder.com/64'}
-                    alt={userDetail?.name || userDetail?.email || 'User avatar'}
-                    className="h-12 w-12 rounded-full border border-border object-cover"
-                  />
+                  {userDetail?.picture ? (
+                    <img
+                      src={userDetail.picture}
+                      alt={userDetail?.name || userDetail?.email || 'User avatar'}
+                      className="h-12 w-12 rounded-full border border-border object-cover"
+                    />
+                  ) : (
+                    <div className="h-12 w-12 rounded-full border border-border bg-primary/10 flex items-center justify-center text-primary font-semibold text-base">
+                      {(userDetail?.name || userDetail?.email || 'U').charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <div>
                     <p className="text-sm font-semibold text-foreground">{userDetail?.name || 'Unnamed User'}</p>
                     <p className="text-xs text-muted-foreground">{userDetail?.email || 'No email'}</p>
