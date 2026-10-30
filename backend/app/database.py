@@ -426,3 +426,14 @@ def ensure_schema_compatibility() -> None:
         else:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_session_events_student_id_server_ts ON session_events (student_id, server_ts)"))
 
+        if "violations" in tables:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_violations_timestamp_review_status ON violations (timestamp, review_status)"))
+        if "exam_sessions" in tables:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_sessions_status_last_heartbeat ON exam_sessions (status, last_heartbeat)"))
+        if "user_profiles" in tables:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_user_profiles_role ON user_profiles (role)"))
+        if "exams" in tables:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exams_status_time_window ON exams (status, start_time, end_time)"))
+        if "role_audit_logs" in tables:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_role_audit_logs_timestamp ON role_audit_logs (timestamp)"))
+

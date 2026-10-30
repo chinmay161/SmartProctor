@@ -1,3 +1,5 @@
+import time
+from fastapi import HTTPException, status
 import requests
 import os
 from .auth0_management import get_management_token
@@ -8,6 +10,34 @@ from ..models.user_profile import UserProfile
 from urllib.parse import quote
 
 AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
+
+# In-memory search cache with 30s TTL to prevent hitting Auth0 Management API rate limits
+_SEARCH_CACHE: dict[str, tuple[float, list[dict], int]] = {}
+_SEARCH_CACHE_TTL = 30.0
+
+
+def invalidate_user_search_cache() -> None:
+    _SEARCH_CACHE.clear()
+
+
+def _handle_auth0_request_error(exc: Exception) -> None:
+    if isinstance(exc, requests.HTTPError):
+        status_code = exc.response.status_code if exc.response is not None else 500
+        if status_code == 429:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Auth0 Management API rate limit reached. Please try again shortly.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Auth0 Management API error ({status_code}): {str(exc)}",
+        )
+    elif isinstance(exc, requests.RequestException):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Unable to connect to Auth0 Management API.",
+        )
+    raise exc
 
 
 def _build_auth0_query(email: str | None, status: str | None) -> str | None:
@@ -30,13 +60,16 @@ def _auth0_list_users(token: str, page: int, per_page: int, query: str | None):
         "include_totals": "true",
     }
     headers = {"Authorization": f"Bearer {token}"}
-    r = requests.get(
-        f"https://{AUTH0_DOMAIN}/api/v2/users",
-        headers=headers,
-        params=params,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.get(
+            f"https://{AUTH0_DOMAIN}/api/v2/users",
+            headers=headers,
+            params=params,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:
+        _handle_auth0_request_error(exc)
 
 
 def _hydrate_user_rows(raw_users: list[dict]):
@@ -112,15 +145,25 @@ def search_users(
     role: str | None = None,
     status: str | None = None,
 ):
-    token = get_management_token()
     role_filter = canonicalize_role(role) if role and role != "all" else "all"
+    cache_key = f"{email}:{page}:{page_size}:{role_filter}:{status}"
+    now = time.time()
+    if cache_key in _SEARCH_CACHE:
+        ts, cached_users, cached_total = _SEARCH_CACHE[cache_key]
+        if now - ts < _SEARCH_CACHE_TTL:
+            return cached_users, cached_total
+        del _SEARCH_CACHE[cache_key]
+
+    token = get_management_token()
     query = _build_auth0_query(email, status)
 
     # No role filtering: use Auth0 pagination directly.
     if role_filter == "all":
         data = _auth0_list_users(token, page - 1, page_size, query)
         users = _hydrate_user_rows(data.get("users", []))
-        return users, data.get("total", len(users))
+        total = data.get("total", len(users))
+        _SEARCH_CACHE[cache_key] = (now, users, total)
+        return users, total
 
     # Role filtering: fetch all users matching base query, then paginate after role check.
     per_page = 50
@@ -143,7 +186,10 @@ def search_users(
     filtered = [u for u in hydrated if role_filter in set(u.get("roles", []))]
     start_idx = max(0, (page - 1) * page_size)
     end_idx = start_idx + page_size
-    return filtered[start_idx:end_idx], len(filtered)
+    paged_users = filtered[start_idx:end_idx]
+    total_filtered = len(filtered)
+    _SEARCH_CACHE[cache_key] = (now, paged_users, total_filtered)
+    return paged_users, total_filtered
 
 
 def get_user_detail(user_id: str):
@@ -168,13 +214,16 @@ def get_user_detail(user_id: str):
         ]
     )
     params = {"fields": fields, "include_fields": "true"}
-    r = requests.get(
-        f"https://{AUTH0_DOMAIN}/api/v2/users/{encoded_user_id}",
-        headers=headers,
-        params=params,
-    )
-    r.raise_for_status()
-    user = r.json()
+    try:
+        r = requests.get(
+            f"https://{AUTH0_DOMAIN}/api/v2/users/{encoded_user_id}",
+            headers=headers,
+            params=params,
+        )
+        r.raise_for_status()
+        user = r.json()
+    except Exception as exc:
+        _handle_auth0_request_error(exc)
 
     roles = []
     try:
@@ -223,10 +272,15 @@ def update_user_blocked(user_id: str, blocked: bool):
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    r = requests.patch(
-        f"https://{AUTH0_DOMAIN}/api/v2/users/{encoded_user_id}",
-        headers=headers,
-        json={"blocked": bool(blocked)},
-    )
-    r.raise_for_status()
+    try:
+        r = requests.patch(
+            f"https://{AUTH0_DOMAIN}/api/v2/users/{encoded_user_id}",
+            headers=headers,
+            json={"blocked": bool(blocked)},
+        )
+        r.raise_for_status()
+    except Exception as exc:
+        _handle_auth0_request_error(exc)
+
+    invalidate_user_search_cache()
     return {"user_id": user_id, "blocked": bool(blocked), "status": "suspended" if blocked else "active"}
