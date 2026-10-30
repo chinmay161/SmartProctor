@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 import { useSession } from '../../context/SessionContext';
 import ThemeToggle from '../../components/ui/ThemeToggle';
+import { openUrl, isNativeApp } from '../../utils/platform';
 
 /**
  * UseWebVersionPage
  * Native guard page shown when a teacher or admin accesses the native mobile app,
  * or when /use-web-version is opened directly.
- * Prompts user with desktop URL, one-tap copy, and clear logout.
+ * Prompts user with desktop URL, one-tap copy, direct open, and clear logout.
  */
+const DEFAULT_WEB_URL = 'https://smart-proctor-zeta.vercel.app/';
+
 const UseWebVersionPage = () => {
   const { logout } = useSession();
   const [copied, setCopied] = useState(false);
 
-  const rawUrl =
-    import.meta.env.VITE_WEB_APP_URL ||
-    (typeof window !== 'undefined' ? window.location.origin : 'https://app.smartproctor.io');
+  const rawUrl = import.meta.env.VITE_WEB_APP_URL || DEFAULT_WEB_URL;
   const webAppUrl = String(rawUrl).replace(/\/+$/, '');
 
   const handleCopy = async () => {
@@ -159,21 +160,32 @@ const UseWebVersionPage = () => {
             >
               Desktop Web URL
             </span>
-            <span
+            <a
               id="web-app-url-display"
+              href={webAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                if (isNativeApp()) {
+                  e.preventDefault();
+                  void openUrl(webAppUrl);
+                }
+              }}
               style={{
                 display: 'block',
                 fontFamily: 'var(--font-data)',
-                fontSize: '14px',
+                fontSize: '13px',
                 color: 'var(--color-foreground)',
                 fontWeight: 600,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                textDecoration: 'none',
               }}
+              title={webAppUrl}
             >
               {webAppUrl}
-            </span>
+            </a>
           </div>
 
           <button
@@ -217,6 +229,37 @@ const UseWebVersionPage = () => {
             )}
           </button>
         </div>
+
+        {/* Open in Browser Button */}
+        <button
+          id="open-web-url-btn"
+          type="button"
+          onClick={() => void openUrl(webAppUrl)}
+          className="touch-target"
+          style={{
+            width: '100%',
+            padding: '12px 20px',
+            borderRadius: '10px',
+            background: 'var(--sp-accent, #3b82f6)',
+            border: 'none',
+            color: '#ffffff',
+            fontFamily: 'var(--font-body)',
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            marginBottom: '12px',
+            transition: 'all 0.2s',
+          }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+            <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6m4-3h6v6m-11 5L21 3" />
+          </svg>
+          Open in Browser
+        </button>
 
         {/* Log out Button */}
         <button
