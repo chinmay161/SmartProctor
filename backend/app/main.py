@@ -109,7 +109,7 @@ if is_production:
 app = FastAPI(
     title="SmartProctor API",
     description="Secure exam proctoring platform",
-    version="1.0.0",
+    version="1.1.0",
     docs_url=None if is_production else "/docs",
     redoc_url=None if is_production else "/redoc",
     openapi_url=None if is_production else "/openapi.json",

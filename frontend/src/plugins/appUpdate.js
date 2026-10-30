@@ -1,5 +1,8 @@
 import { registerPlugin, WebPlugin } from '@capacitor/core';
 
+const CURRENT_VERSION = '1.1.0';
+const CURRENT_VERSION_CODE = 2;
+
 /**
  * Web fallback implementation of AppUpdate for browser preview & testing.
  */
@@ -24,8 +27,8 @@ class AppUpdateWeb extends WebPlugin {
       return {
         available: false,
         isCached: true,
-        currentVersion: '1.0.0',
-        currentVersionCode: 1,
+        currentVersion: CURRENT_VERSION,
+        currentVersionCode: CURRENT_VERSION_CODE,
       };
     }
 
@@ -48,18 +51,18 @@ class AppUpdateWeb extends WebPlugin {
         return {
           available: false,
           isCached: true,
-          currentVersion: '1.0.0',
-          currentVersionCode: 1,
-          latestVersion: '1.0.0',
+          currentVersion: CURRENT_VERSION,
+          currentVersionCode: CURRENT_VERSION_CODE,
+          latestVersion: CURRENT_VERSION,
         };
       }
 
       if (response.status === 404) {
         return {
           available: false,
-          currentVersion: '1.0.0',
-          currentVersionCode: 1,
-          latestVersion: '1.0.0',
+          currentVersion: CURRENT_VERSION,
+          currentVersionCode: CURRENT_VERSION_CODE,
+          latestVersion: CURRENT_VERSION,
           message: 'No releases found on GitHub repository.',
         };
       }
@@ -68,8 +71,8 @@ class AppUpdateWeb extends WebPlugin {
         return {
           available: false,
           rateLimited: true,
-          currentVersion: '1.0.0',
-          currentVersionCode: 1,
+          currentVersion: CURRENT_VERSION,
+          currentVersionCode: CURRENT_VERSION_CODE,
           message: 'GitHub API rate limit reached. Please try again later.',
         };
       }
@@ -89,8 +92,8 @@ class AppUpdateWeb extends WebPlugin {
       if (data.draft || data.prerelease) {
         return {
           available: false,
-          currentVersion: '1.0.0',
-          currentVersionCode: 1,
+          currentVersion: CURRENT_VERSION,
+          currentVersionCode: CURRENT_VERSION_CODE,
           message: 'Latest release is a draft or pre-release; ignored.',
         };
       }
@@ -110,13 +113,13 @@ class AppUpdateWeb extends WebPlugin {
         return scoreB - scoreA;
       })[0];
 
-      const available = Boolean(apkAsset && cleanLatestVersion !== '1.0.0');
+      const available = Boolean(apkAsset && cleanLatestVersion !== CURRENT_VERSION);
 
       return {
         available,
-        currentVersion: '1.0.0',
-        currentVersionCode: 1,
-        latestVersion: cleanLatestVersion || '1.0.0',
+        currentVersion: CURRENT_VERSION,
+        currentVersionCode: CURRENT_VERSION_CODE,
+        latestVersion: cleanLatestVersion || CURRENT_VERSION,
         tagName: tagName,
         releaseNotes: data.body || 'No release notes provided.',
         apkUrl: apkAsset?.browser_download_url || null,
@@ -128,8 +131,8 @@ class AppUpdateWeb extends WebPlugin {
       }
       return {
         available: false,
-        currentVersion: '1.0.0',
-        currentVersionCode: 1,
+        currentVersion: CURRENT_VERSION,
+        currentVersionCode: CURRENT_VERSION_CODE,
         error: err.message,
       };
     }
@@ -144,8 +147,8 @@ class AppUpdateWeb extends WebPlugin {
 
   async getAppVersion() {
     return {
-      versionName: '1.0.0',
-      versionCode: 1,
+      versionName: CURRENT_VERSION,
+      versionCode: CURRENT_VERSION_CODE,
       platform: 'web',
     };
   }
