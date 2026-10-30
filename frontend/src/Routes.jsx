@@ -17,8 +17,6 @@ import TeacherAttemptReviewPage from './pages/teacher-attempt-review';
 import TeacherViolationReportPage from './pages/teacher-violation-report';
 import ExamPortal from './pages/exam-portal';
 import TeacherMonitoringPage from './pages/exam-monitoring';
-import HeadPoseDiagnosticPage from './pages/headpose-diagnostic';
-import AIDiagnosticsDashboard from './pages/ai-diagnostics';
 import AppSpikeBenchmark from './pages/app-spike';
 import ExamLockSpikePage from './pages/app-spike/ExamLockSpikePage';
 import UseWebVersionPage from './pages/native-guard/UseWebVersionPage';
@@ -69,23 +67,6 @@ const Routes = () => {
           <Route 
             path="/signup" 
             element={<PublicRoute component={Signup} redirectPath="/student-dashboard" />} 
-          />
-          {/* Diagnostic Observability Platform Routes */}
-          <Route 
-            path="/debug" 
-            element={<AIDiagnosticsDashboard />} 
-          />
-          <Route 
-            path="/debug/ai-diagnostics" 
-            element={<AIDiagnosticsDashboard />} 
-          />
-          <Route 
-            path="/debug/dashboard" 
-            element={<AIDiagnosticsDashboard />} 
-          />
-          <Route 
-            path="/debug/headpose" 
-            element={<HeadPoseDiagnosticPage />} 
           />
 
           {/* Protected Routes - Student */}

@@ -193,40 +193,6 @@ const SettingsPage = () => {
             <ThemeToggle />
           </div>
         </div>
-
-        {/* Diagnostics & Security */}
-        <div className="bg-card border border-border rounded-2xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center space-x-2 border-b border-border/50 pb-3">
-            <Icon name="Shield" size={18} className="text-primary" />
-            <h2 className="text-lg font-heading font-semibold">
-              Diagnostics & Proctoring Tools
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <a
-              href="/debug/headpose"
-              className="p-3.5 rounded-xl border border-border bg-muted/20 hover:bg-muted/60 transition-smooth flex items-center justify-between group"
-            >
-              <div className="flex items-center space-x-3">
-                <Icon name="Eye" size={18} className="text-primary" />
-                <span className="text-sm font-medium">Head Pose Diagnostic</span>
-              </div>
-              <Icon name="ChevronRight" size={16} className="text-muted-foreground group-hover:translate-x-1 transition-transform" />
-            </a>
-
-            <a
-              href="/debug/ai-diagnostics"
-              className="p-3.5 rounded-xl border border-border bg-muted/20 hover:bg-muted/60 transition-smooth flex items-center justify-between group"
-            >
-              <div className="flex items-center space-x-3">
-                <Icon name="Activity" size={18} className="text-primary" />
-                <span className="text-sm font-medium">AI Observability Dashboard</span>
-              </div>
-              <Icon name="ChevronRight" size={16} className="text-muted-foreground group-hover:translate-x-1 transition-transform" />
-            </a>
-          </div>
-        </div>
       </main>
 
       {/* Modern Update Available Modal */}
