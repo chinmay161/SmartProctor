@@ -16,6 +16,11 @@ export const VISION_VIOLATION_SEVERITY = Object.freeze({
   // Not a vision type, but reported by the client-side proctoring flow on resume.
   PAGE_RELOAD: 'minor',
   SCREEN_SHARE_STOPPED: 'major',
+  // Native lockdown violation types
+  PIN_EXITED: 'major',
+  APP_BACKGROUNDED: 'major',
+  FOCUS_LOST: 'minor',
+  MULTI_WINDOW: 'major',
 });
 
 export const VIOLATION_DISPLAY_INFO = Object.freeze({
@@ -36,6 +41,10 @@ export const VIOLATION_DISPLAY_INFO = Object.freeze({
   WINDOW_BLUR: { label: 'Window blur detected', icon: 'Minimize2' },
   FULLSCREEN_EXIT: { label: 'Exited fullscreen', icon: 'Minimize' },
   AUDIO_ACTIVITY: { label: 'Suspicious audio detected', icon: 'Volume2' },
+  PIN_EXITED: { label: 'Screen pinning exited', icon: 'Unlock' },
+  APP_BACKGROUNDED: { label: 'App sent to background', icon: 'Layers' },
+  FOCUS_LOST: { label: 'App lost focus', icon: 'EyeOff' },
+  MULTI_WINDOW: { label: 'Split screen detected', icon: 'Columns' },
 });
 
 export const formatViolationType = (type) =>

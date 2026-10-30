@@ -36,6 +36,11 @@ VIOLATION_BASE_PENALTY = {
     # Client-side audio types
     "VOICE_DETECTED": 15,
     "MIC_DISCONNECTED": 20,
+    # Native lockdown types
+    "PIN_EXITED": 25,
+    "APP_BACKGROUNDED": 20,
+    "FOCUS_LOST": 15,
+    "MULTI_WINDOW": 20,
 }
 
 

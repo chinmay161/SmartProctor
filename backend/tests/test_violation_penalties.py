@@ -44,6 +44,13 @@ NEW_TYPES = {
     "MIC_DISCONNECTED": 20,
 }
 
+NATIVE_LOCKDOWN_TYPES = {
+    "PIN_EXITED": 25,
+    "APP_BACKGROUNDED": 20,
+    "FOCUS_LOST": 15,
+    "MULTI_WINDOW": 20,
+}
+
 
 
 @pytest.mark.parametrize("violation_type,expected", sorted(EXISTING_TYPES.items()))
@@ -53,6 +60,11 @@ def test_existing_types_keep_their_base_penalty(violation_type, expected):
 
 @pytest.mark.parametrize("violation_type,expected", sorted(NEW_TYPES.items()))
 def test_new_vision_types_have_explicit_base_penalty(violation_type, expected):
+    assert base_penalty_for(violation_type) == expected
+
+
+@pytest.mark.parametrize("violation_type,expected", sorted(NATIVE_LOCKDOWN_TYPES.items()))
+def test_native_lockdown_types_have_explicit_base_penalty(violation_type, expected):
     assert base_penalty_for(violation_type) == expected
 
 
