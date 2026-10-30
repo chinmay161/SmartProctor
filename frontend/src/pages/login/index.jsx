@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import LoginForm from './components/LoginForm';
 import FeatureHighlights from './components/FeatureHighlights';
 import ThemeToggle from '../../components/ui/ThemeToggle';
@@ -42,34 +43,18 @@ const Login = () => {
           }}
         >
           <div style={{ width: '100%', maxWidth: '460px' }}>
-            {/* Mobile-only logo */}
-            <div
+            {/* Mobile-only brand */}
+            <Link
+              to="/"
               className="lg:hidden auth-fade-up auth-mobile-logo"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '12px',
                 marginBottom: '2rem',
+                textDecoration: 'none',
               }}
             >
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '9px',
-                  background: 'rgba(59,130,246,0.15)',
-                  border: '1px solid rgba(59,130,246,0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="var(--auth-accent)" strokeWidth="2" style={{ width: '20px', height: '20px' }}>
-                  <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
-                  <path d="M6 12v5c3 3 9 3 12 0v-5" />
-                </svg>
-              </div>
               <span
                 style={{
                   fontFamily: 'var(--auth-font-display)',
@@ -80,7 +65,7 @@ const Login = () => {
               >
                 SmartProctor
               </span>
-            </div>
+            </Link>
 
             <LoginForm />
           </div>

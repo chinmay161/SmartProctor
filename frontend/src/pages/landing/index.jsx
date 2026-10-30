@@ -1,7 +1,6 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../../components/AppIcon';
-import SmartProctorLogo from '../../components/ui/SmartProctorLogo';
 import ThemeToggle from '../../components/ui/ThemeToggle';
 import AppFooter from '../../components/ui/AppFooter';
 import NeonGridBackground from '../../components/ui/NeonGridBackground';
@@ -18,12 +17,19 @@ const LandingPage = () => {
 
   const isAuthenticated = sessionAuth || auth0Auth;
 
-  const getDashboardPath = () => {
+  const getDashboardPath = useCallback(() => {
     const userRole = profile?.role || role;
     if (userRole === 'admin') return '/admin-panel';
     if (userRole === 'teacher') return '/teacher-dashboard';
     return '/student-dashboard';
-  };
+  }, [profile?.role, role]);
+
+  useEffect(() => {
+    if (isAuthenticated && sessionStorage.getItem('auth_redirect_to_dashboard')) {
+      sessionStorage.removeItem('auth_redirect_to_dashboard');
+      navigate(getDashboardPath(), { replace: true });
+    }
+  }, [isAuthenticated, navigate, getDashboardPath]);
 
   const features = [
     {
@@ -90,11 +96,8 @@ const LandingPage = () => {
       <header className="sticky top-0 z-30 w-full backdrop-blur-md bg-background/80 border-b border-border transition-colors">
         <div className="h-[2px] w-full bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-400" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5 group">
-            <div className="flex items-center justify-center p-1.5 rounded-xl bg-primary/10 border border-primary/20 shadow-sm transition-transform duration-200 group-hover:scale-105">
-              <SmartProctorLogo size={28} />
-            </div>
-            <span className="text-xl font-bold tracking-tight text-foreground">
+          <Link to="/" className="flex items-center gap-2 group">
+            <span className="text-xl font-bold tracking-tight text-foreground hover:text-primary transition-colors">
               Smart<span className="text-primary">Proctor</span>
             </span>
           </Link>

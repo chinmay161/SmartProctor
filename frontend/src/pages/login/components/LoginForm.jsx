@@ -117,11 +117,22 @@ const LoginForm = () => {
       setIsLoading(true);
       setTransitionMessage('Redirecting to secure sign-in...');
       setIsRedirecting(true);
+      try {
+        sessionStorage.setItem('auth_redirect_to_dashboard', 'true');
+      } catch {
+        // Ignore storage exceptions in private mode
+      }
       await loginWithRedirect({
         ...(isNativeApp() ? { openUrl } : {}),
+        appState: { returnTo: '/login' },
         authorizationParams: { login_hint: formData.email.trim(), screen_hint: 'login' },
       });
     } catch {
+      try {
+        sessionStorage.removeItem('auth_redirect_to_dashboard');
+      } catch {
+        // Ignore storage exceptions
+      }
       setIsRedirecting(false);
       setIsLoading(false);
       setErrors({ submit: 'Sign-in failed. Please try again.' });
@@ -133,11 +144,22 @@ const LoginForm = () => {
       setIsLoading(true);
       setTransitionMessage('Redirecting to Google sign-in...');
       setIsRedirecting(true);
+      try {
+        sessionStorage.setItem('auth_redirect_to_dashboard', 'true');
+      } catch {
+        // Ignore storage exceptions in private mode
+      }
       await loginWithRedirect({
         ...(isNativeApp() ? { openUrl } : {}),
+        appState: { returnTo: '/login' },
         authorizationParams: { connection: 'google-oauth2' },
       });
     } catch {
+      try {
+        sessionStorage.removeItem('auth_redirect_to_dashboard');
+      } catch {
+        // Ignore storage exceptions
+      }
       setIsRedirecting(false);
       setIsLoading(false);
       setErrors({ submit: 'Google sign-in failed. Please try again.' });

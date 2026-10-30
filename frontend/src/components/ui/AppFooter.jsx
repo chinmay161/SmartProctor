@@ -1,6 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import SmartProctorLogo from './SmartProctorLogo';
 import { useSession } from '../../context/SessionContext';
 
 const DeviceTestModal = lazy(() => import('../proctoring/DeviceTestModal'));
@@ -47,7 +46,6 @@ const AppFooter = ({ className = '' }) => {
           {/* Left: Brand, Copyright & Clock */}
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 text-xs sm:text-sm">
             <div className="flex items-center gap-2">
-              <SmartProctorLogo size={20} />
               <span className="text-slate-400 font-medium">
                 &copy; {new Date().getFullYear()} SmartProctor. All rights reserved.
               </span>

@@ -41,10 +41,9 @@ createRoot(document.getElementById('root')).render(
       cacheLocation={isNative ? 'localstorage' : undefined}
       skipRedirectCallback={isNative}
       onRedirectCallback={(appState) => {
-        const target = appState?.returnTo;
-        if (typeof target === 'string' && target.length > 0) {
-          window.history.replaceState({}, document.title, target);
-        }
+        const target = appState?.returnTo && appState.returnTo !== '/' ? appState.returnTo : '/login';
+        window.history.replaceState({}, document.title, target);
+        try { sessionStorage.setItem('auth_redirect_to_dashboard', 'true'); } catch {}
       }}
       authorizationParams={{
         redirect_uri: redirectUri,
