@@ -235,8 +235,21 @@ Now that you have both live URLs:
 | `EVENT_RETENTION_DAYS` | No | `render.yaml` | Auto-cleanup retention period for flight recorder events in days. | `30` |
 | `AI_WORKER_BASE_URL` | No | Render Dashboard | Optional external AI worker URL. If unset, `/ai/*` routes return 503 and `/health` never calls it. | (empty) |
 | `SENTRY_DSN` | No | Render Dashboard | Sentry project DSN for backend error tracking. Initialized only if set. | `https://examplePublicKey@o0.ingest.sentry.io/0` |
-| `SENTRY_TRACES_RATE` | No | `render.yaml` | Sample rate for backend performance tracing. | `0.05` |
 | `LOG_HASH_SALT` | No | Render Dashboard | Salt for HMAC-SHA256 anonymized user logging (`user_hash`). | `smartproctor-log-salt` |
+| `BREVO_API_KEY` | No | Render Dashboard | Optional Brevo REST API v3 key for transactional emails. | (empty) |
+| `BREVO_SENDER_EMAIL` | No | Render Dashboard | Sender email address. Must be a sender verified in Brevo. | `notifications@yourdomain.com` |
+| `BREVO_SENDER_NAME` | No | `render.yaml` | Display name for outgoing emails. | `SmartProctor` |
+
+### Brevo Email Service (Optional)
+
+SmartProctor supports transactional exam completion digests sent to the exam creator upon publishing results, along with admin verification test emails.
+
+1. **Sender Verification**:
+   - In Brevo, navigate to **Senders, Domains & Dedicated IPs** and add your sender.
+   - `BREVO_SENDER_EMAIL` must be a sender verified in Brevo.
+2. **Personal Data & Privacy**:
+   - The only personal data sent to Brevo is the recipient teacher's email address and aggregate counts (total submissions, class average score, and total violations).
+   - No student names, student emails, photos, answers, or individual violation records are ever transmitted to Brevo.
 
 ### Frontend Variables (Vercel)
 

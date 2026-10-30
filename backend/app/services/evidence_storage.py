@@ -34,7 +34,7 @@ def redact_sensitive_info(text: str) -> str:
     s = re.sub(r'(https?://[^\s\?]+)\?[^\s]+', r'\1?[SIGNED_QUERY_REDACTED]', s)
     # Redact key/secret/token patterns in text
     s = re.sub(
-        r'(?i)(secret[_-]?access[_-]?key|access[_-]?key[_-]?id|token|password|credential|sig|signature)\s*[:=]\s*["\']?[^"\'\s,;]+["\']?',
+        r'(?i)(api[_-]?key|secret[_-]?access[_-]?key|access[_-]?key[_-]?id|secret|token|password|credential|sig|signature)\s*[:=]\s*["\']?[^"\'\s,;]+["\']?',
         r'\1=[REDACTED]',
         s,
     )

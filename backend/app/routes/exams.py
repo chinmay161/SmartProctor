@@ -1,11 +1,12 @@
 import json
 import csv
+import logging
 from datetime import datetime, timezone
 from io import StringIO
-from typing import Any
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import object_session
 
 from ..auth.dependencies import get_current_user
@@ -19,7 +20,16 @@ from ..models.exam_attempt import AttemptStatus, ExamAttempt
 from ..models.exam_session import ExamSession
 from ..models.violation import Violation
 from ..models.question import Question
+from ..monitoring import compute_user_hash
 from ..permissions.exam_permissions import require_exam_owner
+from ..services.email_service import (
+    hash_recipient,
+    resolve_user_email,
+    send_exam_completion_digest,
+)
+from ..services.evidence_storage import redact_sensitive_info
+
+logger = logging.getLogger(__name__)
 from ..schemas.exam import (
     CompletedExamAnalyticsResponse,
     CompletedExamViolationReportResponse,
@@ -523,8 +533,106 @@ def end_exam_endpoint(exam_id: str, user=Depends(require_role("teacher"))):
         db.close()
 
 
+def process_and_send_exam_digest(
+    exam_id: str,
+    creator_sub: str,
+    token_email: Optional[str] = None,
+) -> None:
+    """
+    Background task to compute exam statistics and send completion digest to exam creator.
+    Opens and closes its own DB session (never reuses the request's session).
+    Computes all metrics in the task.
+    Resolves recipient email (including Auth0 lookup with 3s timeout / max 1 retry) inside the task.
+    Excludes IN_PROGRESS attempts from submissions and class average; guards against divide-by-zero.
+    Joins violations through ExamAttempt and excludes review_status == 'FALSE_POSITIVE'.
+    Enforces idempotency: only sets digest_sent_at on successful dispatch; leaves empty on error for retry.
+    """
+    db = SessionLocal()
+    try:
+        exam = db.query(Exam).filter(Exam.id == exam_id).first()
+        if not exam:
+            logger.warning("Exam %s not found in background digest task", exam_id)
+            return
+
+        if exam.digest_sent_at is not None:
+            logger.info("Exam %s digest was already sent at %s; skipping", exam_id, exam.digest_sent_at)
+            return
+
+        recipient_email = resolve_user_email(creator_sub, db, token_email)
+        if not recipient_email:
+            creator_hash = compute_user_hash(creator_sub)
+            logger.warning(
+                "Cannot send exam digest for exam %s: no email found for creator user_sub_hash=%s",
+                exam_id,
+                creator_hash,
+            )
+            return
+
+        completed_attempts = (
+            db.query(ExamAttempt)
+            .filter(
+                ExamAttempt.exam_id == exam_id,
+                ExamAttempt.status != AttemptStatus.IN_PROGRESS,
+            )
+            .all()
+        )
+        total_submissions = len(completed_attempts)
+        scores = [a.score for a in completed_attempts if a.score is not None]
+        avg_score = round(sum(scores) / len(scores), 1) if scores else None
+
+        total_violations = (
+            db.query(Violation)
+            .join(ExamAttempt, Violation.attempt_id == ExamAttempt.id)
+            .filter(
+                ExamAttempt.exam_id == exam_id,
+                Violation.review_status != "FALSE_POSITIVE",
+            )
+            .count()
+        )
+
+        teacher_name = "Educator"
+
+        result = send_exam_completion_digest(
+            teacher_email=recipient_email,
+            teacher_name=teacher_name,
+            exam_title=exam.title,
+            total_submissions=total_submissions,
+            average_score=avg_score,
+            total_violations=total_violations,
+        )
+
+        if result.get("status") in ("sent", "simulated", "disabled"):
+            exam.digest_sent_at = datetime.now(timezone.utc)
+            db.commit()
+            logger.info(
+                "Exam %s digest marked sent (recipient_hash=%s, status=%s)",
+                exam_id,
+                result.get("recipient_hash"),
+                result.get("status"),
+            )
+        else:
+            logger.error(
+                "Failed to send exam %s digest (recipient_hash=%s); leaving digest_sent_at empty for retry",
+                exam_id,
+                result.get("recipient_hash"),
+            )
+    except Exception as exc:
+        db.rollback()
+        logger.error(
+            "Unhandled exception in background exam digest task for exam %s: %s",
+            exam_id,
+            redact_sensitive_info(str(exc)),
+        )
+    finally:
+        db.close()
+
+
 @router.patch("/{exam_id}/publish-results")
-def publish_results(exam_id: str, user=Depends(require_role("teacher"))):
+def publish_results(
+    exam_id: str,
+    background_tasks: BackgroundTasks,
+    user=Depends(require_role("teacher")),
+):
     db = SessionLocal()
     try:
         exam = require_exam_owner(db, exam_id, user["sub"])
@@ -534,6 +642,16 @@ def publish_results(exam_id: str, user=Depends(require_role("teacher"))):
             return {"exam_id": exam.id, "results_visible": True, "already_released": True}
         exam.results_visible = True
         db.commit()
+
+        # Enqueue background task only when transitioning results_visible from false to true
+        if exam.digest_sent_at is None:
+            background_tasks.add_task(
+                process_and_send_exam_digest,
+                exam_id=exam.id,
+                creator_sub=user["sub"],
+                token_email=user.get("email"),
+            )
+
         return {"exam_id": exam.id, "results_visible": True, "already_released": False}
     finally:
         db.close()

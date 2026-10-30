@@ -8,7 +8,7 @@ from sqlalchemy import and_, or_
 from typing import Optional
 
 from ..auth.dependencies import canonicalize_role, get_current_user
-from ..auth.roles import deny_access, require_role
+from ..auth.roles import deny_access, require_role, require_teacher_or_admin
 from ..database import SessionLocal
 from ..models.exam import Exam
 from ..models.exam_attempt import ExamAttempt
@@ -21,15 +21,6 @@ from ..services.telemetry_service import record_event
 from ..services.violation_reporting import notify_proctors_from_thread, record_violation
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
-
-
-
-def require_teacher_or_admin(user=Depends(get_current_user)):
-    required = ["teacher", "admin", "school_admin"]
-    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
-    if not roles.intersection(required):
-        deny_access(user, required)
-    return user
 
 
 def _serialize_session(session: ExamSession) -> dict:

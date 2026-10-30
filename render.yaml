@@ -62,4 +62,10 @@ services:
         sync: false
       - key: EVENT_RETENTION_DAYS
         value: "30"
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_SENDER_NAME
+        value: "SmartProctor"
 

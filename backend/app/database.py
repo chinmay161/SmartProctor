@@ -134,6 +134,8 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE exams ADD COLUMN is_template BOOLEAN NOT NULL DEFAULT 0")
         if "results_visible" not in exam_columns:
             statements.append("ALTER TABLE exams ADD COLUMN results_visible BOOLEAN NOT NULL DEFAULT 0")
+        if "digest_sent_at" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN digest_sent_at DATETIME")
 
     if "exam_sessions" in tables:
         session_columns = {column["name"] for column in inspector.get_columns("exam_sessions")}

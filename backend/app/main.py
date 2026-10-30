@@ -190,10 +190,11 @@ app.include_router(ws_proctoring.router)
 app.include_router(ws_signaling.router)
 app.include_router(questions.router)
 app.include_router(analytics.router)
-from .routes import profile, telemetry, feedback
+from .routes import profile, telemetry, feedback, notifications
 app.include_router(profile.router)
 app.include_router(telemetry.router)
 app.include_router(feedback.router)
+app.include_router(notifications.router)
 
 
 @app.get("/")
