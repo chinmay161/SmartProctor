@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Routes from './Routes';
 import { ThemeProvider } from "./context/ThemeContext";
 import { SessionProvider } from "./context/SessionContext";
+import { ToastProvider } from "./context/ToastContext";
 import UpdateModal from './components/update/UpdateModal';
 import AppUpdate from './plugins/appUpdate';
 import { isNativeApp } from './utils/platform';
@@ -32,12 +33,14 @@ function App() {
   return (
     <SessionProvider>
       <ThemeProvider>
-        <Routes />
-        <UpdateModal
-          isOpen={Boolean(backgroundRelease)}
-          release={backgroundRelease}
-          onClose={() => setBackgroundRelease(null)}
-        />
+        <ToastProvider>
+          <Routes />
+          <UpdateModal
+            isOpen={Boolean(backgroundRelease)}
+            release={backgroundRelease}
+            onClose={() => setBackgroundRelease(null)}
+          />
+        </ToastProvider>
       </ThemeProvider>
     </SessionProvider>
   );

@@ -21,6 +21,8 @@ const DeviceTestModal = ({ onClose }) => {
           authorizationParams: { audience: auth0Audience },
         })
       );
+    } else {
+      flightRecorder.setAccessTokenGetter(null);
     }
   }, [isAuthenticated, getAccessTokenSilently, auth0Audience]);
 
@@ -43,7 +45,7 @@ const DeviceTestModal = ({ onClose }) => {
         onComplete={close}
         onCancel={close}
         cancelLabel="Close"
-        onRequestReportProblem={() => setShowReportProblem(true)}
+        onRequestReportProblem={isAuthenticated ? () => setShowReportProblem(true) : undefined}
       />
       {showReportProblem && (
         <ReportProblemModal onClose={() => setShowReportProblem(false)} />

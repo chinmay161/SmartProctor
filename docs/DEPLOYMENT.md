@@ -336,3 +336,15 @@ While the student and proctor WebSockets recover on their own with exponential b
    - **URL**: `https://smartproctor-backend.onrender.com/health`
    - **Interval**: Every 10 minutes
    - **Timing**: Schedule to run during exam hours or exam days to prevent the instance from entering sleep mode.
+
+---
+
+## 11. Deployment Window & Exam Hour Safety
+
+> [!CAUTION]
+> **Do not deploy during exam hours.**
+
+When a new frontend deployment goes live on Vercel or CDN hosting, old hashed JavaScript chunks from the previous release are replaced. If a deployment occurs while students are in the middle of active exam sessions:
+- Any dynamic chunk fetch for an old file hash will result in an HTTP 404 chunk load failure.
+- Although `exam-portal` statically bundles its critical components and `lazyWithRetry` handles failures non-blockingly without reload prompts, students or instructors navigating to new views may experience chunk mismatch.
+- **Rule**: Schedule all frontend and backend deployments, rollbacks, and infrastructure updates outside of active exam windows.

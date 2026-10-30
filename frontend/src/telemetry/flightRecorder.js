@@ -92,6 +92,7 @@ class FlightRecorder {
 
   saveToStorage() {
     try {
+      if (this.kind === 'device_test' && !this.getAccessToken) return;
       if (typeof window === 'undefined' || !window.sessionStorage) return;
       const toStore = {
         traceId: this.traceId,
@@ -118,7 +119,7 @@ class FlightRecorder {
       if (sessionId) this.sessionId = sessionId;
       if (examId) this.examId = examId;
       if (kind) this.kind = kind;
-      if (getAccessToken) this.getAccessToken = getAccessToken;
+      if (getAccessToken !== undefined) this.getAccessToken = getAccessToken;
 
       this.saveToStorage();
 
@@ -148,6 +149,16 @@ class FlightRecorder {
 
   setAccessTokenGetter(fn) {
     this.getAccessToken = fn;
+    if (this.kind === 'device_test' && !fn) {
+      this.buffer = [];
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          sessionStorage.removeItem(STORAGE_KEY);
+        }
+      } catch {
+        // safe
+      }
+    }
   }
 
   getTraceId() {
@@ -164,6 +175,11 @@ class FlightRecorder {
    */
   record(category, name, data = null) {
     try {
+      // Telemetry must be dropped (not queued in sessionStorage) when there is no token in device tests
+      if (this.kind === 'device_test' && !this.getAccessToken) {
+        return;
+      }
+
       if (!this.traceId) {
         this.traceId = generateTraceId();
       }
@@ -227,6 +243,24 @@ class FlightRecorder {
 
   async flush({ keepalive = false } = {}) {
     if (this.buffer.length === 0 || (this.flushing && !keepalive)) return;
+
+    // Dropped without token in device tests: no network calls to authenticated endpoints, no retry storms
+    if (this.kind === 'device_test') {
+      const authHeader = await this.getAuthHeader();
+      if (!authHeader) {
+        this.buffer = [];
+        this.flushing = false;
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            sessionStorage.removeItem(STORAGE_KEY);
+          }
+        } catch {
+          // safe
+        }
+        return;
+      }
+    }
+
     this.flushing = true;
 
     try {

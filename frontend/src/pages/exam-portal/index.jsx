@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import Icon from '../../components/AppIcon';
@@ -38,9 +38,7 @@ import { VIOLATION_DROP_REASONS } from '../../telemetry/violationDropReasons';
 import ReportProblemModal from '../../components/feedback/ReportProblemModal';
 import PilotScenarioPanel from './components/PilotScenarioPanel';
 import { isNativeApp } from '../../utils/platform';
-
-// Only camera exams need the gate UI, so it ships in its own chunk.
-const PreExamGate = lazy(() => import('../../components/proctoring/PreExamGate'));
+import PreExamGate from '../../components/proctoring/PreExamGate';
 
 const CAMERA_WIZARD_FLAGS =['enableWebcam', 'detectMultipleFaces', 'detectNoFace', 'detectMobilePhone'];
 const wizardRequiresCamera = (cfg) => CAMERA_WIZARD_FLAGS.some((flag) => Boolean(cfg?.[flag]));
