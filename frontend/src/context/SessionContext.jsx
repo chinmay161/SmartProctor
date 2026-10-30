@@ -5,6 +5,7 @@ import { apiRequest } from '../services/api';
 import { setAccessTokenProvider, setLoginRedirectHandler } from '../services/httpClient';
 import { setSentryRole } from '../utils/sentryScrubber';
 import { isNativeApp, openUrl, getNativeCallbackUrl } from '../utils/platform';
+import { releaseNativeLockdown } from '../proctoring/nativeLockdown';
 
 // Keys written by the removed custom-session token storage. Exact names only:
 // other code (e.g. ThemeContext's 'smartproctor-theme') shares the prefix.
@@ -155,6 +156,7 @@ export const SessionProvider = ({ children }) => {
 
   const logout = useCallback(() => {
     if (isNativeApp()) {
+      void releaseNativeLockdown();
       const nativeReturnTo = getNativeCallbackUrl(auth0Domain);
       auth0Logout({
         openUrl,
@@ -185,6 +187,7 @@ export const SessionProvider = ({ children }) => {
   );
 };
 
+/* eslint-disable react-refresh/only-export-components */
 /**
  * Hook to use session context
  */

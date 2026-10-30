@@ -39,6 +39,14 @@ import ReportProblemModal from '../../components/feedback/ReportProblemModal';
 import PilotScenarioPanel from './components/PilotScenarioPanel';
 import { isNativeApp } from '../../utils/platform';
 import PreExamGate from '../../components/proctoring/PreExamGate';
+import { App } from '@capacitor/app';
+import ExamLock from '../../plugins/examLock';
+import {
+  createNativeLockdownTracker,
+  releaseNativeLockdown,
+  evaluateDndFilter,
+} from '../../proctoring/nativeLockdown';
+import { ToastContext } from '../../context/ToastContext';
 
 const CAMERA_WIZARD_FLAGS =['enableWebcam', 'detectMultipleFaces', 'detectNoFace', 'detectMobilePhone'];
 const wizardRequiresCamera = (cfg) => CAMERA_WIZARD_FLAGS.some((flag) => Boolean(cfg?.[flag]));
@@ -195,6 +203,13 @@ const ExamPortal = () => {
   const [submissionResult, setSubmissionResult] = useState(null);
   const reloadReportedRef = useRef(false);
 
+  const toastCtx = React.useContext(ToastContext);
+  const toast = toastCtx?.toast;
+  const [lockTaskMode, setLockTaskMode] = useState('none');
+  const [isSecure, setIsSecure] = useState(false);
+  const [pinningLost, setPinningLost] = useState(false);
+  const nativeTrackerRef = useRef(null);
+  const lockdownActive = isSecure && (lockTaskMode === 'pinned' || lockTaskMode === 'locked');
 
   const sourceExam = examDataState;
   const securityConfig = examRules || sourceExam?.wizard_config || {};
@@ -412,7 +427,7 @@ const ExamPortal = () => {
         setIsResume(resumable);
         setCameraRequired(requiresCamera);
         setMicRequired(requiresMic);
-        const needsGate = requiresCamera || requiresMic || (!isNativeApp() && Boolean(cfg?.enableScreenRecording)) || Boolean(cfg?.browserLockdown);
+        const needsGate = isNativeApp() || requiresCamera || requiresMic || (!isNativeApp() && Boolean(cfg?.enableScreenRecording)) || Boolean(cfg?.browserLockdown);
         setStage(needsGate ? 'gate' : 'starting');
       } catch {
         if (mounted) {
@@ -429,6 +444,9 @@ const ExamPortal = () => {
     loadExam();
     return () => {
       mounted = false;
+      if (isNativeApp()) {
+        void releaseNativeLockdown();
+      }
       if (violationRetryTimeoutRef.current) {
         clearTimeout(violationRetryTimeoutRef.current);
         violationRetryTimeoutRef.current = null;
@@ -555,6 +573,17 @@ const ExamPortal = () => {
           console.warn('[exam-portal] Failed to start audio engine:', err);
           setMicBlocked(true);
         }
+      }
+    }
+    if (isNative) {
+      try {
+        const st = await ExamLock.getState();
+        if (st) {
+          setIsSecure(Boolean(st.secure));
+          setLockTaskMode(st.lockTaskMode || 'pinned');
+        }
+      } catch (err) {
+        console.warn('[exam-portal] Failed to query initial ExamLock state:', err);
       }
     }
     setStage('ready');
@@ -711,6 +740,9 @@ const ExamPortal = () => {
             examEndedRef.current = true;
             examStatusRef.current = 'ending';
             setProctorWarning('Exam terminated by proctor.');
+            if (isNative) {
+              void releaseNativeLockdown();
+            }
             if (handleConfirmSubmitRef.current) handleConfirmSubmitRef.current();
           }
         } catch {
@@ -979,6 +1011,132 @@ const ExamPortal = () => {
     };
   }, []);
 
+  // Native lockdown listeners and tracker during active exam
+  useEffect(() => {
+    if (!isNative || stage !== 'ready') return undefined;
+
+    let mounted = true;
+    const tracker = createNativeLockdownTracker({
+      onViolation: (v) => {
+        addViolation(v.message, v.type, v.confidence ?? 1.0, {
+          severity: v.severity,
+          durationMs: v.durationMs,
+          reason: v.reason,
+        });
+      },
+      onTelemetry: (eventName, payload) => {
+        flightRecorder.record('lockdown', eventName, payload);
+      },
+    });
+    nativeTrackerRef.current = tracker;
+
+    const focusLossInterval = setInterval(() => {
+      tracker.evaluateFocusLossTimer(Date.now());
+    }, 1000);
+
+    const checkDnd = async () => {
+      try {
+        const res = await ExamLock.getInterruptionFilter();
+        const filter = res?.filter;
+        const evaluated = evaluateDndFilter(filter);
+        flightRecorder.record('lockdown', 'dnd_check', {
+          filter: Number(filter ?? 0),
+          status: evaluated.status,
+        });
+        if (evaluated.status === 'off') {
+          flightRecorder.record('lockdown', 'dnd_off', { filter: Number(filter || 1) });
+        }
+      } catch (err) {
+        console.warn('[exam-portal] Failed to check interruption filter:', err);
+      }
+    };
+
+    let cleanups = [];
+
+    const setupListeners = async () => {
+      try {
+        const l1 = await ExamLock.addListener('pinningExited', (data) => {
+          if (!mounted) return;
+          setPinningLost(true);
+          setLockTaskMode('none');
+          tracker.handlePinningExited(data);
+        });
+        cleanups.push(() => l1?.remove?.());
+
+        const l2 = await ExamLock.addListener('pinningStarted', (data) => {
+          if (!mounted) return;
+          setPinningLost(false);
+          setLockTaskMode(data?.lockTaskMode || 'pinned');
+          tracker.handlePinningStarted(data);
+        });
+        cleanups.push(() => l2?.remove?.());
+
+        const l3 = await ExamLock.addListener('pinningFailed', (data) => {
+          if (!mounted) return;
+          tracker.handlePinningFailed(data);
+        });
+        cleanups.push(() => l3?.remove?.());
+
+        const l4 = await ExamLock.addListener('windowFocusChanged', (data) => {
+          if (!mounted) return;
+          tracker.handleWindowFocus(Boolean(data?.hasFocus));
+          if (data?.hasFocus) {
+            void checkDnd();
+          }
+        });
+        cleanups.push(() => l4?.remove?.());
+
+        const l5 = await ExamLock.addListener('activityPaused', () => {
+          if (!mounted) return;
+          tracker.handleActivityPaused();
+        });
+        cleanups.push(() => l5?.remove?.());
+
+        const l6 = await ExamLock.addListener('activityResumed', () => {
+          if (!mounted) return;
+          tracker.handleActivityResumed();
+          void checkDnd();
+        });
+        cleanups.push(() => l6?.remove?.());
+
+        const l7 = await ExamLock.addListener('multiWindowChanged', (data) => {
+          if (!mounted) return;
+          tracker.handleMultiWindowChanged(Boolean(data?.inMultiWindow));
+        });
+        cleanups.push(() => l7?.remove?.());
+
+        // Back button toast during exam (Requirement 5)
+        const l8 = await App.addListener('backButton', () => {
+          if (!mounted) return;
+          if (toast?.warning) {
+            toast.warning('Back is disabled during the exam', 2500);
+          } else {
+            console.warn('[exam-portal] Back is disabled during the exam');
+          }
+        });
+        cleanups.push(() => l8?.remove?.());
+      } catch (err) {
+        console.warn('[exam-portal] Error setting up ExamLock listeners:', err);
+      }
+    };
+
+    void setupListeners();
+
+    return () => {
+      mounted = false;
+      clearInterval(focusLossInterval);
+      cleanups.forEach((c) => {
+        try {
+          c();
+        } catch {
+          /* best-effort */
+        }
+      });
+      cleanups = [];
+      tracker.reset();
+    };
+  }, [isNative, stage, toast]);
+
   // Client error reporting to flight recorder
   useEffect(() => {
     const onError = (e) => {
@@ -1162,6 +1320,7 @@ const ExamPortal = () => {
 
 
   const handleAnswerChange = (questionId, answer) => {
+    if (isNative && pinningLost) return;
     setAnswers((prev) => ({
       ...prev,
       [questionId]: answer
@@ -1172,18 +1331,21 @@ const ExamPortal = () => {
   };
 
   const handleNext = () => {
+    if (isNative && pinningLost) return;
     if (currentQuestionIndex < totalQuestions - 1) {
       setCurrentQuestionIndex((prev) => prev + 1);
     }
   };
 
   const handlePrevious = () => {
+    if (isNative && pinningLost) return;
     if (currentQuestionIndex > 0) {
       setCurrentQuestionIndex((prev) => prev - 1);
     }
   };
 
   const handleMarkForReview = () => {
+    if (isNative && pinningLost) return;
     setMarkedForReview((prev) => {
       const newSet = new Set(prev);
       if (newSet?.has(currentQuestion?.id)) {
@@ -1196,8 +1358,21 @@ const ExamPortal = () => {
   };
 
   const handleQuestionSelect = (index) => {
+    if (isNative && pinningLost) return;
     setCurrentQuestionIndex(index);
     setShowPalette(false);
+  };
+
+  const handleTimeUp = () => {
+    setProctorWarning('Time is up. Submitting your exam...');
+    if (isNative) {
+      void releaseNativeLockdown();
+    }
+    if (handleConfirmSubmitRef.current) {
+      handleConfirmSubmitRef.current();
+    } else {
+      handleSubmit();
+    }
   };
 
   const handleSubmit = () => {
@@ -1225,6 +1400,14 @@ const ExamPortal = () => {
         throw new Error('Attempt details are missing. Please return to dashboard and restart the exam.');
       }
       setShowSubmitModal(false);
+
+      if (isNative) {
+        try {
+          await releaseNativeLockdown();
+        } catch (err) {
+          console.warn('[exam-portal] releaseNativeLockdown error:', err);
+        }
+      }
 
       const activeExamId = examId || examDataState?.id || sourceExam?.id;
       let resultData = null;
@@ -1308,6 +1491,11 @@ const ExamPortal = () => {
             <div>
               <h2 className="text-2xl font-heading font-semibold text-foreground">Exam Submitted!</h2>
               <p className="text-sm text-muted-foreground mt-1">Your responses have been recorded successfully.</p>
+              {isNative && (
+                <p className="text-xs text-primary font-medium mt-2">
+                  You can now turn Do Not Disturb off.
+                </p>
+              )}
             </div>
 
             {hasScore && (
@@ -1436,13 +1624,13 @@ const ExamPortal = () => {
         sourceExam={sourceExam}
         remainingSeconds={remainingSeconds}
         durationMinutesForTimer={durationMinutesForTimer}
-        onTimeUp={handleSubmit}
+        onTimeUp={handleTimeUp}
         onReportProblem={() => setShowReportProblem(true)}
         showFullscreenBtn={browserLockdownEnabled && !isFullscreen}
         onEnterFullscreen={enterFullscreen}
         onTogglePalette={() => setShowPalette(!showPalette)}
         isNative={isNative}
-        showNativeLockdownBanner={isNative && (import.meta.env.VITE_APP_SPIKE === 'true' || import.meta.env.VITE_APP_SPIKE === true)}
+        lockdownActive={isNative ? lockdownActive : false}
       />
 
       <ExamInterruptionOverlays
@@ -1466,6 +1654,8 @@ const ExamPortal = () => {
         onEnterFullscreen={enterFullscreen}
         violationLock={violationLock}
         isNative={isNative}
+        pinningLost={isNative && pinningLost}
+        onRePin={() => void ExamLock.startPinning()}
       />
 
       <div className="relative z-10 flex-1 flex overflow-hidden">

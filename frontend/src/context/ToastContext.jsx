@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import Icon from '../components/AppIcon';
 
-const ToastContext = createContext(null);
+export const ToastContext = createContext(null);
 
 export const useToast = () => {
   const context = useContext(ToastContext);

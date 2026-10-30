@@ -1,6 +1,7 @@
 import React from "react";
 import * as Sentry from "@sentry/react";
 import Icon from "./AppIcon";
+import { releaseNativeLockdown } from "../proctoring/nativeLockdown";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -8,11 +9,12 @@ class ErrorBoundary extends React.Component {
     this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError() {
     return { hasError: true };
   }
 
   componentDidCatch(error, errorInfo) {
+    void releaseNativeLockdown();
     error.__ErrorBoundary = true;
     window.__COMPONENT_ERROR__?.(error, errorInfo);
     try {

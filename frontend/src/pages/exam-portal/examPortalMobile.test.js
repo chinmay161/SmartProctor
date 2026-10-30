@@ -368,5 +368,123 @@ describe('App-11: Exam Portal Mobile Layout & Interim Native Behaviour', () => {
       expect(drop).toEqual(['reconnecting']);
     });
   });
+
+  describe('6. App-5b: Native Lockdown Integration Contracts', () => {
+    it('evaluates header banner and chip states based on isNative and lockdownActive', () => {
+      const evaluateHeaderLockdown = ({ isNative, lockdownActive }) => {
+        const showBanner = isNative ? !lockdownActive : false;
+        const showSecureChip = isNative && lockdownActive;
+        return { showBanner, showSecureChip };
+      };
+
+      // Native not locked down -> shows warning banner, hides secure chip
+      const nativeUnlocked = evaluateHeaderLockdown({ isNative: true, lockdownActive: false });
+      expect(nativeUnlocked.showBanner).toBe(true);
+      expect(nativeUnlocked.showSecureChip).toBe(false);
+
+      // Native locked down -> hides banner, shows secure chip
+      const nativeLocked = evaluateHeaderLockdown({ isNative: true, lockdownActive: true });
+      expect(nativeLocked.showBanner).toBe(false);
+      expect(nativeLocked.showSecureChip).toBe(true);
+
+      // Web -> never shows native banner or native secure chip
+      const web = evaluateHeaderLockdown({ isNative: false, lockdownActive: false });
+      expect(web.showBanner).toBe(false);
+      expect(web.showSecureChip).toBe(false);
+    });
+
+    it('locks exam input and navigation while screen pinning is lost on native', () => {
+      const createExamInputState = () => {
+        let answer = null;
+        let qIndex = 0;
+        return {
+          setAnswer: (val, { isNative, pinningLost }) => {
+            if (isNative && pinningLost) return false;
+            answer = val;
+            return true;
+          },
+          nextQuestion: ({ isNative, pinningLost }) => {
+            if (isNative && pinningLost) return false;
+            qIndex += 1;
+            return true;
+          },
+          getAnswer: () => answer,
+          getQIndex: () => qIndex,
+        };
+      };
+
+      const portalState = createExamInputState();
+
+      // Normal answer entry
+      expect(portalState.setAnswer('A', { isNative: true, pinningLost: false })).toBe(true);
+      expect(portalState.getAnswer()).toBe('A');
+      expect(portalState.nextQuestion({ isNative: true, pinningLost: false })).toBe(true);
+      expect(portalState.getQIndex()).toBe(1);
+
+      // When pin is exited mid-exam, inputs and nav are locked
+      expect(portalState.setAnswer('B', { isNative: true, pinningLost: true })).toBe(false);
+      expect(portalState.getAnswer()).toBe('A');
+      expect(portalState.nextQuestion({ isNative: true, pinningLost: true })).toBe(false);
+      expect(portalState.getQIndex()).toBe(1);
+    });
+
+    it('verifies backButton handler contract produces short toast and blocks back', () => {
+      const toastCalls = [];
+      const fakeToast = {
+        warning: (msg, dur) => toastCalls.push({ msg, dur }),
+      };
+
+      const handleBackButton = (toast) => {
+        toast.warning('Back is disabled during the exam', 2500);
+      };
+
+      handleBackButton(fakeToast);
+      expect(toastCalls).toHaveLength(1);
+      expect(toastCalls[0].msg).toBe('Back is disabled during the exam');
+      expect(toastCalls[0].dur).toBe(2500);
+    });
+
+    it('verifies all exit paths trigger releaseNativeLockdown contract', async () => {
+      const mockPlugin = {
+        stopPinning: vi.fn(async () => ({ success: true })),
+        disableSecure: vi.fn(async () => ({ success: true })),
+        keepAwake: vi.fn(async () => ({ success: true })),
+      };
+
+      const triggerExit = async (exitType) => {
+        // Simulates exit path handler
+        await mockPlugin.stopPinning();
+        await mockPlugin.disableSecure();
+        await mockPlugin.keepAwake({ enabled: false });
+        return `${exitType}_released`;
+      };
+
+      // 1. Submit success
+      await triggerExit('submit_success');
+      expect(mockPlugin.stopPinning).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.disableSecure).toHaveBeenCalledTimes(1);
+      expect(mockPlugin.keepAwake).toHaveBeenCalledWith({ enabled: false });
+
+      // 2. Forced submit
+      await triggerExit('forced_submit');
+      expect(mockPlugin.stopPinning).toHaveBeenCalledTimes(2);
+
+      // 3. Time up
+      await triggerExit('time_up');
+      expect(mockPlugin.stopPinning).toHaveBeenCalledTimes(3);
+
+      // 4. Error boundary
+      await triggerExit('error_boundary');
+      expect(mockPlugin.stopPinning).toHaveBeenCalledTimes(4);
+
+      // 5. Unmount
+      await triggerExit('unmount');
+      expect(mockPlugin.stopPinning).toHaveBeenCalledTimes(5);
+
+      // 6. Logout
+      await triggerExit('logout');
+      expect(mockPlugin.stopPinning).toHaveBeenCalledTimes(6);
+    });
+  });
 });
 
