@@ -22,19 +22,47 @@ public class ExamLockPlugin extends Plugin {
     private static final String TAG = "ExamLockPlugin";
     private static WeakReference<ExamLockPlugin> instanceRef;
 
-    private boolean isExamPinned = false;
+    private boolean isPinningPending = false;
+    private boolean hasConfirmedPin = false;
     private boolean isActivityForeground = true;
+    private static final long PIN_TIMEOUT_MS = 20000;
 
     private final Handler pollHandler = new Handler(Looper.getMainLooper());
     private final Runnable pollRunnable = new Runnable() {
         @Override
         public void run() {
-            if (isExamPinned) {
+            if (isPinningPending || hasConfirmedPin) {
                 checkLockTaskState("poll");
                 pollHandler.postDelayed(this, 500);
             }
         }
     };
+
+    private final Runnable pinningTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isPinningPending && !hasConfirmedPin) {
+                isPinningPending = false;
+                stopPolling();
+
+                JSObject data = new JSObject();
+                data.put("timestamp", System.currentTimeMillis());
+                data.put("reason", "timeout");
+                data.put("timeoutMs", PIN_TIMEOUT_MS);
+                notifyListeners("pinningFailed", data);
+                Logger.warn(TAG, "pinningFailed event fired after 20s timeout");
+            }
+        }
+    };
+
+    private void startPinningTimeout() {
+        pollHandler.removeCallbacks(pinningTimeoutRunnable);
+        pollHandler.postDelayed(pinningTimeoutRunnable, PIN_TIMEOUT_MS);
+    }
+
+    private void cancelPinningTimeout() {
+        pollHandler.removeCallbacks(pinningTimeoutRunnable);
+    }
 
     @Override
     public void load() {
@@ -106,8 +134,40 @@ public class ExamLockPlugin extends Plugin {
     }
 
     /**
+     * keepAwake: Sets or clears WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON.
+     */
+    @PluginMethod
+    public void keepAwake(PluginCall call) {
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.reject("Activity not available");
+            return;
+        }
+
+        boolean enabled = call.getBoolean("enabled", true);
+        activity.runOnUiThread(() -> {
+            try {
+                if (enabled) {
+                    activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                } else {
+                    activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("keepAwake", enabled);
+                call.resolve(ret);
+            } catch (Exception e) {
+                Logger.error(TAG, "Failed to toggle FLAG_KEEP_SCREEN_ON", e);
+                call.reject("Failed to set keepAwake: " + e.getMessage(), e);
+            }
+        });
+    }
+
+    /**
      * startPinning: Invokes startLockTask() while activity is in foreground.
-     * Starts 500ms polling for lock task mode transitions.
+     * Sets isPinningPending=true; reports pin exit only if a previous poll
+     * confirmed lockTaskMode != none after startPinning. Fires pinningStarted
+     * upon first confirmed pin, or pinningFailed if not confirmed within 20s.
      */
     @PluginMethod
     public void startPinning(PluginCall call) {
@@ -124,9 +184,16 @@ public class ExamLockPlugin extends Plugin {
 
         activity.runOnUiThread(() -> {
             try {
+                cancelPinningTimeout();
+                stopPolling();
+
                 activity.startLockTask();
-                isExamPinned = true;
+                isPinningPending = true;
+                hasConfirmedPin = false;
+
+                startPinningTimeout();
                 startPolling();
+                checkLockTaskState("startPinning");
 
                 JSObject ret = new JSObject();
                 ret.put("success", true);
@@ -153,9 +220,11 @@ public class ExamLockPlugin extends Plugin {
 
         activity.runOnUiThread(() -> {
             try {
-                activity.stopLockTask();
-                isExamPinned = false;
+                cancelPinningTimeout();
+                isPinningPending = false;
+                hasConfirmedPin = false;
                 stopPolling();
+                activity.stopLockTask();
 
                 JSObject ret = new JSObject();
                 ret.put("success", true);
@@ -195,6 +264,10 @@ public class ExamLockPlugin extends Plugin {
         int flags = activity.getWindow().getAttributes().flags;
         boolean secure = (flags & WindowManager.LayoutParams.FLAG_SECURE) != 0;
         state.put("secure", secure);
+
+        // 1b. keepAwake: FLAG_KEEP_SCREEN_ON
+        boolean keepAwake = (flags & WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0;
+        state.put("keepAwake", keepAwake);
 
         // 2. lockTaskMode: from ActivityManager.getLockTaskModeState()
         int modeCode = getLockTaskModeCode();
@@ -275,18 +348,38 @@ public class ExamLockPlugin extends Plugin {
     }
 
     private void checkLockTaskState(String source) {
-        if (!isExamPinned) return;
         int mode = getLockTaskModeCode();
-        if (mode == ActivityManager.LOCK_TASK_MODE_NONE) {
-            isExamPinned = false;
-            stopPolling();
 
-            JSObject data = new JSObject();
-            data.put("timestamp", System.currentTimeMillis());
-            data.put("source", source);
-            data.put("lockTaskMode", "none");
-            notifyListeners("pinningExited", data);
-            Logger.warn(TAG, "pinningExited event fired (source=" + source + ")");
+        if (isPinningPending) {
+            if (mode != ActivityManager.LOCK_TASK_MODE_NONE) {
+                isPinningPending = false;
+                hasConfirmedPin = true;
+                cancelPinningTimeout();
+
+                JSObject data = new JSObject();
+                data.put("timestamp", System.currentTimeMillis());
+                data.put("lockTaskMode", getLockTaskModeString(mode));
+                data.put("lockTaskModeCode", mode);
+                data.put("source", source);
+                notifyListeners("pinningStarted", data);
+                Logger.info(TAG, "pinningStarted event fired (source=" + source + ", mode=" + mode + ")");
+            }
+            return;
+        }
+
+        if (hasConfirmedPin) {
+            if (mode == ActivityManager.LOCK_TASK_MODE_NONE) {
+                hasConfirmedPin = false;
+                stopPolling();
+
+                JSObject data = new JSObject();
+                data.put("timestamp", System.currentTimeMillis());
+                data.put("source", source);
+                data.put("lockTaskMode", "none");
+                data.put("lockTaskModeCode", ActivityManager.LOCK_TASK_MODE_NONE);
+                notifyListeners("pinningExited", data);
+                Logger.warn(TAG, "pinningExited event fired (source=" + source + ")");
+            }
         }
     }
 
@@ -315,13 +408,14 @@ public class ExamLockPlugin extends Plugin {
         notifyListeners("activityResumed", data);
         Logger.info(TAG, "activityResumed event fired");
 
-        if (isExamPinned) {
+        if (isPinningPending || hasConfirmedPin) {
             checkLockTaskState("resume");
         }
     }
 
     @Override
     protected void handleOnDestroy() {
+        cancelPinningTimeout();
         stopPolling();
         super.handleOnDestroy();
     }
@@ -333,7 +427,7 @@ public class ExamLockPlugin extends Plugin {
         notifyListeners("windowFocusChanged", data);
         Logger.info(TAG, "windowFocusChanged event fired: hasFocus=" + hasFocus);
 
-        if (isExamPinned) {
+        if (isPinningPending || hasConfirmedPin) {
             checkLockTaskState("windowFocus");
         }
     }

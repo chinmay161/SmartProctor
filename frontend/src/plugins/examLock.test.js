@@ -47,9 +47,26 @@ describe('App-5: ExamLock Capacitor Plugin Contracts', () => {
       expect(state.lockTaskMode).toBe('none');
     });
 
-    it('getState() returns required state keys {secure, lockTaskMode, inMultiWindow, inPip, interruptionFilter}', async () => {
+    it('keepAwake(enabled) toggles keepAwake flag in state', async () => {
+      const res = await ExamLock.keepAwake({ enabled: true });
+      expect(res.success).toBe(true);
+      expect(res.keepAwake).toBe(true);
+
+      let state = await ExamLock.getState();
+      expect(state.keepAwake).toBe(true);
+
+      const resOff = await ExamLock.keepAwake({ enabled: false });
+      expect(resOff.success).toBe(true);
+      expect(resOff.keepAwake).toBe(false);
+
+      state = await ExamLock.getState();
+      expect(state.keepAwake).toBe(false);
+    });
+
+    it('getState() returns required state keys {secure, keepAwake, lockTaskMode, inMultiWindow, inPip, interruptionFilter}', async () => {
       const state = await ExamLock.getState();
       expect(state).toHaveProperty('secure');
+      expect(state).toHaveProperty('keepAwake');
       expect(state).toHaveProperty('lockTaskMode');
       expect(state).toHaveProperty('inMultiWindow');
       expect(state).toHaveProperty('inPip');
@@ -60,6 +77,8 @@ describe('App-5: ExamLock Capacitor Plugin Contracts', () => {
   describe('2. Event Registration Contracts', () => {
     it('supports registering listeners for all required lock events', async () => {
       const requiredEvents = [
+        'pinningStarted',
+        'pinningFailed',
         'pinningExited',
         'multiWindowChanged',
         'windowFocusChanged',
@@ -75,6 +94,18 @@ describe('App-5: ExamLock Capacitor Plugin Contracts', () => {
           handle.remove();
         }
       }
+    });
+
+    it('startPinning() triggers pinningStarted event', async () => {
+      const startedPromise = new Promise((resolve) => {
+        ExamLock.addListener('pinningStarted', (data) => {
+          resolve(data);
+        });
+      });
+      await ExamLock.startPinning();
+      const eventData = await startedPromise;
+      expect(eventData).toBeDefined();
+      expect(eventData.lockTaskMode).toBe('pinned');
     });
   });
 
