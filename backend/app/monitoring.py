@@ -8,6 +8,19 @@ import time
 import uuid
 from contextvars import ContextVar
 from typing import Any, Dict, Optional
+import importlib
+import sys
+# On Python >= 3.12, legacy eventlet raises AttributeError: module 'ssl' has no attribute 'wrap_socket'.
+# If eventlet is present but broken, register dummy module so sentry_sdk does not crash during contextvars check.
+if "eventlet" not in sys.modules and sys.version_info >= (3, 12):
+    try:
+        importlib.import_module("eventlet")
+    except AttributeError:
+        sys.modules["eventlet"] = None
+        sys.modules["eventlet.patcher"] = None
+    except Exception:
+        pass
+
 import sentry_sdk
 
 # Context variables for request correlation and user identity

@@ -1,5 +1,11 @@
 import os
 import sys
+
+# Prevent incompatible eventlet from crashing in Python 3.12 when sentry_sdk inspects contextvars
+if "eventlet" not in sys.modules:
+    sys.modules["eventlet"] = None
+    sys.modules["eventlet.patcher"] = None
+
 import tempfile
 from pathlib import Path
 
@@ -8,6 +14,8 @@ import pytest
 # Point the app at a throwaway SQLite file before any app module creates its engine.
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="smartproctor-tests-")
 os.environ["DATABASE_URL"] = f"sqlite:///{Path(_TEST_DB_DIR, 'test.db').as_posix()}"
+os.environ["EVIDENCE_STORAGE"] = "local"
+os.environ["ENVIRONMENT"] = "test"
 
 backend_dir = Path(__file__).resolve().parent.parent
 if str(backend_dir) not in sys.path:
