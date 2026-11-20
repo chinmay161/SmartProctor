@@ -21,4 +21,5 @@ class Question(Base):
     usage_count = Column(Integer, nullable=False, default=0)
     avg_score = Column(Integer, nullable=False, default=0)
     avg_time = Column(Integer, nullable=False, default=0)
+    created_by = Column(String, nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

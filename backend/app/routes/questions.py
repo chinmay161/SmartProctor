@@ -5,14 +5,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..auth.dependencies import canonicalize_role, get_current_user
 from ..auth.roles import deny_access
 from ..database import SessionLocal
+from ..models.exam_question import ExamQuestion
 from ..models.question import Question
-from ..schemas.question import QuestionCreateRequest, QuestionImportRequest
+from ..schemas.question import (
+    QuestionCreateRequest,
+    QuestionImportRequest,
+    QuestionUpdateRequest,
+)
 
 router = APIRouter(prefix="/api/questions", tags=["Questions"])
 
 
 def _require_question_access(user):
-    required = ["teacher", "student", "admin"]
+    """Only teachers and admins can access the question bank."""
+    required = ["teacher", "admin"]
     roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
     if not roles.intersection(required):
         deny_access(user, required)
@@ -23,6 +29,49 @@ def _require_question_write_access(user):
     roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
     if not roles.intersection(required):
         deny_access(user, required)
+
+
+def _serialize_question_for_student(question) -> dict:
+    options = []
+    raw_options = None
+    if hasattr(question, "options_json") and question.options_json:
+        try:
+            raw_options = json.loads(question.options_json)
+        except Exception:
+            raw_options = []
+    elif hasattr(question, "options") and question.options:
+        if isinstance(question.options, str):
+            try:
+                raw_options = json.loads(question.options)
+            except Exception:
+                raw_options = []
+        elif isinstance(question.options, list):
+            raw_options = question.options
+
+    if isinstance(raw_options, list):
+        for opt in raw_options:
+            if isinstance(opt, dict):
+                options.append({"text": opt.get("text", "")})
+            else:
+                options.append({"text": str(opt)})
+
+    q_text = getattr(question, "question_text", None) or getattr(question, "text", "")
+    q_id = getattr(question, "source_question_id", None) or str(question.id)
+
+    return {
+        "id": q_id,
+        "type": getattr(question, "type", "mcq"),
+        "subject": getattr(question, "subject", None),
+        "difficulty": getattr(question, "difficulty", None),
+        "questionText": q_text,
+        "text": q_text,
+        "options": options,
+        "correctAnswer": None,
+        "acceptedAnswers": [],
+        "explanation": None,
+        "tags": [],
+        "marks": int(getattr(question, "marks", 1) or 1),
+    }
 
 
 def _serialize_question(question: Question) -> dict:
@@ -71,6 +120,7 @@ def _serialize_question(question: Question) -> dict:
         "usageCount": question.usage_count,
         "avgScore": question.avg_score,
         "avgTime": question.avg_time,
+        "created_by": question.created_by,
         "createdDate": created,
         "created_at": created,
     }
@@ -83,7 +133,7 @@ def _normalize_question_type(question_type: str) -> str:
     return normalized
 
 
-def _build_question_model(payload: QuestionCreateRequest) -> Question:
+def _build_question_model(payload: QuestionCreateRequest, user: dict | None = None) -> Question:
     question_type = _normalize_question_type(payload.type)
     question_text = payload.questionText.strip()
     if not question_text:
@@ -133,6 +183,8 @@ def _build_question_model(payload: QuestionCreateRequest) -> Question:
     else:
         raise HTTPException(status_code=400, detail="Unsupported question type")
 
+    creator_id = user.get("sub") if user else None
+
     return Question(
         id=(payload.id or None),
         type=question_type,
@@ -148,139 +200,49 @@ def _build_question_model(payload: QuestionCreateRequest) -> Question:
         usage_count=0,
         avg_score=0,
         avg_time=0,
+        created_by=creator_id,
     )
 
 
-def _seed_questions_if_empty(db) -> None:
-    has_questions = db.query(Question.id).first()
-    if has_questions:
-        return
+@router.get("/stats")
+def get_question_stats(user=Depends(get_current_user)):
+    """Return aggregated statistics for questions visible to the user."""
+    _require_question_access(user)
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    db = SessionLocal()
+    try:
+        query = db.query(Question)
+        if "admin" not in roles:
+            query = query.filter(Question.created_by == user["sub"])
+        questions = query.all()
 
-    seed = [
-        {
-            "id": "q1",
-            "type": "mcq",
-            "subject": "mathematics",
-            "difficulty": "easy",
-            "question_text": "What is the derivative of x^2 with respect to x?",
-            "options": [
-                {"text": "2x", "isCorrect": True},
-                {"text": "x", "isCorrect": False},
-                {"text": "2", "isCorrect": False},
-                {"text": "x^2", "isCorrect": False},
-            ],
-            "correct_answer": "2x",
-            "accepted_answers": [],
-            "explanation": "Using the power rule, d/dx(x^2) = 2x.",
-            "tags": ["calculus", "derivatives"],
-            "marks": 2,
-        },
-        {
-            "id": "q2",
-            "type": "fill-blank",
-            "subject": "mathematics",
-            "difficulty": "easy",
-            "question_text": "Solve the equation: 2x + 5 = 15",
-            "options": [],
-            "correct_answer": "5",
-            "accepted_answers": ["5"],
-            "explanation": "2x = 10, therefore x = 5.",
-            "tags": ["algebra", "equations"],
-            "marks": 3,
-        },
-        {
-            "id": "q3",
-            "type": "true-false",
-            "subject": "mathematics",
-            "difficulty": "easy",
-            "question_text": "The sum of angles in a triangle is always 180 degrees.",
-            "options": [],
-            "correct_answer": "true",
-            "accepted_answers": ["true"],
-            "explanation": "In Euclidean geometry, triangle angles sum to 180 degrees.",
-            "tags": ["geometry", "triangles"],
-            "marks": 1,
-        },
-        {
-            "id": "q4",
-            "type": "essay",
-            "subject": "mathematics",
-            "difficulty": "hard",
-            "question_text": "Explain the fundamental theorem of calculus and one practical application.",
-            "options": [],
-            "correct_answer": "",
-            "accepted_answers": [],
-            "explanation": "Answer should cover the derivative-integral relationship and applied area.",
-            "tags": ["calculus", "theory"],
-            "marks": 10,
-        },
-        {
-            "id": "q5",
-            "type": "mcq",
-            "subject": "mathematics",
-            "difficulty": "medium",
-            "question_text": "Calculate the integral of sin(x) from 0 to pi",
-            "options": [
-                {"text": "2", "isCorrect": True},
-                {"text": "0", "isCorrect": False},
-                {"text": "1", "isCorrect": False},
-                {"text": "pi", "isCorrect": False},
-            ],
-            "correct_answer": "2",
-            "accepted_answers": [],
-            "explanation": "Integral of sin(x) from 0 to pi evaluates to 2.",
-            "tags": ["calculus", "integration"],
-            "marks": 4,
-        },
-        {
-            "id": "q6",
-            "type": "mcq",
-            "subject": "statistics",
-            "difficulty": "easy",
-            "question_text": "What is the probability of getting heads in a fair coin toss?",
-            "options": [
-                {"text": "0.5", "isCorrect": True},
-                {"text": "0.25", "isCorrect": False},
-                {"text": "1", "isCorrect": False},
-                {"text": "0.75", "isCorrect": False},
-            ],
-            "correct_answer": "0.5",
-            "accepted_answers": [],
-            "explanation": "A fair coin has two equally likely outcomes.",
-            "tags": ["statistics", "probability"],
-            "marks": 2,
-        },
-    ]
+        total = len(questions)
+        mcq_count = sum(1 for q in questions if q.type in ("mcq", "multiple-choice"))
+        essay_count = sum(1 for q in questions if q.type == "essay")
+        scores = [q.avg_score for q in questions if q.avg_score is not None]
+        avg_perf = round(sum(scores) / len(scores)) if scores else 0
 
-    for item in seed:
-        db.add(
-            Question(
-                id=item["id"],
-                type=item["type"],
-                subject=item["subject"],
-                difficulty=item["difficulty"],
-                question_text=item["question_text"],
-                options_json=json.dumps(item["options"]),
-                correct_answer=item["correct_answer"],
-                accepted_answers_json=json.dumps(item["accepted_answers"]),
-                explanation=item["explanation"],
-                tags_json=json.dumps(item["tags"]),
-                marks=item["marks"],
-                usage_count=0,
-                avg_score=0,
-                avg_time=0,
-            )
-        )
-    db.commit()
+        return {
+            "totalQuestions": total,
+            "mcqCount": mcq_count,
+            "essayCount": essay_count,
+            "avgPerformance": avg_perf,
+        }
+    finally:
+        db.close()
 
 
 @router.get("/")
 def list_questions(user=Depends(get_current_user)):
+    """List questions visible to the user: teachers only see their own questions, admins see all."""
     _require_question_access(user)
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
     db = SessionLocal()
     try:
-        _seed_questions_if_empty(db)
-        questions = db.query(Question).order_by(Question.created_at.desc()).all()
+        query = db.query(Question)
+        if "admin" not in roles:
+            query = query.filter(Question.created_by == user["sub"])
+        questions = query.order_by(Question.created_at.desc()).all()
         return [_serialize_question(question) for question in questions]
     finally:
         db.close()
@@ -288,11 +250,27 @@ def list_questions(user=Depends(get_current_user)):
 
 @router.get("/{question_id}")
 def get_question(question_id: str, user=Depends(get_current_user)):
-    _require_question_access(user)
+    """Get a specific question by ID if owned by the teacher or if user is admin; students get sanitized view."""
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
     db = SessionLocal()
     try:
-        _seed_questions_if_empty(db)
-        question = db.query(Question).filter_by(id=question_id).first()
+        if "student" in roles and "teacher" not in roles and "admin" not in roles:
+            # Student view: sanitized question without correct answers
+            question = db.query(Question).filter_by(id=question_id).first()
+            if not question:
+                eq = db.query(ExamQuestion).filter(
+                    (ExamQuestion.id == question_id) | (ExamQuestion.source_question_id == question_id)
+                ).first()
+                if eq:
+                    return _serialize_question_for_student(eq)
+                raise HTTPException(status_code=404, detail="Question not found")
+            return _serialize_question_for_student(question)
+
+        _require_question_access(user)
+        query = db.query(Question).filter_by(id=question_id)
+        if "admin" not in roles:
+            query = query.filter(Question.created_by == user["sub"])
+        question = query.first()
         if not question:
             raise HTTPException(status_code=404, detail="Question not found")
         return _serialize_question(question)
@@ -302,10 +280,11 @@ def get_question(question_id: str, user=Depends(get_current_user)):
 
 @router.post("/")
 def create_question(payload: QuestionCreateRequest, user=Depends(get_current_user)):
+    """Create a new question scoped to the calling teacher."""
     _require_question_write_access(user)
     db = SessionLocal()
     try:
-        question = _build_question_model(payload)
+        question = _build_question_model(payload, user=user)
         if question.id and db.query(Question.id).filter_by(id=question.id).first():
             raise HTTPException(status_code=409, detail="Question ID already exists")
         db.add(question)
@@ -316,8 +295,97 @@ def create_question(payload: QuestionCreateRequest, user=Depends(get_current_use
         db.close()
 
 
+@router.put("/{question_id}")
+def update_question(
+    question_id: str,
+    payload: QuestionUpdateRequest,
+    user=Depends(get_current_user),
+):
+    """Update a question owned by the calling teacher (or any question if admin)."""
+    _require_question_write_access(user)
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    db = SessionLocal()
+    try:
+        query = db.query(Question).filter_by(id=question_id)
+        if "admin" not in roles:
+            query = query.filter(Question.created_by == user["sub"])
+        question = query.first()
+        if not question:
+            raise HTTPException(status_code=404, detail="Question not found")
+
+        if payload.questionText is not None:
+            text = payload.questionText.strip()
+            if not text:
+                raise HTTPException(status_code=400, detail="Question text cannot be empty")
+            question.question_text = text
+
+        if payload.type is not None:
+            question.type = _normalize_question_type(payload.type)
+
+        if payload.subject is not None:
+            question.subject = payload.subject.strip() or None
+
+        if payload.difficulty is not None:
+            question.difficulty = payload.difficulty.strip() or None
+
+        if payload.options is not None:
+            options = []
+            for option in payload.options:
+                otext = option.text.strip()
+                if otext:
+                    options.append({"text": otext, "isCorrect": bool(option.isCorrect)})
+            question.options_json = json.dumps(options)
+
+        if payload.correctAnswer is not None:
+            question.correct_answer = payload.correctAnswer.strip() or None
+
+        if payload.acceptedAnswers is not None:
+            answers = [str(a).strip() for a in payload.acceptedAnswers if str(a).strip()]
+            question.accepted_answers_json = json.dumps(answers)
+
+        if payload.explanation is not None:
+            question.explanation = payload.explanation.strip() or None
+
+        if payload.tags is not None:
+            tags = [str(t).strip() for t in payload.tags if str(t).strip()]
+            question.tags_json = json.dumps(tags)
+
+        if payload.marks is not None:
+            if payload.marks < 1:
+                raise HTTPException(status_code=400, detail="Marks must be at least 1")
+            question.marks = payload.marks
+
+        db.commit()
+        db.refresh(question)
+        return _serialize_question(question)
+    finally:
+        db.close()
+
+
+@router.delete("/{question_id}")
+def delete_question(question_id: str, user=Depends(get_current_user)):
+    """Delete a question owned by the calling teacher (or any question if admin)."""
+    _require_question_write_access(user)
+    roles = {canonicalize_role(r) for r in (user.get("roles") or [])}
+    db = SessionLocal()
+    try:
+        query = db.query(Question).filter_by(id=question_id)
+        if "admin" not in roles:
+            query = query.filter(Question.created_by == user["sub"])
+        question = query.first()
+        if not question:
+            raise HTTPException(status_code=404, detail="Question not found")
+
+        db.delete(question)
+        db.commit()
+        return {"message": "Question deleted successfully", "id": question_id}
+    finally:
+        db.close()
+
+
 @router.post("/import")
 def import_questions(payload: QuestionImportRequest, user=Depends(get_current_user)):
+    """Import a list of questions, associating them with the calling teacher."""
     _require_question_write_access(user)
     if not payload.questions:
         raise HTTPException(status_code=400, detail="No questions provided for import")
@@ -340,7 +408,7 @@ def import_questions(payload: QuestionImportRequest, user=Depends(get_current_us
 
         created_questions = []
         for item in payload.questions:
-            question = _build_question_model(item)
+            question = _build_question_model(item, user=user)
             db.add(question)
             created_questions.append(question)
 

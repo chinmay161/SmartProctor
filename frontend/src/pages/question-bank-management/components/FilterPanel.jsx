@@ -5,16 +5,15 @@ import Select from '../../../components/ui/Select';
 import Button from '../../../components/ui/Button';
 import { Checkbox } from '../../../components/ui/Checkbox';
 
-const FilterPanel = ({ filters, onFilterChange, onClearFilters }) => {
+const FilterPanel = ({ filters, onFilterChange, onClearFilters, availableSubjects = [] }) => {
+  const defaultSubjects = ['mathematics', 'physics', 'chemistry', 'biology', 'computer-science'];
+  const allSubjectValues = Array.from(new Set([...defaultSubjects, ...availableSubjects.map((s) => String(s || '').trim().toLowerCase())])).filter(Boolean);
   const subjectOptions = [
     { value: 'all', label: 'All Subjects' },
-    { value: 'mathematics', label: 'Mathematics' },
-    { value: 'physics', label: 'Physics' },
-    { value: 'chemistry', label: 'Chemistry' },
-    { value: 'biology', label: 'Biology' },
-    { value: 'computer-science', label: 'Computer Science' },
-    { value: 'english', label: 'English' },
-    { value: 'history', label: 'History' }
+    ...allSubjectValues.map((s) => ({
+      value: s,
+      label: s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, ' ')
+    }))
   ];
 
   const difficultyOptions = [

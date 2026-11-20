@@ -5,24 +5,52 @@ import Input from '../../../components/ui/Input';
 import Select from '../../../components/ui/Select';
 import { Checkbox } from '../../../components/ui/Checkbox';
 
-const CreateQuestionModal = ({ onClose, onSave }) => {
-  const [formData, setFormData] = useState({
-    type: 'mcq',
-    subject: 'mathematics',
-    difficulty: 'medium',
-    questionText: '',
-    options: [
-      { text: '', isCorrect: false },
-      { text: '', isCorrect: false },
-      { text: '', isCorrect: false },
-      { text: '', isCorrect: false }
-    ],
-    correctAnswer: '',
-    acceptedAnswers: [''],
-    explanation: '',
-    tags: [],
-    tagsInput: '',
-    marks: 1,
+const CreateQuestionModal = ({ onClose, onSave, initialQuestion = null }) => {
+  const isEditing = Boolean(initialQuestion?.id);
+  const [formData, setFormData] = useState(() => {
+    if (initialQuestion) {
+      return {
+        id: initialQuestion.id,
+        type: initialQuestion.type || 'mcq',
+        subject: initialQuestion.subject || 'mathematics',
+        difficulty: initialQuestion.difficulty || 'medium',
+        questionText: initialQuestion.questionText || initialQuestion.text || '',
+        options: Array.isArray(initialQuestion.options) && initialQuestion.options.length > 0
+          ? initialQuestion.options.map((opt) => (typeof opt === 'string' ? { text: opt, isCorrect: opt === initialQuestion.correctAnswer } : opt))
+          : [
+              { text: '', isCorrect: false },
+              { text: '', isCorrect: false },
+              { text: '', isCorrect: false },
+              { text: '', isCorrect: false }
+            ],
+        correctAnswer: initialQuestion.correctAnswer || '',
+        acceptedAnswers: Array.isArray(initialQuestion.acceptedAnswers) && initialQuestion.acceptedAnswers.length > 0
+          ? initialQuestion.acceptedAnswers
+          : [''],
+        explanation: initialQuestion.explanation || '',
+        tags: Array.isArray(initialQuestion.tags) ? initialQuestion.tags : [],
+        tagsInput: Array.isArray(initialQuestion.tags) ? initialQuestion.tags.join(', ') : '',
+        marks: initialQuestion.marks || 1,
+      };
+    }
+    return {
+      type: 'mcq',
+      subject: 'mathematics',
+      difficulty: 'medium',
+      questionText: '',
+      options: [
+        { text: '', isCorrect: false },
+        { text: '', isCorrect: false },
+        { text: '', isCorrect: false },
+        { text: '', isCorrect: false }
+      ],
+      correctAnswer: '',
+      acceptedAnswers: [''],
+      explanation: '',
+      tags: [],
+      tagsInput: '',
+      marks: 1,
+    };
   });
   const [saveError, setSaveError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -89,9 +117,11 @@ const CreateQuestionModal = ({ onClose, onSave }) => {
         <div className="p-4 md:p-6 border-b border-border flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
-              <Icon name="FilePlus" size={20} className="text-primary" />
+              <Icon name={isEditing ? 'Edit' : 'FilePlus'} size={20} className="text-primary" />
             </div>
-            <h2 className="text-lg md:text-xl font-heading font-semibold text-foreground">Create New Question</h2>
+            <h2 className="text-lg md:text-xl font-heading font-semibold text-foreground">
+              {isEditing ? 'Edit Question' : 'Create New Question'}
+            </h2>
           </div>
           <button
             onClick={onClose}
@@ -237,7 +267,7 @@ const CreateQuestionModal = ({ onClose, onSave }) => {
             Cancel
           </Button>
           <Button variant="default" onClick={handleSave} loading={isSaving}>
-            Create Question
+            {isEditing ? 'Save Changes' : 'Create Question'}
           </Button>
         </div>
       </div>

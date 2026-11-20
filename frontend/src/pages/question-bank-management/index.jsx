@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useLogout } from '../../context/SessionContext';
 import RoleBasedHeader from '../../components/ui/RoleBasedHeader';
 import SecurityBadgeDisplay from '../../components/ui/SecurityBadgeDisplay';
-
 import Button from '../../components/ui/Button';
+import Icon from '../../components/AppIcon';
 import { Checkbox } from '../../components/ui/Checkbox';
 import QuestionCard from './components/QuestionCard';
 import FilterPanel from './components/FilterPanel';
@@ -11,8 +11,19 @@ import BulkOperationsBar from './components/BulkOperationsBar';
 import QuestionStatsCard from './components/QuestionStatsCard';
 import QuestionPreviewModal from './components/QuestionPreviewModal';
 import CreateQuestionModal from './components/CreateQuestionModal';
+import { apiGet, apiPost, apiPut, apiDelete } from '../../services/httpClient';
+
+const PAGE_SIZE = 10;
 
 const QuestionBankManagement = () => {
+  const { logout } = useLogout();
+  const fileInputRef = useRef(null);
+
+  const [questions, setQuestions] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [actionMessage, setActionMessage] = useState(null);
+
   const [filters, setFilters] = useState({
     searchQuery: '',
     subject: 'all',
@@ -22,145 +33,133 @@ const QuestionBankManagement = () => {
     onlyUnused: false,
     lowPerformance: false,
     hasImages: false,
-    hasExplanations: false
+    hasExplanations: false,
   });
 
   const [selectedQuestions, setSelectedQuestions] = useState([]);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [previewQuestion, setPreviewQuestion] = useState(null);
+  const [editQuestion, setEditQuestion] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const sampleQuestions = [
-    {
-      id: 1,
-      type: 'mcq',
-      subject: 'Mathematics',
-      difficulty: 'medium',
-      questionText: 'What is the derivative of f(x) = 3x² + 2x - 5?',
-      options: [
-        { text: '6x + 2', isCorrect: true },
-        { text: '3x + 2', isCorrect: false },
-        { text: '6x - 2', isCorrect: false },
-        { text: '3x² + 2', isCorrect: false }
-      ],
-      explanation: 'Using the power rule, the derivative of 3x² is 6x, the derivative of 2x is 2, and the derivative of a constant is 0.',
-      tags: ['Calculus', 'Derivatives', 'Midterm'],
-      usageCount: 45,
-      avgScore: 78,
-      avgTime: 120,
-      createdDate: '01/15/2026'
-    },
-    {
-      id: 2,
-      type: 'true-false',
-      subject: 'Physics',
-      difficulty: 'easy',
-      questionText: 'The speed of light in vacuum is approximately 300,000 km/s.',
-      correctAnswer: 'True',
-      explanation: 'The speed of light in vacuum is exactly 299,792,458 m/s, which is approximately 300,000 km/s.',
-      tags: ['Optics', 'Constants', 'Quiz'],
-      usageCount: 67,
-      avgScore: 92,
-      avgTime: 45,
-      createdDate: '01/10/2026'
-    },
-    {
-      id: 3,
-      type: 'fill-blank',
-      subject: 'Chemistry',
-      difficulty: 'hard',
-      questionText: 'The process by which a solid changes directly to a gas without passing through the liquid state is called _______.',
-      acceptedAnswers: ['sublimation', 'Sublimation'],
-      explanation: 'Sublimation is the phase transition where a substance changes from solid to gas without becoming liquid first. Examples include dry ice and iodine.',
-      tags: ['Phase Changes', 'Thermodynamics', 'Final'],
-      usageCount: 23,
-      avgScore: 54,
-      avgTime: 180,
-      createdDate: '01/05/2026'
-    },
-    {
-      id: 4,
-      type: 'essay',
-      subject: 'Biology',
-      difficulty: 'hard',
-      questionText: 'Explain the process of photosynthesis and its importance in the ecosystem. Include the chemical equation and describe the light-dependent and light-independent reactions.',
-      explanation: 'Expected answer should cover: 6CO₂ + 6H₂O + light energy → C₆H₁₂O₆ + 6O₂, light-dependent reactions in thylakoids, light-independent reactions (Calvin cycle) in stroma, and ecological importance.',
-      tags: ['Photosynthesis', 'Plant Biology', 'Final'],
-      usageCount: 12,
-      avgScore: 71,
-      avgTime: 900,
-      createdDate: '12/28/2025'
-    },
-    {
-      id: 5,
-      type: 'mcq',
-      subject: 'Computer Science',
-      difficulty: 'medium',
-      questionText: 'Which data structure uses LIFO (Last In First Out) principle?',
-      options: [
-        { text: 'Queue', isCorrect: false },
-        { text: 'Stack', isCorrect: true },
-        { text: 'Array', isCorrect: false },
-        { text: 'Linked List', isCorrect: false }
-      ],
-      explanation: 'A stack follows the LIFO principle where the last element added is the first one to be removed, like a stack of plates.',
-      tags: ['Data Structures', 'Algorithms', 'Midterm'],
-      usageCount: 89,
-      avgScore: 85,
-      avgTime: 90,
-      createdDate: '01/18/2026'
-    },
-    {
-      id: 6,
-      type: 'mcq',
-      subject: 'Mathematics',
-      difficulty: 'easy',
-      questionText: 'What is the value of π (pi) rounded to two decimal places?',
-      options: [
-        { text: '3.12', isCorrect: false },
-        { text: '3.14', isCorrect: true },
-        { text: '3.16', isCorrect: false },
-        { text: '3.18', isCorrect: false }
-      ],
-      explanation: 'Pi (π) is approximately 3.14159, which rounds to 3.14 when rounded to two decimal places.',
-      tags: ['Geometry', 'Constants', 'Basic'],
-      usageCount: 156,
-      avgScore: 94,
-      avgTime: 30,
-      createdDate: '01/12/2026'
+  const fetchQuestions = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await apiGet('/api/questions/');
+      setQuestions(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err?.detail || err?.message || 'Failed to load question bank');
+      setQuestions([]);
+    } finally {
+      setIsLoading(false);
     }
-  ];
-
-  const [questions, setQuestions] = useState(sampleQuestions);
-
-  // backend-driven: questions come from API
-
-  const stats = {
-    totalQuestions: 247,
-    mcqCount: 156,
-    essayCount: 34,
-    avgPerformance: 76
   };
 
   useEffect(() => {
-    let mounted = true;
-    const fetchQuestions = async () => {
-      try {
-        const qs = await import('../../services/httpClient').then(m => m.apiGet('/api/questions'));
-        if (!mounted) return;
-        setQuestions(qs || []);
-      } catch (err) {
-        setQuestions([]);
-      }
-    };
-
     fetchQuestions();
-    return () => { mounted = false; };
   }, []);
 
+  // Compute real statistics from loaded questions
+  const stats = useMemo(() => {
+    const total = questions.length;
+    const mcq = questions.filter((q) => q.type === 'mcq' || q.type === 'multiple-choice').length;
+    const essay = questions.filter((q) => q.type === 'essay').length;
+    const scores = questions.map((q) => Number(q.avgScore) || 0);
+    const avgScore = total > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / total) : 0;
+    return {
+      totalQuestions: total,
+      mcqCount: mcq,
+      essayCount: essay,
+      avgPerformance: avgScore,
+    };
+  }, [questions]);
+
+  const availableSubjects = useMemo(() => {
+    return Array.from(new Set(questions.map((q) => q.subject).filter(Boolean)));
+  }, [questions]);
+
+  // Real client-side filtering and sorting
+  const filteredQuestions = useMemo(() => {
+    let result = [...questions];
+
+    if (filters.searchQuery.trim()) {
+      const query = filters.searchQuery.toLowerCase();
+      result = result.filter(
+        (q) =>
+          (q.questionText || q.text || '').toLowerCase().includes(query) ||
+          (q.subject || '').toLowerCase().includes(query) ||
+          (Array.isArray(q.tags) && q.tags.some((t) => String(t).toLowerCase().includes(query)))
+      );
+    }
+
+    if (filters.subject !== 'all') {
+      result = result.filter(
+        (q) => (q.subject || '').toLowerCase() === filters.subject.toLowerCase()
+      );
+    }
+
+    if (filters.difficulty !== 'all') {
+      result = result.filter(
+        (q) => (q.difficulty || '').toLowerCase() === filters.difficulty.toLowerCase()
+      );
+    }
+
+    if (filters.type !== 'all') {
+      result = result.filter((q) => {
+        const t = (q.type || '').toLowerCase();
+        if (filters.type === 'mcq') return t === 'mcq' || t === 'multiple-choice';
+        return t === filters.type.toLowerCase();
+      });
+    }
+
+    if (filters.onlyUnused) {
+      result = result.filter((q) => Number(q.usageCount || 0) === 0);
+    }
+
+    if (filters.lowPerformance) {
+      result = result.filter((q) => (Number(q.avgScore) || 0) < 60);
+    }
+
+    if (filters.hasExplanations) {
+      result = result.filter((q) => Boolean(q.explanation && String(q.explanation).trim()));
+    }
+
+    // Sort
+    result.sort((a, b) => {
+      switch (filters.sortBy) {
+        case 'oldest':
+          return (a.created_at || a.createdDate || '').localeCompare(b.created_at || b.createdDate || '');
+        case 'most-used':
+          return (Number(b.usageCount) || 0) - (Number(a.usageCount) || 0);
+        case 'highest-score':
+          return (Number(b.avgScore) || 0) - (Number(a.avgScore) || 0);
+        case 'lowest-score':
+          return (Number(a.avgScore) || 0) - (Number(b.avgScore) || 0);
+        case 'recent':
+        default:
+          return (b.created_at || b.createdDate || '').localeCompare(a.created_at || a.createdDate || '');
+      }
+    });
+
+    return result;
+  }, [questions, filters]);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredQuestions.length / PAGE_SIZE));
+  const paginatedQuestions = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredQuestions.slice(start, start + PAGE_SIZE);
+  }, [filteredQuestions, currentPage]);
+
   const handleFilterChange = (key, value) => {
-    setFilters({ ...filters, [key]: value });
+    setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
   const handleClearFilters = () => {
@@ -173,24 +172,21 @@ const QuestionBankManagement = () => {
       onlyUnused: false,
       lowPerformance: false,
       hasImages: false,
-      hasExplanations: false
+      hasExplanations: false,
     });
   };
 
   const handleSelectQuestion = (questionId) => {
-    setSelectedQuestions(prev =>
-      prev?.includes(questionId)
-        ? prev?.filter(id => id !== questionId)
-        : [...prev, questionId]
+    setSelectedQuestions((prev) =>
+      prev.includes(questionId) ? prev.filter((id) => id !== questionId) : [...prev, questionId]
     );
   };
 
   const handleSelectAll = () => {
-    const source = questions || [];
-    if (selectedQuestions?.length === source?.length) {
+    if (selectedQuestions.length === paginatedQuestions.length && paginatedQuestions.length > 0) {
       setSelectedQuestions([]);
     } else {
-      setSelectedQuestions(source?.map(q => q?.id));
+      setSelectedQuestions(paginatedQuestions.map((q) => q.id));
     }
   };
 
@@ -200,48 +196,165 @@ const QuestionBankManagement = () => {
   };
 
   const handleEdit = (question) => {
-    console.log('Edit question:', question);
+    setEditQuestion(question);
+    setShowCreateModal(true);
   };
 
-  const handleDuplicate = (question) => {
-    console.log('Duplicate question:', question);
+  const handleDuplicate = async (question) => {
+    try {
+      const payload = {
+        type: question.type || 'mcq',
+        subject: question.subject || null,
+        difficulty: question.difficulty || null,
+        questionText: `${question.questionText || question.text || ''} (Copy)`,
+        options: Array.isArray(question.options) ? question.options : [],
+        correctAnswer: question.correctAnswer || null,
+        acceptedAnswers: Array.isArray(question.acceptedAnswers) ? question.acceptedAnswers : [],
+        explanation: question.explanation || null,
+        tags: Array.isArray(question.tags) ? question.tags : [],
+        marks: Number(question.marks) > 0 ? Number(question.marks) : 1,
+      };
+      await apiPost('/api/questions/', payload);
+      setActionMessage('Question duplicated successfully');
+      setTimeout(() => setActionMessage(null), 3500);
+      await fetchQuestions();
+    } catch (err) {
+      setError(err?.detail || err?.message || 'Failed to duplicate question');
+    }
   };
 
-  const handleDelete = (question) => {
-    console.log('Delete question:', question);
+  const handleDelete = async (question) => {
+    if (!window.confirm(`Delete question: "${(question.questionText || question.text || '').slice(0, 40)}..."?`)) {
+      return;
+    }
+    try {
+      await apiDelete(`/api/questions/${question.id}`);
+      setSelectedQuestions((prev) => prev.filter((id) => id !== question.id));
+      setActionMessage('Question deleted successfully');
+      setTimeout(() => setActionMessage(null), 3500);
+      await fetchQuestions();
+    } catch (err) {
+      setError(err?.detail || err?.message || 'Failed to delete question');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedQuestions.length === 0) return;
+    if (!window.confirm(`Delete ${selectedQuestions.length} selected question(s)?`)) return;
+
+    try {
+      await Promise.all(selectedQuestions.map((id) => apiDelete(`/api/questions/${id}`)));
+      setSelectedQuestions([]);
+      setActionMessage('Selected questions deleted successfully');
+      setTimeout(() => setActionMessage(null), 3500);
+      await fetchQuestions();
+    } catch (err) {
+      setError(err?.detail || err?.message || 'Failed to delete selected questions');
+    }
   };
 
   const handleBulkExport = () => {
-    console.log('Export questions:', selectedQuestions);
+    const toExport =
+      selectedQuestions.length > 0
+        ? questions.filter((q) => selectedQuestions.includes(q.id))
+        : filteredQuestions;
+
+    if (toExport.length === 0) return;
+
+    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(toExport, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute('href', dataStr);
+    downloadAnchor.setAttribute('download', `question-bank-${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
   };
 
   const handleBulkImport = () => {
-    console.log('Import questions');
+    fileInputRef.current?.click();
   };
 
-  const handleBulkDelete = () => {
-    console.log('Delete questions:', selectedQuestions);
-    setSelectedQuestions([]);
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target.result);
+        const questionsArray = Array.isArray(parsed) ? parsed : parsed.questions || [];
+        if (!questionsArray || questionsArray.length === 0) {
+          setError('No valid questions found in uploaded JSON file');
+          return;
+        }
+
+        const formatted = questionsArray.map((q) => ({
+          type: q.type || 'mcq',
+          subject: q.subject || null,
+          difficulty: q.difficulty || null,
+          questionText: q.questionText || q.text || 'Imported Question',
+          options: Array.isArray(q.options)
+            ? q.options.map((opt) => (typeof opt === 'string' ? { text: opt, isCorrect: opt === q.correctAnswer } : opt))
+            : [],
+          correctAnswer: q.correctAnswer || null,
+          acceptedAnswers: Array.isArray(q.acceptedAnswers) ? q.acceptedAnswers : [],
+          explanation: q.explanation || null,
+          tags: Array.isArray(q.tags) ? q.tags : [],
+          marks: Number(q.marks) > 0 ? Number(q.marks) : 1,
+        }));
+
+        await apiPost('/api/questions/import', { questions: formatted });
+        setActionMessage(`Successfully imported ${formatted.length} question(s)`);
+        setTimeout(() => setActionMessage(null), 3500);
+        await fetchQuestions();
+      } catch (err) {
+        setError(err?.detail || err?.message || 'Failed to parse or import question file');
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
   };
 
-  const handleBulkTag = (tag) => {
-    console.log('Add tag to questions:', selectedQuestions, tag);
+  const handleBulkTag = async (tag) => {
+    if (!tag || selectedQuestions.length === 0) return;
+    try {
+      await Promise.all(
+        selectedQuestions.map(async (id) => {
+          const q = questions.find((item) => item.id === id);
+          if (!q) return;
+          const currentTags = Array.isArray(q.tags) ? q.tags : [];
+          if (!currentTags.includes(tag)) {
+            await apiPut(`/api/questions/${id}`, { tags: [...currentTags, tag] });
+          }
+        })
+      );
+      setActionMessage(`Tag "${tag}" added to selected questions`);
+      setTimeout(() => setActionMessage(null), 3500);
+      await fetchQuestions();
+    } catch (err) {
+      setError(err?.detail || err?.message || 'Failed to update tags');
+    }
   };
 
-  const handleSaveQuestion = (questionData) => {
-    console.log('Save new question:', questionData);
+  const handleSaveQuestion = async (questionData) => {
+    if (questionData.id) {
+      await apiPut(`/api/questions/${questionData.id}`, questionData);
+      setActionMessage('Question updated successfully');
+    } else {
+      await apiPost('/api/questions/', questionData);
+      setActionMessage('Question created successfully');
+    }
+    setTimeout(() => setActionMessage(null), 3500);
+    await fetchQuestions();
   };
-
-  const { logout } = useLogout();
 
   return (
     <div className="min-h-screen bg-background">
-      <RoleBasedHeader
-        userRole="teacher"
-        onLogout={logout}
-      />
+      <RoleBasedHeader userRole="teacher" onLogout={logout} />
       <main className="pt-20 pb-12">
         <div className="max-w-[1920px] mx-auto px-4 md:px-6 lg:px-8">
+          {/* Header & Primary Actions */}
           <div className="mb-6 md:mb-8">
             <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
               <div>
@@ -249,10 +362,17 @@ const QuestionBankManagement = () => {
                   Question Bank Management
                 </h1>
                 <p className="text-sm md:text-base text-muted-foreground">
-                  Organize, create, and maintain your assessment questions
+                  Create, organize, and manage your private assessment questions
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".json"
+                  className="hidden"
+                />
                 <Button
                   variant="outline"
                   size="default"
@@ -277,20 +397,42 @@ const QuestionBankManagement = () => {
                   size="default"
                   iconName="Plus"
                   iconPosition="left"
-                  onClick={() => setShowCreateModal(true)}
+                  onClick={() => {
+                    setEditQuestion(null);
+                    setShowCreateModal(true);
+                  }}
                 >
                   Create Question
                 </Button>
               </div>
             </div>
 
+            {/* Notification / Alert Banners */}
+            {actionMessage && (
+              <div className="mb-4 p-4 rounded-lg bg-success/10 border border-success/30 text-success text-sm flex items-center justify-between">
+                <span>{actionMessage}</span>
+                <button onClick={() => setActionMessage(null)} className="text-success hover:underline text-xs">
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {error && (
+              <div className="mb-4 p-4 rounded-lg bg-error/10 border border-error/30 text-error text-sm flex items-center justify-between">
+                <span>{error}</span>
+                <Button variant="outline" size="sm" onClick={fetchQuestions}>
+                  Retry
+                </Button>
+              </div>
+            )}
+
             <QuestionStatsCard stats={stats} />
           </div>
 
-          {selectedQuestions?.length > 0 && (
+          {selectedQuestions.length > 0 && (
             <div className="mb-6">
               <BulkOperationsBar
-                selectedCount={selectedQuestions?.length}
+                selectedCount={selectedQuestions.length}
                 onExport={handleBulkExport}
                 onImport={handleBulkImport}
                 onBulkDelete={handleBulkDelete}
@@ -306,6 +448,7 @@ const QuestionBankManagement = () => {
                 filters={filters}
                 onFilterChange={handleFilterChange}
                 onClearFilters={handleClearFilters}
+                availableSubjects={availableSubjects}
               />
             </div>
 
@@ -313,73 +456,171 @@ const QuestionBankManagement = () => {
               <div className="bg-card border border-border rounded-lg shadow-md p-4 md:p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center space-x-3">
-                      <Checkbox
-                      checked={selectedQuestions?.length === (questions || [])?.length}
+                    <Checkbox
+                      checked={
+                        paginatedQuestions.length > 0 &&
+                        selectedQuestions.length === paginatedQuestions.length
+                      }
                       onChange={handleSelectAll}
                     />
                     <p className="text-sm font-medium text-foreground">
-                      {(questions || [])?.length} questions found
+                      {filteredQuestions.length} question{filteredQuestions.length !== 1 ? 's' : ''} found
                     </p>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    iconName="Download"
-                    iconPosition="left"
-                    onClick={handleBulkExport}
-                  >
-                    Export All
-                  </Button>
+                  {filteredQuestions.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      iconName="Download"
+                      iconPosition="left"
+                      onClick={handleBulkExport}
+                    >
+                      Export All
+                    </Button>
+                  )}
                 </div>
 
-                <div className="space-y-4">
-                  {(questions || [])?.map((question) => (
-                    <div key={question?.id} className="flex items-start space-x-3">
-                      <div className="pt-6">
-                        <Checkbox
-                          checked={selectedQuestions?.includes(question?.id)}
-                          onChange={() => handleSelectQuestion(question?.id)}
-                        />
+                {/* Loading Skeleton */}
+                {isLoading && (
+                  <div className="space-y-4 py-4">
+                    {[1, 2, 3].map((n) => (
+                      <div key={n} className="animate-pulse p-4 border border-border rounded-lg space-y-3">
+                        <div className="h-4 bg-muted rounded w-1/4"></div>
+                        <div className="h-6 bg-muted rounded w-3/4"></div>
+                        <div className="h-4 bg-muted rounded w-1/2"></div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <QuestionCard
-                          question={question}
-                          onEdit={handleEdit}
-                          onDuplicate={handleDuplicate}
-                          onDelete={handleDelete}
-                          onPreview={handlePreview}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-center">
-                <div className="flex items-center space-x-2">
-                  <Button variant="outline" size="sm" iconName="ChevronLeft">
-                    Previous
-                  </Button>
-                  <div className="flex items-center space-x-1">
-                    <button className="w-8 h-8 md:w-10 md:h-10 rounded-md bg-primary text-primary-foreground text-sm font-medium">
-                      1
-                    </button>
-                    <button className="w-8 h-8 md:w-10 md:h-10 rounded-md hover:bg-muted text-sm font-medium text-foreground transition-smooth">
-                      2
-                    </button>
-                    <button className="w-8 h-8 md:w-10 md:h-10 rounded-md hover:bg-muted text-sm font-medium text-foreground transition-smooth">
-                      3
-                    </button>
-                    <span className="text-muted-foreground px-2">...</span>
-                    <button className="w-8 h-8 md:w-10 md:h-10 rounded-md hover:bg-muted text-sm font-medium text-foreground transition-smooth">
-                      10
-                    </button>
+                    ))}
                   </div>
-                  <Button variant="outline" size="sm" iconName="ChevronRight">
-                    Next
-                  </Button>
-                </div>
+                )}
+
+                {/* Empty State: No Questions At All */}
+                {!isLoading && questions.length === 0 && (
+                  <div className="text-center py-16 px-4">
+                    <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Icon name="Database" size={32} className="text-primary" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-foreground mb-1">
+                      No questions in your bank yet
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
+                      Questions you create will be securely stored and only visible to you when authoring exams.
+                    </p>
+                    <Button
+                      variant="default"
+                      size="default"
+                      iconName="Plus"
+                      iconPosition="left"
+                      onClick={() => {
+                        setEditQuestion(null);
+                        setShowCreateModal(true);
+                      }}
+                    >
+                      Create your first question
+                    </Button>
+                  </div>
+                )}
+
+                {/* Empty State: Filter Returned No Match */}
+                {!isLoading && questions.length > 0 && filteredQuestions.length === 0 && (
+                  <div className="text-center py-12 px-4">
+                    <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Icon name="Search" size={24} className="text-muted-foreground" />
+                    </div>
+                    <h3 className="text-base font-semibold text-foreground mb-1">
+                      No matching questions found
+                    </h3>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Try adjusting or clearing your filters to see more questions.
+                    </p>
+                    <Button variant="outline" size="sm" onClick={handleClearFilters}>
+                      Clear Filters
+                    </Button>
+                  </div>
+                )}
+
+                {/* Question List */}
+                {!isLoading && filteredQuestions.length > 0 && (
+                  <div className="space-y-4">
+                    {paginatedQuestions.map((question) => (
+                      <div key={question.id} className="flex items-start space-x-3">
+                        <div className="pt-6">
+                          <Checkbox
+                            checked={selectedQuestions.includes(question.id)}
+                            onChange={() => handleSelectQuestion(question.id)}
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <QuestionCard
+                            question={question}
+                            onEdit={handleEdit}
+                            onDuplicate={handleDuplicate}
+                            onDelete={handleDelete}
+                            onPreview={handlePreview}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+
+              {/* Real Pagination */}
+              {!isLoading && totalPages > 1 && (
+                <div className="flex justify-center">
+                  <div className="flex items-center space-x-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      iconName="ChevronLeft"
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    >
+                      Previous
+                    </Button>
+                    <div className="flex items-center space-x-1">
+                      {Array.from({ length: totalPages }).map((_, index) => {
+                        const pageNum = index + 1;
+                        if (
+                          pageNum === 1 ||
+                          pageNum === totalPages ||
+                          (pageNum >= currentPage - 1 && pageNum <= currentPage + 1)
+                        ) {
+                          return (
+                            <button
+                              key={pageNum}
+                              onClick={() => setCurrentPage(pageNum)}
+                              className={`w-8 h-8 md:w-10 md:h-10 rounded-md text-sm font-medium transition-smooth ${
+                                currentPage === pageNum
+                                  ? 'bg-primary text-primary-foreground font-bold'
+                                  : 'hover:bg-muted text-foreground'
+                              }`}
+                            >
+                              {pageNum}
+                            </button>
+                          );
+                        }
+                        if (pageNum === currentPage - 2 || pageNum === currentPage + 2) {
+                          return (
+                            <span key={pageNum} className="text-muted-foreground px-1">
+                              ...
+                            </span>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      iconName="ChevronRight"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -396,7 +637,11 @@ const QuestionBankManagement = () => {
       )}
       {showCreateModal && (
         <CreateQuestionModal
-          onClose={() => setShowCreateModal(false)}
+          initialQuestion={editQuestion}
+          onClose={() => {
+            setShowCreateModal(false);
+            setEditQuestion(null);
+          }}
           onSave={handleSaveQuestion}
         />
       )}
@@ -405,4 +650,3 @@ const QuestionBankManagement = () => {
 };
 
 export default QuestionBankManagement;
- 
