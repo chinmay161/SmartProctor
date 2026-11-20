@@ -265,6 +265,17 @@ def ensure_schema_compatibility() -> None:
             """
         )
 
+    if "proctor_assignments" not in tables:
+        statements.append(
+            """
+            CREATE TABLE IF NOT EXISTS proctor_assignments (
+                id VARCHAR PRIMARY KEY,
+                exam_id VARCHAR NOT NULL,
+                teacher_id VARCHAR NOT NULL
+            )
+            """
+        )
+
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
@@ -428,12 +439,18 @@ def ensure_schema_compatibility() -> None:
 
         if "violations" in tables:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_violations_timestamp_review_status ON violations (timestamp, review_status)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_violations_attempt_id ON violations (attempt_id)"))
         if "exam_sessions" in tables:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_sessions_status_last_heartbeat ON exam_sessions (status, last_heartbeat)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_sessions_exam_id ON exam_sessions (exam_id)"))
         if "user_profiles" in tables:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_user_profiles_role ON user_profiles (role)"))
         if "exams" in tables:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exams_status_time_window ON exams (status, start_time, end_time)"))
+        if "exam_attempts" in tables:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exam_attempts_exam_id_status ON exam_attempts (exam_id, status)"))
+        if "proctor_assignments" in tables:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_proctor_assignments_teacher_id ON proctor_assignments (teacher_id)"))
         if "role_audit_logs" in tables:
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_role_audit_logs_timestamp ON role_audit_logs (timestamp)"))
 

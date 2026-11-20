@@ -77,6 +77,11 @@ from .routes import questions
 from .routes import analytics
 from .routes import ws_proctoring, ws_signaling
 from .models.user_profile import UserProfile
+from .models.exam import Exam
+from .models.exam_session import ExamSession
+from .models.violation import Violation
+from .models.enrollment import ExamEnrollment
+from .models.proctor import ProctorAssignment
 from .services.auto_submit_worker import AutoSubmitWorker
 
 worker = AutoSubmitWorker()
