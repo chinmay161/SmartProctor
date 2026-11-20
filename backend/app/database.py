@@ -136,6 +136,22 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE exams ADD COLUMN results_visible BOOLEAN NOT NULL DEFAULT 0")
         if "digest_sent_at" not in exam_columns:
             statements.append("ALTER TABLE exams ADD COLUMN digest_sent_at DATETIME")
+        if "max_attempts" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 1")
+        if "total_marks" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN total_marks INTEGER")
+        if "passing_marks" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN passing_marks INTEGER")
+        if "violation_threshold" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN violation_threshold INTEGER NOT NULL DEFAULT 3")
+        if "violation_action" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN violation_action VARCHAR NOT NULL DEFAULT 'warn'")
+        if "visible_before_start" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN visible_before_start BOOLEAN NOT NULL DEFAULT 0")
+        if "question_pool_mode" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN question_pool_mode VARCHAR NOT NULL DEFAULT 'fixed'")
+        if "pool_draw_count" not in exam_columns:
+            statements.append("ALTER TABLE exams ADD COLUMN pool_draw_count INTEGER")
 
     if "exam_sessions" in tables:
         session_columns = {column["name"] for column in inspector.get_columns("exam_sessions")}
@@ -206,6 +222,8 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE exam_attempts ADD COLUMN flag_reason VARCHAR")
         if "integrity_score" not in attempt_columns:
             statements.append("ALTER TABLE exam_attempts ADD COLUMN integrity_score INTEGER NOT NULL DEFAULT 100")
+        if "question_ids" not in attempt_columns:
+            statements.append("ALTER TABLE exam_attempts ADD COLUMN question_ids TEXT")
 
     if "violations" in tables:
         violation_columns = {column["name"] for column in inspector.get_columns("violations")}
@@ -245,6 +263,11 @@ def ensure_schema_compatibility() -> None:
             statements.append("ALTER TABLE violations ADD COLUMN reviewed_at DATETIME")
         if "review_note" not in violation_columns:
             statements.append("ALTER TABLE violations ADD COLUMN review_note VARCHAR(300)")
+
+    if "questions" in tables:
+        question_columns = {column["name"] for column in inspector.get_columns("questions")}
+        if "created_by" not in question_columns:
+            statements.append("ALTER TABLE questions ADD COLUMN created_by VARCHAR")
 
     if "problem_reports" not in tables:
         statements.append(

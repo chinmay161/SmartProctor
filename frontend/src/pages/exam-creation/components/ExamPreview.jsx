@@ -126,7 +126,20 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
                   <Icon name="FileText" size={18} className="text-success" />
                   <span className="text-xs text-muted-foreground">Questions</span>
                 </div>
-                <p className="text-lg font-semibold text-foreground">{selectedQuestions?.length}</p>
+                {formData?.questionPoolMode === 'dynamic_draw' ? (
+                  <>
+                    <p className="text-lg font-semibold text-foreground">
+                      {formData?.poolDrawCount || 0}{' '}
+                      <span className="text-xs font-normal text-muted-foreground">/ {selectedQuestions?.length || 0} pool</span>
+                    </p>
+                    <p className="text-xs text-primary font-medium mt-0.5">Dynamic Draw</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-lg font-semibold text-foreground">{selectedQuestions?.length || 0}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Fixed Selection</p>
+                  </>
+                )}
               </div>
 
               <div className="bg-muted/30 rounded-lg p-4">
@@ -191,6 +204,18 @@ const ExamPreview = ({ formData, selectedQuestions }) => {
 
         {activeTab === 'questions' && (
           <div className="space-y-4">
+            {formData?.questionPoolMode === 'dynamic_draw' && (
+              <div className="bg-primary/10 border border-primary/30 rounded-lg p-4 flex items-start space-x-3">
+                <Icon name="Layers" size={20} className="text-primary shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <p className="font-semibold text-foreground text-sm">Dynamic Question Pool ({selectedQuestions?.length || 0} candidates)</p>
+                  <p className="text-muted-foreground mt-0.5">
+                    Each student attempt will randomly draw <strong>{formData?.poolDrawCount || 0} questions</strong> from this candidate pool.
+                    The complete pool of candidate questions is previewed below.
+                  </p>
+                </div>
+              </div>
+            )}
             {(remoteQuestions || [])?.map((question, index) => (
               <div key={question?.id} className="bg-muted/30 border border-border rounded-lg p-4 md:p-6">
                 <div className="flex items-start space-x-3 mb-4">

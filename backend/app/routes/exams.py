@@ -35,7 +35,7 @@ from ..services.email_service import (
     resolve_user_email,
     send_exam_completion_digest,
 )
-from ..services.evidence_storage import redact_sensitive_info
+from ..services.evidence_storage import get_evidence_storage, resolve_evidence_field, redact_sensitive_info
 
 logger = logging.getLogger(__name__)
 from ..schemas.exam import (
@@ -59,6 +59,7 @@ from ..services.attempt_service import (
     publish_exam,
     sync_exam_status_for_now,
     utcnow,
+    validate_or_recalculate_exam_total_marks,
 )
 from ..services.exam_service import configure_exam_rules, exam_requires_camera, exam_requires_mic
 
@@ -232,6 +233,13 @@ def _serialize_exam(
         violation_count=completed_metrics.get("total_violations") if completed_metrics else None,
         average_score_percent=completed_metrics.get("average_score_percent") if completed_metrics else None,
         max_attempts=_max_attempts_for_exam(exam),
+        total_marks=exam.total_marks if exam.total_marks is not None else (int(wizard_config.get("totalMarks") or wizard_config.get("total_marks")) if isinstance(wizard_config, dict) and (wizard_config.get("totalMarks") or wizard_config.get("total_marks")) else None),
+        passing_marks=exam.passing_marks if exam.passing_marks is not None else (int(wizard_config.get("passingMarks") or wizard_config.get("passing_marks")) if isinstance(wizard_config, dict) and (wizard_config.get("passingMarks") or wizard_config.get("passing_marks")) else None),
+        violation_threshold=exam.violation_threshold if exam.violation_threshold is not None else (int(wizard_config.get("violationThreshold") or wizard_config.get("violation_threshold")) if isinstance(wizard_config, dict) and (wizard_config.get("violationThreshold") or wizard_config.get("violation_threshold")) else 3),
+        violation_action=exam.violation_action if exam.violation_action else (str(wizard_config.get("violationAction") or wizard_config.get("violation_action") or "warn") if isinstance(wizard_config, dict) else "warn"),
+        visible_before_start=bool(exam.visible_before_start) if exam.visible_before_start is not None else (bool(wizard_config.get("visibleBeforeStart") or wizard_config.get("publishImmediately")) if isinstance(wizard_config, dict) else False),
+        question_pool_mode=exam.question_pool_mode if exam.question_pool_mode else (str(wizard_config.get("questionPoolMode") or "fixed") if isinstance(wizard_config, dict) else "fixed"),
+        pool_draw_count=exam.pool_draw_count if exam.pool_draw_count is not None else (int(wizard_config.get("poolDrawCount")) if isinstance(wizard_config, dict) and wizard_config.get("poolDrawCount") else None),
         attempts_used=attempts_used,
         has_in_progress=has_in_progress,
         created_by=exam.created_by,
@@ -335,6 +343,12 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
     violations_by_type: dict[str, int] = {}
     total_violation_count = 0
 
+    storage = None
+    try:
+        storage = get_evidence_storage()
+    except Exception:
+        storage = None
+
     row_map: dict[str, dict[str, Any]] = {}
     for violation in violations:
         sev = str(violation.severity or "").lower()
@@ -375,6 +389,21 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
         elif sev == "severe":
             row["severe_count"] += unit_count
 
+        raw_evidence = getattr(violation, "evidence_files", None)
+        resolved_evidence = None
+        ev_status = getattr(violation, "evidence_status", None)
+        if raw_evidence:
+            try:
+                resolved_evidence = resolve_evidence_field(raw_evidence, storage)
+                if resolved_evidence:
+                    ev_status = ev_status or "captured"
+                else:
+                    ev_status = ev_status or "url_failed"
+            except Exception:
+                ev_status = ev_status or "url_failed"
+        elif not ev_status:
+            ev_status = "no_image_in_request"
+
         v_status = getattr(violation, "review_status", None) or "NONE"
         v_note = getattr(violation, "review_note", None) or ""
         row["violations"].append({
@@ -386,7 +415,9 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
             "review_note": v_note,
             "reviewed_by": getattr(violation, "reviewed_by", None),
             "reviewed_at": violation.reviewed_at.isoformat() if getattr(violation, "reviewed_at", None) else None,
-            "evidence_files": getattr(violation, "evidence_files", None),
+            "evidence_files": resolved_evidence,
+            "evidence_file": resolved_evidence,
+            "evidence_status": ev_status,
         })
 
         event_ts = violation.timestamp
@@ -442,6 +473,91 @@ def _collect_completed_exam_metrics(db, exam: Exam) -> dict[str, Any]:
     }
 
 
+def _sync_exam_operational_fields(exam: Exam, payload: ExamCreateRequest | ExamUpdateRequest) -> None:
+    wcfg = dict(payload.wizard_config) if payload.wizard_config is not None else {}
+    if not wcfg and exam.wizard_config:
+        try:
+            parsed = json.loads(exam.wizard_config)
+            if isinstance(parsed, dict):
+                wcfg = dict(parsed)
+        except Exception:
+            pass
+
+    raw_max_att = payload.max_attempts if getattr(payload, "max_attempts", None) is not None else (wcfg.get("maxAttempts") or wcfg.get("max_attempts"))
+    if raw_max_att is not None:
+        try:
+            val = max(1, int(raw_max_att))
+            exam.max_attempts = val
+            wcfg["maxAttempts"] = str(val)
+            wcfg["max_attempts"] = val
+        except (TypeError, ValueError):
+            pass
+
+    raw_total_marks = payload.total_marks if getattr(payload, "total_marks", None) is not None else (wcfg.get("totalMarks") or wcfg.get("total_marks"))
+    if raw_total_marks is not None:
+        try:
+            val = int(raw_total_marks)
+            exam.total_marks = val
+            wcfg["totalMarks"] = str(val)
+            wcfg["total_marks"] = val
+        except (TypeError, ValueError):
+            pass
+
+    raw_pass = payload.passing_marks if getattr(payload, "passing_marks", None) is not None else (wcfg.get("passingMarks") or wcfg.get("passing_marks"))
+    if raw_pass is not None:
+        try:
+            val = int(raw_pass)
+            exam.passing_marks = val
+            wcfg["passingMarks"] = str(val)
+            wcfg["passing_marks"] = val
+        except (TypeError, ValueError):
+            pass
+
+    raw_thresh = payload.violation_threshold if getattr(payload, "violation_threshold", None) is not None else (wcfg.get("violationThreshold") or wcfg.get("violation_threshold"))
+    if raw_thresh is not None:
+        try:
+            val = max(1, int(raw_thresh))
+            exam.violation_threshold = val
+            wcfg["violationThreshold"] = str(val)
+            wcfg["violation_threshold"] = val
+        except (TypeError, ValueError):
+            pass
+
+    raw_act = payload.violation_action if getattr(payload, "violation_action", None) is not None else (wcfg.get("violationAction") or wcfg.get("violation_action"))
+    if raw_act is not None:
+        act_str = str(raw_act).lower().strip()
+        if act_str in ("warn", "flag", "terminate"):
+            exam.violation_action = act_str
+            wcfg["violationAction"] = act_str
+            wcfg["violation_action"] = act_str
+
+    raw_vis = payload.visible_before_start if getattr(payload, "visible_before_start", None) is not None else (wcfg.get("visibleBeforeStart") if "visibleBeforeStart" in wcfg else wcfg.get("publishImmediately"))
+    if raw_vis is not None:
+        vis_bool = bool(raw_vis)
+        exam.visible_before_start = vis_bool
+        wcfg["visibleBeforeStart"] = vis_bool
+        wcfg["publishImmediately"] = vis_bool
+
+    raw_pool = payload.question_pool_mode if getattr(payload, "question_pool_mode", None) is not None else wcfg.get("questionPoolMode")
+    if raw_pool is not None:
+        pool_str = str(raw_pool).lower().strip()
+        if pool_str in ("fixed", "dynamic_draw"):
+            exam.question_pool_mode = pool_str
+            wcfg["questionPoolMode"] = pool_str
+
+    raw_k = payload.pool_draw_count if getattr(payload, "pool_draw_count", None) is not None else wcfg.get("poolDrawCount")
+    if raw_k is not None:
+        try:
+            val = int(raw_k)
+            exam.pool_draw_count = val
+            wcfg["poolDrawCount"] = str(val)
+        except (TypeError, ValueError):
+            pass
+
+    if wcfg:
+        exam.wizard_config = json.dumps(wcfg)
+
+
 @router.post("/", response_model=ExamResponse, status_code=status.HTTP_201_CREATED)
 def create_exam(payload: ExamCreateRequest, user=Depends(require_role("teacher"))):
     db = SessionLocal()
@@ -458,6 +574,9 @@ def create_exam(payload: ExamCreateRequest, user=Depends(require_role("teacher")
             status=ExamStatus.DRAFT if payload.is_draft else ExamStatus.SCHEDULED,
             created_by=user["sub"],
         )
+        _sync_exam_operational_fields(exam, payload)
+        if not payload.is_draft and not payload.is_template and payload.question_ids:
+            validate_or_recalculate_exam_total_marks(db, exam)
         _ensure_exam_is_not_already_over(exam)
         db.add(exam)
         db.commit()
@@ -508,6 +627,10 @@ def update_exam(exam_id: str, payload: ExamUpdateRequest, user=Depends(require_r
             exam.is_template = bool(payload.is_template)
         if payload.is_draft is not None and exam.status not in (ExamStatus.ACTIVE, ExamStatus.ENDED):
             exam.status = ExamStatus.DRAFT if payload.is_draft else ExamStatus.SCHEDULED
+
+        _sync_exam_operational_fields(exam, payload)
+        if (payload.is_draft is False or (payload.is_draft is None and exam.status != ExamStatus.DRAFT)) and not exam.is_template:
+            validate_or_recalculate_exam_total_marks(db, exam)
 
         _ensure_exam_is_not_already_over(exam)
 

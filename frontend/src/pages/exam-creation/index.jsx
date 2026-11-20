@@ -40,7 +40,6 @@ const getDefaultExamTimezone = () => {
 
 const defaultExamData = {
   title: '',
-  course: '',
   duration: '',
   maxAttempts: '1',
   totalMarks: '',
@@ -55,6 +54,7 @@ const defaultExamData = {
   allowLateSubmission: false,
   gracePeriod: '',
   latePenalty: '',
+  visibleBeforeStart: false,
   publishImmediately: false,
   sendReminders: true,
   enableWebcam: true,
@@ -71,6 +71,8 @@ const defaultExamData = {
   violationAction: 'warn',
   violationFreezeMinSeconds: '1',
   violationFreezeMaxSeconds: '5',
+  questionPoolMode: 'fixed',
+  poolDrawCount: '',
   randomizeQuestions: true,
   randomizeAnswers: true,
   disableCopyPaste: true,
@@ -315,6 +317,14 @@ const ExamCreation = () => {
           title: exam?.title || wizardConfig?.title || '',
           duration: exam?.duration_minutes ? String(exam.duration_minutes) : (wizardConfig?.duration || ''),
           instructions: exam?.description || wizardConfig?.instructions || '',
+          totalMarks: exam?.total_marks != null ? String(exam.total_marks) : (wizardConfig?.totalMarks || ''),
+          passingMarks: exam?.passing_marks != null ? String(exam.passing_marks) : (wizardConfig?.passingMarks || ''),
+          maxAttempts: exam?.max_attempts != null ? String(exam.max_attempts) : (wizardConfig?.maxAttempts || '1'),
+          violationThreshold: exam?.violation_threshold != null ? String(exam.violation_threshold) : (wizardConfig?.violationThreshold || '3'),
+          violationAction: exam?.violation_action || wizardConfig?.violationAction || 'warn',
+          visibleBeforeStart: exam?.visible_before_start != null ? Boolean(exam.visible_before_start) : Boolean(wizardConfig?.visibleBeforeStart ?? wizardConfig?.publishImmediately ?? false),
+          questionPoolMode: exam?.question_pool_mode || wizardConfig?.questionPoolMode || 'fixed',
+          poolDrawCount: exam?.pool_draw_count != null ? String(exam.pool_draw_count) : (wizardConfig?.poolDrawCount || ''),
         };
         const scheduleTimezone = merged?.timezone || defaultExamData.timezone;
 
@@ -354,11 +364,17 @@ const ExamCreation = () => {
 
     if (step === 0) {
       if (!examData?.title) nextErrors.title = 'Exam title is required';
-      if (!examData?.course) nextErrors.course = 'Course selection is required';
       if (!examData?.duration) nextErrors.duration = 'Duration is required';
       if (!examData?.maxAttempts) nextErrors.maxAttempts = 'Maximum attempts is required';
       if (!examData?.totalMarks) nextErrors.totalMarks = 'Total marks is required';
       if (!examData?.passingMarks) nextErrors.passingMarks = 'Passing marks is required';
+      if (
+        examData?.totalMarks &&
+        examData?.passingMarks &&
+        Number(examData.passingMarks) > Number(examData.totalMarks)
+      ) {
+        nextErrors.passingMarks = 'Passing marks cannot exceed total marks';
+      }
       if (!examData?.difficulty) nextErrors.difficulty = 'Difficulty level is required';
     }
 
@@ -381,8 +397,16 @@ const ExamCreation = () => {
     }
 
     if (step === 2) {
-      if (selectedQuestions?.length === 0) {
+      if (!selectedQuestions || selectedQuestions.length === 0) {
         nextErrors.questions = 'Please select at least one question';
+      }
+      if (examData?.questionPoolMode === 'dynamic_draw') {
+        const drawCount = Number(examData?.poolDrawCount);
+        if (!examData?.poolDrawCount || !Number.isInteger(drawCount) || drawCount <= 0) {
+          nextErrors.poolDrawCount = 'Number of questions to draw must be a positive integer';
+        } else if (drawCount > (selectedQuestions?.length || 0)) {
+          nextErrors.poolDrawCount = `Cannot draw ${drawCount} questions from a pool of ${selectedQuestions?.length || 0} questions`;
+        }
       }
     }
 
@@ -462,8 +486,18 @@ const ExamCreation = () => {
       duration_minutes: Number.isFinite(duration) && duration > 0 ? duration : null,
       question_ids: selectedQuestions,
       is_draft: isDraft,
+      max_attempts: examData.maxAttempts ? Number(examData.maxAttempts) : 1,
+      total_marks: examData.totalMarks ? Number(examData.totalMarks) : null,
+      passing_marks: examData.passingMarks ? Number(examData.passingMarks) : null,
+      violation_threshold: examData.violationThreshold ? Number(examData.violationThreshold) : 3,
+      violation_action: examData.violationAction || 'warn',
+      visible_before_start: Boolean(examData.visibleBeforeStart ?? examData.publishImmediately),
+      question_pool_mode: examData.questionPoolMode || 'fixed',
+      pool_draw_count: examData.poolDrawCount ? Number(examData.poolDrawCount) : null,
       wizard_config: {
         ...examData,
+        visibleBeforeStart: Boolean(examData.visibleBeforeStart ?? examData.publishImmediately),
+        publishImmediately: Boolean(examData.visibleBeforeStart ?? examData.publishImmediately),
       },
     };
 
@@ -575,6 +609,9 @@ const ExamCreation = () => {
       case 2:
         return (
           <QuestionBankPanel
+            formData={examData}
+            onFormDataChange={handleExamDataChange}
+            errors={errors}
             selectedQuestions={selectedQuestions}
             onQuestionsChange={setSelectedQuestions}
             targetTotalMarks={examData?.totalMarks}

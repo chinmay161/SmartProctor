@@ -185,10 +185,13 @@ const SchedulingConfiguration = ({ formData, onChange, errors, minEndDate, minEn
             )}
 
             <Checkbox
-              label="Publish results immediately"
-              description="Show results to students after submission"
-              checked={formData?.publishImmediately}
-              onChange={(e) => handleInputChange('publishImmediately', e?.target?.checked)}
+              label="Visible to students before start date"
+              description="Display this upcoming exam on students' dashboards and schedules before start time (students can only begin once start time arrives)"
+              checked={Boolean(formData?.visibleBeforeStart ?? formData?.publishImmediately)}
+              onChange={(e) => {
+                const val = e?.target?.checked;
+                onChange({ ...formData, visibleBeforeStart: val, publishImmediately: val });
+              }}
             />
 
             <Checkbox

@@ -16,6 +16,14 @@ class ExamCreateRequest(BaseModel):
     end_time: datetime | None = None
     is_draft: bool = False
     is_template: bool = False
+    max_attempts: int | None = Field(default=None, ge=1)
+    total_marks: int | None = Field(default=None, ge=1)
+    passing_marks: int | None = Field(default=None, ge=0)
+    violation_threshold: int | None = Field(default=None, ge=1)
+    violation_action: str | None = None
+    visible_before_start: bool | None = None
+    question_pool_mode: str | None = None
+    pool_draw_count: int | None = None
 
     @model_validator(mode="after")
     def validate_window(self):
@@ -36,6 +44,14 @@ class ExamUpdateRequest(BaseModel):
     end_time: datetime | None = None
     is_draft: bool | None = None
     is_template: bool | None = None
+    max_attempts: int | None = Field(default=None, ge=1)
+    total_marks: int | None = Field(default=None, ge=1)
+    passing_marks: int | None = Field(default=None, ge=0)
+    violation_threshold: int | None = Field(default=None, ge=1)
+    violation_action: str | None = None
+    visible_before_start: bool | None = None
+    question_pool_mode: str | None = None
+    pool_draw_count: int | None = None
 
     @model_validator(mode="after")
     def validate_window(self):
@@ -73,6 +89,13 @@ class ExamResponse(BaseModel):
     violation_count: int | None = None
     average_score_percent: float | None = None
     max_attempts: int = 1
+    total_marks: int | None = None
+    passing_marks: int | None = None
+    violation_threshold: int = 3
+    violation_action: str = "warn"
+    visible_before_start: bool = False
+    question_pool_mode: str = "fixed"
+    pool_draw_count: int | None = None
     attempts_used: int | None = None
     has_in_progress: bool | None = None
     created_by: str

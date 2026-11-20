@@ -148,15 +148,26 @@ const SecuritySettings = ({ formData, onChange, errors }) => {
         </div>
 
         <CheckboxGroup label="Question Security">
+          {formData?.questionPoolMode === 'dynamic_draw' && (
+            <div className="bg-primary/10 border border-primary/30 rounded-lg p-3.5 mb-2 flex items-start space-x-3">
+              <Icon name="Layers" size={18} className="text-primary shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <p className="font-semibold text-foreground">Dynamic Question Pool Active</p>
+                <p className="text-muted-foreground mt-0.5">
+                  Each student attempt will draw {formData.poolDrawCount || 0} random questions from the candidate pool. Enabling &quot;Randomize question order&quot; below also randomizes their display sequence.
+                </p>
+              </div>
+            </div>
+          )}
           <Checkbox
             label="Randomize question order"
-            description="Show questions in random order for each student"
+            description="Shuffle question sequence for each student attempt"
             checked={formData?.randomizeQuestions}
             onChange={(e) => handleInputChange('randomizeQuestions', e?.target?.checked)}
           />
           <Checkbox
             label="Randomize answer options"
-            description="Shuffle answer choices for MCQ questions"
+            description="Shuffle MCQ option choices for each student"
             checked={formData?.randomizeAnswers}
             onChange={(e) => handleInputChange('randomizeAnswers', e?.target?.checked)}
           />

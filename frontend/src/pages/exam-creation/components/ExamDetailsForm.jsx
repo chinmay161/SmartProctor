@@ -4,14 +4,6 @@ import Select from '../../../components/ui/Select';
 import Icon from '../../../components/AppIcon';
 
 const ExamDetailsForm = ({ formData, onChange, errors }) => {
-  const courseOptions = [
-    { value: 'math-101', label: 'Mathematics 101 - Calculus I' },
-    { value: 'cs-201', label: 'Computer Science 201 - Data Structures' },
-    { value: 'phy-301', label: 'Physics 301 - Quantum Mechanics' },
-    { value: 'eng-102', label: 'English 102 - Literature Analysis' },
-    { value: 'bio-205', label: 'Biology 205 - Molecular Biology' }
-  ];
-
   const difficultyOptions = [
     { value: 'easy', label: 'Easy' },
     { value: 'medium', label: 'Medium' },
@@ -44,18 +36,6 @@ const ExamDetailsForm = ({ formData, onChange, errors }) => {
           error={errors?.title}
           required
           description="Provide a clear, descriptive title for the exam"
-        />
-
-        <Select
-          label="Course"
-          placeholder="Select course"
-          options={courseOptions}
-          value={formData?.course}
-          onChange={(value) => handleInputChange('course', value)}
-          error={errors?.course}
-          required
-          searchable
-          description="Choose the course this exam belongs to"
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -96,7 +76,7 @@ const ExamDetailsForm = ({ formData, onChange, errors }) => {
             error={errors?.totalMarks}
             required
             min="1"
-            description="Maximum marks for this exam"
+            description="Maximum marks for this exam (locks to selected questions sum on publish)"
           />
 
           <Input
