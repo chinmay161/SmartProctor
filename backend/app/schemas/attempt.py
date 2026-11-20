@@ -10,6 +10,7 @@ class AttemptStartResponse(BaseModel):
     attempt_id: str
     auto_submit_time: datetime
     duration_remaining_seconds: int
+    question_ids: list[str] = Field(default_factory=list)
 
 
 class SaveAnswerRequest(BaseModel):
@@ -95,3 +96,4 @@ class ResumeAttemptResponse(BaseModel):
     auto_submit_time: datetime
     duration_remaining_seconds: int
     saved_answers: list[dict[str, Any]]
+    question_ids: list[str] = Field(default_factory=list)

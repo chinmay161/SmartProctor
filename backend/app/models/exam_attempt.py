@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
 from ..database import Base
 import uuid
@@ -41,3 +41,4 @@ class ExamAttempt(Base):
     flagged_at = Column(DateTime(timezone=True), nullable=True)
     flag_reason = Column(String, nullable=True)
     integrity_score = Column(Integer, nullable=False, default=100)
+    question_ids = Column(Text, nullable=True)  # JSON-serialized list of question IDs assigned to this attempt

@@ -511,6 +511,8 @@ const ExamPortal = () => {
     }
 
     let restoredAnswers = {};
+    let attemptQuestionIds = null;
+    let attemptQuestions = null;
     try {
       const resume = await callApi(`/attempts/${encodeURIComponent(activeExamId)}/resume`, 'GET');
       if (resume?.attempt_id) setAttemptId(resume.attempt_id);
@@ -521,13 +523,39 @@ const ExamPortal = () => {
         if (saved?.question_id) restoredAnswers[String(saved.question_id)] = saved.answer;
         if (saved?.source_question_id) restoredAnswers[String(saved.source_question_id)] = saved.answer;
       });
+      if (Array.isArray(resume?.question_ids) && resume.question_ids.length > 0) {
+        attemptQuestionIds = resume.question_ids;
+      }
+      if (resume?.attempt_id) {
+        try {
+          const directQuestions = await callApi(`/attempts/${encodeURIComponent(resume.attempt_id)}/questions`, 'GET');
+          if (Array.isArray(directQuestions) && directQuestions.length > 0) {
+            attemptQuestions = directQuestions;
+          }
+        } catch {
+          attemptQuestions = null;
+        }
+      }
     } catch {
       restoredAnswers = {};
       setLoadWarning('Could not load attempt progress. You may continue, but previous progress may be unavailable.');
     }
 
-    const responses = await questionsPromise;
-    const liveQuestions = responses.filter(Boolean).map((q, idx) => mapApiQuestionToPortal(q, idx));
+    let liveQuestions = [];
+    if (attemptQuestions && attemptQuestions.length > 0) {
+      liveQuestions = attemptQuestions.map((q, idx) => mapApiQuestionToPortal(q, idx));
+    } else {
+      const responses = await questionsPromise;
+      let fetched = responses.filter(Boolean).map((q, idx) => mapApiQuestionToPortal(q, idx));
+      if (attemptQuestionIds && attemptQuestionIds.length > 0) {
+        const qMap = new Map(fetched.map((q) => [String(q.id), q]));
+        const ordered = attemptQuestionIds.map((id) => qMap.get(String(id))).filter(Boolean);
+        if (ordered.length > 0) {
+          fetched = ordered;
+        }
+      }
+      liveQuestions = fetched;
+    }
     const questions = cfg
       ? applyQuestionSecurity(liveQuestions, cfg, newSessionId || activeExamId)
       : liveQuestions;

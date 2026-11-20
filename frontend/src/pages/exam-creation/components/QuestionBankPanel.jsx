@@ -60,7 +60,14 @@ const chooseSubsetForTargetMarks = (selectedQuestionIds, marksById, targetMarks)
     .map((item) => item.id);
 };
 
-const QuestionBankPanel = ({ selectedQuestions, onQuestionsChange, targetTotalMarks }) => {
+const QuestionBankPanel = ({
+  formData = {},
+  onFormDataChange,
+  errors = {},
+  selectedQuestions,
+  onQuestionsChange,
+  targetTotalMarks,
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('');
   const [selectedDifficulty, setSelectedDifficulty] = useState('');
@@ -106,6 +113,7 @@ const QuestionBankPanel = ({ selectedQuestions, onQuestionsChange, targetTotalMa
 
   useEffect(() => {
     if (!Array.isArray(selectedQuestions) || selectedQuestions.length === 0 || availableQuestions.length === 0) return;
+    if (formData?.questionPoolMode === 'dynamic_draw') return;
 
     const marksById = new Map(availableQuestions.map((question) => [question.id, Number(question?.marks) || 0]));
     const optimizedSelection = chooseSubsetForTargetMarks(selectedQuestions, marksById, targetTotalMarks);
@@ -118,7 +126,7 @@ const QuestionBankPanel = ({ selectedQuestions, onQuestionsChange, targetTotalMa
         text: `Questions auto-selected to fit ${selectedMarks} mark${selectedMarks === 1 ? '' : 's'}.`,
       });
     }
-  }, [availableQuestions, selectedQuestions, targetTotalMarks]);
+  }, [availableQuestions, selectedQuestions, targetTotalMarks, formData?.questionPoolMode]);
 
   const questionTypes = [
     { value: '', label: 'All Types' },
@@ -177,6 +185,18 @@ const QuestionBankPanel = ({ selectedQuestions, onQuestionsChange, targetTotalMa
     } else {
       onQuestionsChange([...(selectedQuestions || []), questionId]);
     }
+  };
+
+  const handleSelectAllFiltered = () => {
+    const filteredIds = filteredQuestions.map((q) => q.id);
+    const merged = Array.from(new Set([...(selectedQuestions || []), ...filteredIds]));
+    onQuestionsChange(merged);
+  };
+
+  const handleDeselectAllFiltered = () => {
+    const filteredSet = new Set(filteredQuestions.map((q) => q.id));
+    const remaining = (selectedQuestions || []).filter((id) => !filteredSet.has(id));
+    onQuestionsChange(remaining);
   };
 
   const handleCreateQuestion = async (questionData) => {
@@ -279,6 +299,144 @@ const QuestionBankPanel = ({ selectedQuestions, onQuestionsChange, targetTotalMa
           </div>
         )}
 
+        {/* Total Marks Lock & Sync Alert */}
+        {(formData?.questionPoolMode || 'fixed') === 'fixed' &&
+          Boolean(formData?.totalMarks) &&
+          selectedQuestions?.length > 0 &&
+          Number(formData.totalMarks) !== selectedMarks && (
+            <div className="bg-warning/10 border border-warning/30 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs mb-4">
+              <div className="flex items-start space-x-2">
+                <Icon name="AlertTriangle" size={16} className="text-warning shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold text-foreground">Total Marks Mismatch</p>
+                  <p className="text-muted-foreground mt-0.5">
+                    Exam Details specify <strong>{formData.totalMarks} marks</strong>, but the {selectedQuestions.length} selected questions sum to <strong>{selectedMarks} marks</strong>. Publishing requires these to match.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onFormDataChange?.({ ...formData, totalMarks: String(selectedMarks) })}
+                className="shrink-0 text-primary border-primary/30 hover:bg-primary/10"
+              >
+                Sync Total Marks to {selectedMarks}
+              </Button>
+            </div>
+        )}
+
+        {/* Question Pool / Randomization Mode */}
+        <div className="mb-6 p-4 rounded-xl border border-border bg-muted/20">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-2">
+              <Icon name="Layers" size={18} className="text-primary" />
+              <span className="text-sm font-semibold text-foreground">Question Pool Mode</span>
+            </div>
+            <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+              formData?.questionPoolMode === 'dynamic_draw'
+                ? 'bg-primary/20 text-primary border border-primary/30'
+                : 'bg-muted text-muted-foreground border border-border'
+            }`}>
+              {formData?.questionPoolMode === 'dynamic_draw' ? 'Dynamic Pool Active' : 'Fixed Selection'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+            <div
+              onClick={() => onFormDataChange?.({ ...formData, questionPoolMode: 'fixed' })}
+              className={`p-3.5 rounded-lg border cursor-pointer transition-all ${
+                (formData?.questionPoolMode || 'fixed') === 'fixed'
+                  ? 'border-primary bg-primary/10 shadow-sm'
+                  : 'border-border bg-card hover:border-primary/40 hover:bg-muted/30'
+              }`}
+            >
+              <div className="flex items-start space-x-3">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 border ${
+                  (formData?.questionPoolMode || 'fixed') === 'fixed'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-muted-foreground'
+                }`}>
+                  {(formData?.questionPoolMode || 'fixed') === 'fixed' && <div className="w-2 h-2 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Fixed Selection</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    All selected questions appear on every exam attempt.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div
+              onClick={() => onFormDataChange?.({ ...formData, questionPoolMode: 'dynamic_draw' })}
+              className={`p-3.5 rounded-lg border cursor-pointer transition-all ${
+                formData?.questionPoolMode === 'dynamic_draw'
+                  ? 'border-primary bg-primary/10 shadow-sm'
+                  : 'border-border bg-card hover:border-primary/40 hover:bg-muted/30'
+              }`}
+            >
+              <div className="flex items-start space-x-3">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5 border ${
+                  formData?.questionPoolMode === 'dynamic_draw'
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-muted-foreground'
+                }`}>
+                  {formData?.questionPoolMode === 'dynamic_draw' && <div className="w-2 h-2 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-foreground">Dynamic Question Pool</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Each student attempt draws N random questions from this pool.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {formData?.questionPoolMode === 'dynamic_draw' && (
+            <div className="bg-card border border-primary/30 rounded-lg p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-semibold text-foreground uppercase tracking-wider mb-1">
+                    Questions to Draw per Attempt
+                  </label>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Number of random questions to draw from the candidate pool for each attempt.
+                  </p>
+                  <div className="max-w-xs">
+                    <Input
+                      type="number"
+                      min="1"
+                      max={selectedQuestions?.length || 1}
+                      placeholder="e.g. 20"
+                      value={formData?.poolDrawCount ?? ''}
+                      onChange={(e) => onFormDataChange?.({ ...formData, poolDrawCount: e?.target?.value })}
+                      error={errors?.poolDrawCount}
+                    />
+                  </div>
+                </div>
+                <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 text-right shrink-0">
+                  <p className="text-xs text-muted-foreground">Candidate Pool Size</p>
+                  <p className="text-base font-semibold text-primary">
+                    {formData?.poolDrawCount || 0} drawn / {selectedQuestions?.length || 0} in pool
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selectedQuestions?.length ? `${selectedQuestions.length} questions available` : 'No questions selected'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-primary/5 border border-primary/20 rounded-md p-2.5 flex items-start space-x-2 text-xs text-muted-foreground">
+                <Icon name="Shield" size={15} className="shrink-0 mt-0.5 text-primary" />
+                <span>
+                  <strong>High-Stakes Security:</strong> When <code>maxAttempts &gt; 1</code>, each sequential attempt draws a fresh random subset from this pool, preventing answer sharing. Pair with Step 3 &quot;Randomize question order&quot; to also shuffle display order.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="space-y-4 mb-6">
           <Input
             type="search"
@@ -311,6 +469,41 @@ const QuestionBankPanel = ({ selectedQuestions, onQuestionsChange, targetTotalMa
 
         <div className="mb-6">
           <QuestionImportTemplate />
+        </div>
+
+        {/* Quick Selection Toolbar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4 p-2.5 rounded-lg bg-muted/40 border border-border text-xs">
+          <div className="flex items-center space-x-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleSelectAllFiltered}
+              disabled={filteredQuestions.length === 0}
+            >
+              Select All Filtered ({filteredQuestions.length})
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleDeselectAllFiltered}
+              disabled={filteredQuestions.length === 0}
+            >
+              Deselect Filtered
+            </Button>
+          </div>
+          {selectedQuestions?.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onQuestionsChange([])}
+              className="text-error hover:text-error hover:bg-error/10"
+            >
+              Clear All ({selectedQuestions.length})
+            </Button>
+          )}
         </div>
 
         <div className="space-y-3 max-h-96 overflow-y-auto">

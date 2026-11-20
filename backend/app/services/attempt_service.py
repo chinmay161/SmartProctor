@@ -1,4 +1,5 @@
 import json
+import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -88,6 +89,11 @@ def _exam_wizard_config(exam: Exam) -> dict[str, Any]:
 
 
 def _max_attempts_for_exam(exam: Exam) -> int:
+    if getattr(exam, "max_attempts", None) is not None:
+        try:
+            return max(1, int(exam.max_attempts))
+        except (TypeError, ValueError):
+            pass
     config = _exam_wizard_config(exam)
     raw = config.get("maxAttempts")
     if raw is None:
@@ -263,16 +269,35 @@ def _score_objective_answer(question: ExamQuestion, answer_value: Any) -> int:
 
 
 def _question_lookup_for_attempt(db: Session, attempt: ExamAttempt) -> tuple[list[ExamQuestion], dict[str, ExamQuestion]]:
-    questions = (
+    all_questions = (
         db.query(ExamQuestion)
         .filter_by(exam_id=attempt.exam_id)
         .order_by(ExamQuestion.created_at.asc(), ExamQuestion.id.asc())
         .all()
     )
+    questions = all_questions
+    if getattr(attempt, "question_ids", None):
+        try:
+            raw = attempt.question_ids
+            drawn_ids = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(drawn_ids, list) and drawn_ids:
+                id_map = {str(q.id): q for q in all_questions}
+                source_map = {str(q.source_question_id): q for q in all_questions if q.source_question_id}
+                ordered = []
+                for qid in drawn_ids:
+                    q = id_map.get(str(qid)) or source_map.get(str(qid))
+                    if q and q not in ordered:
+                        ordered.append(q)
+                if ordered:
+                    questions = ordered
+        except Exception:
+            pass
+
     lookup: dict[str, ExamQuestion] = {}
     for question in questions:
         lookup[str(question.id)] = question
-        lookup[str(question.source_question_id)] = question
+        if question.source_question_id:
+            lookup[str(question.source_question_id)] = question
     return questions, lookup
 
 
@@ -332,6 +357,65 @@ def sync_exam_status_for_now(exam: Exam, now_utc: datetime) -> bool:
     return changed
 
 
+def validate_or_recalculate_exam_total_marks(db: Session, exam: Exam) -> int:
+    """Strictly validate or dynamically recalculate total_marks from selected questions."""
+    question_ids = _parse_question_ids(exam)
+    if not question_ids:
+        # If exam is already active/scheduled and has no question_ids, allow if legacy total_marks exists
+        if exam.total_marks is not None and int(exam.total_marks) > 0:
+            return int(exam.total_marks)
+        raise HTTPException(status_code=400, detail="Cannot publish an exam with no questions selected")
+
+    source_questions = db.query(Question).filter(Question.id.in_(question_ids)).all()
+    q_map = {q.id: q for q in source_questions}
+    selected_questions = [q_map[qid] for qid in question_ids if qid in q_map]
+    if not selected_questions:
+        if exam.total_marks is not None and int(exam.total_marks) > 0:
+            return int(exam.total_marks)
+        raise HTTPException(status_code=400, detail="Selected questions not found in question bank")
+
+    cfg = _exam_wizard_config(exam)
+    pool_mode = str(getattr(exam, "question_pool_mode", None) or cfg.get("questionPoolMode") or "fixed").lower().strip()
+
+    if pool_mode == "dynamic_draw":
+        raw_k = getattr(exam, "pool_draw_count", None) or cfg.get("poolDrawCount")
+        try:
+            draw_count = int(raw_k)
+        except (TypeError, ValueError):
+            draw_count = len(selected_questions)
+        if draw_count > len(selected_questions):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot draw {draw_count} questions from a pool of {len(selected_questions)} questions",
+            )
+        marks_set = {int(q.marks or 1) for q in selected_questions}
+        if len(marks_set) == 1:
+            per_q = marks_set.pop()
+            expected_total = draw_count * per_q
+            if exam.total_marks is None or exam.total_marks <= 0:
+                exam.total_marks = expected_total
+            elif int(exam.total_marks) != expected_total:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Exam total marks ({exam.total_marks}) does not match dynamic pool draw marks ({expected_total})",
+                )
+        else:
+            if exam.total_marks is None or exam.total_marks <= 0:
+                avg_mark = sum(int(q.marks or 1) for q in selected_questions) / len(selected_questions)
+                exam.total_marks = int(round(draw_count * avg_mark))
+    else:
+        selected_sum = sum(int(q.marks or 1) for q in selected_questions)
+        if exam.total_marks is None or exam.total_marks <= 0:
+            exam.total_marks = selected_sum
+        elif int(exam.total_marks) != selected_sum:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Selected questions total ({selected_sum} marks) does not equal exam total marks ({exam.total_marks}). Adjust question selection or update total marks.",
+            )
+
+    return int(exam.total_marks or 0)
+
+
 def publish_exam(db: Session, exam_id: str, owner_id: str, start_time: datetime | None = None, end_time: datetime | None = None) -> Exam:
     exam = _ensure_exam_exists(db, exam_id)
     if exam.created_by != owner_id:
@@ -350,6 +434,8 @@ def publish_exam(db: Session, exam_id: str, owner_id: str, start_time: datetime 
     now_utc = utcnow()
     if now_utc >= _as_utc(exam.end_time):
         raise HTTPException(status_code=400, detail="end_time must be in the future for a scheduled exam")
+
+    validate_or_recalculate_exam_total_marks(db, exam)
 
     exam.status = ExamStatus.SCHEDULED
     sync_exam_status_for_now(exam, now_utc)
@@ -507,7 +593,16 @@ def list_available_exams_for_student(db: Session, student_id: str) -> list[Exam]
             continue
         if not (now_utc < _as_utc(exam.end_time)):
             continue
-        if exam.status not in (ExamStatus.SCHEDULED, ExamStatus.ACTIVE):
+        if exam.status == ExamStatus.ACTIVE:
+            pass
+        elif exam.status == ExamStatus.SCHEDULED:
+            is_visible_before = bool(getattr(exam, "visible_before_start", False))
+            if not is_visible_before:
+                cfg = _exam_wizard_config(exam)
+                is_visible_before = bool(cfg.get("visibleBeforeStart") or cfg.get("publishImmediately"))
+            if not is_visible_before:
+                continue
+        else:
             continue
 
         submitted_count = (
@@ -568,12 +663,43 @@ def start_exam_attempt(db: Session, exam_id: str, student_id: str) -> ExamAttemp
     if auto_submit_time > _as_utc(exam.end_time):
         raise HTTPException(status_code=400, detail="Invalid auto_submit_time")
 
+    config = _exam_wizard_config(exam)
+    pool_mode = str(getattr(exam, "question_pool_mode", None) or config.get("questionPoolMode") or "fixed").lower().strip()
+    randomize_q = bool(config.get("randomizeQuestions", False))
+
+    candidates = (
+        db.query(ExamQuestion)
+        .filter_by(exam_id=exam.id)
+        .order_by(ExamQuestion.created_at.asc(), ExamQuestion.id.asc())
+        .all()
+    )
+
+    drawn_ids: list[str] = []
+    if candidates:
+        if pool_mode == "dynamic_draw":
+            raw_draw = getattr(exam, "pool_draw_count", None) or config.get("poolDrawCount")
+            try:
+                draw_count = int(raw_draw)
+            except (TypeError, ValueError):
+                draw_count = len(candidates)
+            k = max(1, min(draw_count, len(candidates)))
+            drawn = random.sample(candidates, k)
+            if randomize_q:
+                random.shuffle(drawn)
+            drawn_ids = [str(q.id) for q in drawn]
+        else:
+            ordered = list(candidates)
+            if randomize_q:
+                random.shuffle(ordered)
+            drawn_ids = [str(q.id) for q in ordered]
+
     attempt = ExamAttempt(
         exam_id=exam_id,
         student_id=student_id,
         status=AttemptStatus.IN_PROGRESS,
         start_time=now_utc,
         auto_submit_time=auto_submit_time,
+        question_ids=json.dumps(drawn_ids) if drawn_ids else None,
     )
     try:
         db.add(attempt)

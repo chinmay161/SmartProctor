@@ -9,6 +9,7 @@ from ..models.exam import Exam
 from ..models.exam_answer import ExamAnswer
 from ..models.exam_attempt import ExamAttempt, AttemptStatus
 from ..permissions.attempt_permissions import require_attempt_owner
+from .questions import _serialize_question_for_student
 from ..schemas.attempt import (
     AttemptStartResponse,
     EvaluateAttemptRequest,
@@ -48,6 +49,8 @@ def _count_questions(question_ids_json: str | None) -> int:
 def _resolve_out_of(attempt: ExamAttempt, exam: Exam) -> int:
     if attempt.max_score_total is not None and int(attempt.max_score_total) > 0:
         return int(attempt.max_score_total)
+    if attempt.question_ids:
+        return _count_questions(attempt.question_ids)
     return _count_questions(exam.question_ids)
 
 
@@ -56,6 +59,8 @@ def start_attempt(exam_id: str, user=Depends(require_role("student"))):
     db = SessionLocal()
     try:
         attempt = start_exam_attempt(db, exam_id, user["sub"])
+        questions, _ = _question_lookup_for_attempt(db, attempt)
+        qids = [str(q.source_question_id or q.id) for q in questions]
         now = attempt.start_time
         auto_submit = attempt.auto_submit_time
         if now.tzinfo is None:
@@ -67,6 +72,7 @@ def start_attempt(exam_id: str, user=Depends(require_role("student"))):
             attempt_id=attempt.id,
             auto_submit_time=attempt.auto_submit_time,
             duration_remaining_seconds=max(remaining, 0),
+            question_ids=qids,
         )
     finally:
         db.close()
@@ -105,6 +111,7 @@ def resume_exam_attempt(exam_id: str, user=Depends(require_role("student"))):
     try:
         attempt, answers, remaining = resume_attempt(db, exam_id, user["sub"])
         questions, _ = _question_lookup_for_attempt(db, attempt)
+        qids = [str(q.source_question_id or q.id) for q in questions]
         eq_map = {str(q.id): str(q.source_question_id) for q in questions if q.source_question_id}
 
         serialized_answers = []
@@ -129,7 +136,20 @@ def resume_exam_attempt(exam_id: str, user=Depends(require_role("student"))):
             auto_submit_time=attempt.auto_submit_time,
             duration_remaining_seconds=remaining,
             saved_answers=serialized_answers,
+            question_ids=qids,
         )
+    finally:
+        db.close()
+
+
+@router.get("/attempts/{attempt_id}/questions")
+def get_attempt_questions(attempt_id: str, user=Depends(require_role("student"))):
+    """Return sanitized questions drawn for this specific attempt."""
+    db = SessionLocal()
+    try:
+        attempt = require_attempt_owner(db, attempt_id, user["sub"])
+        questions, _ = _question_lookup_for_attempt(db, attempt)
+        return [_serialize_question_for_student(q) for q in questions]
     finally:
         db.close()
 
