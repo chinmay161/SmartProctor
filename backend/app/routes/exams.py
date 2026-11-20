@@ -7,6 +7,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import object_session
 
 from ..auth.dependencies import get_current_user
@@ -20,6 +21,13 @@ from ..models.exam_attempt import AttemptStatus, ExamAttempt
 from ..models.exam_session import ExamSession
 from ..models.violation import Violation
 from ..models.question import Question
+from ..models.audit import AuditLog
+from ..models.exam_answer import ExamAnswer
+from ..models.exam_question import ExamQuestion
+from ..models.problem_report import ProblemReport
+from ..models.proctor import ProctorAssignment
+from ..models.session_event import SessionEvent
+from .teacher import invalidate_teacher_dashboard_cache
 from ..monitoring import compute_user_hash
 from ..permissions.exam_permissions import require_exam_owner
 from ..services.email_service import (
@@ -454,6 +462,7 @@ def create_exam(payload: ExamCreateRequest, user=Depends(require_role("teacher")
         db.add(exam)
         db.commit()
         db.refresh(exam)
+        invalidate_teacher_dashboard_cache(exam.created_by)
         return _serialize_exam(exam)
     finally:
         db.close()
@@ -504,6 +513,7 @@ def update_exam(exam_id: str, payload: ExamUpdateRequest, user=Depends(require_r
 
         db.commit()
         db.refresh(exam)
+        invalidate_teacher_dashboard_cache(exam.created_by)
         return _serialize_exam(exam)
     finally:
         db.close()
@@ -518,6 +528,7 @@ def publish_exam_endpoint(
     db = SessionLocal()
     try:
         exam = publish_exam(db, exam_id, user["sub"], payload.start_time, payload.end_time)
+        invalidate_teacher_dashboard_cache(exam.created_by)
         return _serialize_exam(exam)
     finally:
         db.close()
@@ -528,6 +539,7 @@ def end_exam_endpoint(exam_id: str, user=Depends(require_role("teacher"))):
     db = SessionLocal()
     try:
         exam, auto_submitted = force_end_exam(db, exam_id, user["sub"])
+        invalidate_teacher_dashboard_cache(exam.created_by)
         return {"exam_id": exam.id, "status": exam.status, "auto_submitted_attempts": auto_submitted}
     finally:
         db.close()
@@ -642,6 +654,7 @@ def publish_results(
             return {"exam_id": exam.id, "results_visible": True, "already_released": True}
         exam.results_visible = True
         db.commit()
+        invalidate_teacher_dashboard_cache(exam.created_by)
 
         # Enqueue background task only when transitioning results_visible from false to true
         if exam.digest_sent_at is None:
@@ -662,20 +675,99 @@ def delete_exam(exam_id: str, user=Depends(require_role("teacher"))):
     db = SessionLocal()
     try:
         exam = require_exam_owner(db, exam_id, user["sub"])
+        teacher_id = exam.created_by
+        # Only DRAFT exams or exams with zero attempts can be deleted
+        attempt_count = (
+            db.query(func.count(ExamAttempt.id))
+            .filter(ExamAttempt.exam_id == exam_id)
+            .scalar()
+        ) or 0
+        if attempt_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail="This exam has student attempts and cannot be deleted.",
+            )
+
+        # Clean up dependent rows in one transaction before deleting exam
+        # 1. Sessions and session-linked logs / violations
+        session_ids = [
+            row[0]
+            for row in db.query(ExamSession.id)
+            .filter(ExamSession.exam_id == exam_id)
+            .all()
+        ]
+        if session_ids:
+            db.query(AuditLog).filter(AuditLog.session_id.in_(session_ids)).delete(synchronize_session=False)
+            db.query(Violation).filter(Violation.session_id.in_(session_ids)).delete(synchronize_session=False)
+            db.query(ExamSession).filter(ExamSession.id.in_(session_ids)).delete(synchronize_session=False)
+
+        # 2. Questions and answers
+        question_ids = [
+            row[0]
+            for row in db.query(ExamQuestion.id)
+            .filter(ExamQuestion.exam_id == exam_id)
+            .all()
+        ]
+        if question_ids:
+            db.query(ExamAnswer).filter(ExamAnswer.question_id.in_(question_ids)).delete(synchronize_session=False)
+            db.query(ExamQuestion).filter(ExamQuestion.id.in_(question_ids)).delete(synchronize_session=False)
+
+        # 3. Tables without FK constraints referencing exam_id
+        db.query(ExamEnrollment).filter(ExamEnrollment.exam_id == exam_id).delete(synchronize_session=False)
+        db.query(ExamRules).filter(ExamRules.exam_id == exam_id).delete(synchronize_session=False)
+        db.query(ProctorAssignment).filter(ProctorAssignment.exam_id == exam_id).delete(synchronize_session=False)
+        db.query(SessionEvent).filter(SessionEvent.exam_id == exam_id).delete(synchronize_session=False)
+        db.query(ProblemReport).filter(ProblemReport.exam_id == exam_id).delete(synchronize_session=False)
+
+        # 4. Delete the exam itself
         db.delete(exam)
         db.commit()
+
+        invalidate_teacher_dashboard_cache(teacher_id)
         return {"message": "Exam deleted"}
     finally:
         db.close()
 
 
 @router.get("/", response_model=list[ExamResponse])
-def list_exams(user=Depends(get_current_user)):
+def list_exams(
+    user=Depends(get_current_user),
+    q: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
     roles = set(user.get("roles") or [])
     db = SessionLocal()
     try:
         if "teacher" in roles:
-            exams = db.query(Exam).filter_by(created_by=user["sub"]).order_by(Exam.created_at.desc()).all()
+            from ..models.proctor import ProctorAssignment
+            # Exams owned by teacher
+            teacher_filter = Exam.created_by == user["sub"]
+            # Exams assigned as proctor
+            proctor_exam_ids = [
+                row[0]
+                for row in db.query(ProctorAssignment.exam_id)
+                .filter(ProctorAssignment.teacher_id == user["sub"])
+                .all()
+            ]
+            if proctor_exam_ids:
+                from sqlalchemy import or_
+                combined_filter = or_(teacher_filter, Exam.id.in_(proctor_exam_ids))
+            else:
+                combined_filter = teacher_filter
+
+            query = db.query(Exam).filter(combined_filter)
+            if q:
+                query = query.filter(Exam.title.ilike(f"%{q}%"))
+            if status and status in ("DRAFT", "SCHEDULED", "ACTIVE", "ENDED"):
+                query = query.filter(Exam.status == status)
+            query = query.order_by(Exam.created_at.desc())
+            if offset > 0:
+                query = query.offset(offset)
+            if limit is not None:
+                query = query.limit(limit)
+            exams = query.all()
             now_utc = utcnow()
             dirty = False
             for exam in exams:
@@ -696,6 +788,13 @@ def list_exams(user=Depends(get_current_user)):
             return response
         if "student" in roles:
             exams = list_available_exams_for_student(db, user["sub"])
+            if q:
+                exams = [e for e in exams if q.lower() in (e.title or "").lower()]
+            if status and status in ("DRAFT", "SCHEDULED", "ACTIVE", "ENDED"):
+                exams = [e for e in exams if e.status == status]
+            if offset > 0 or limit is not None:
+                end_idx = offset + limit if limit is not None else len(exams)
+                exams = exams[offset:end_idx]
             is_mcq_map = compute_is_mcq_only_for_exams(db, exams)
             return [
                 _serialize_exam(
