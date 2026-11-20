@@ -67,8 +67,8 @@ const CompletedExamCard = ({ exam, onReleaseResults, releasing = false }) => {
         </span>
       </div>
 
-      {/* Metric chips — 2×2 responsive grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
+      {/* Metric chips — responsive grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px', marginBottom: '16px' }}>
         {[
           { icon: ICONS.clip,  label: 'Evaluated',  value: String(evaluatedCount),                  color: '#10B981' },
           { icon: ICONS.file,  label: 'Results',     value: alreadyReleased ? 'Released' : 'Pending', color: alreadyReleased ? '#10B981' : '#F59E0B' },
@@ -102,8 +102,9 @@ const CompletedExamCard = ({ exam, onReleaseResults, releasing = false }) => {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', paddingTop: '14px', borderTop: '1px solid var(--color-border)' }}>
         {[
           { label: 'Analytics',         icon: ICONS.bar,  onClick: () => navigate(`/teacher-dashboard/completed/${encodeURIComponent(exam?.id)}/analytics`),         style: 'ghost'   },
+          { label: 'Grade Attempts',    icon: ICONS.clip, onClick: () => navigate(`/teacher-dashboard/completed/${encodeURIComponent(exam?.id)}/analytics`),         style: 'ghost'   },
           { label: 'Violation Report',  icon: ICONS.file, onClick: () => navigate(`/teacher-dashboard/completed/${encodeURIComponent(exam?.id)}/violation-report`),   style: 'ghost'   },
-        ].map(({ label, icon, onClick, style }) => (
+        ].map(({ label, icon, onClick }) => (
           <button
             key={label}
             onClick={onClick}
@@ -125,7 +126,7 @@ const CompletedExamCard = ({ exam, onReleaseResults, releasing = false }) => {
             ? <span style={{ width: '13px', height: '13px', borderRadius: '50%', border: '2px solid #fff', borderTopColor: 'transparent', animation: 'spin 0.7s linear infinite', display: 'inline-block' }} />
             : <Ico d={alreadyReleased ? ICONS.check : ICONS.send} size={13} color={alreadyReleased ? '#10B981' : '#fff'} />
           }
-          {alreadyReleased ? 'Results Released' : 'Release Results'}
+          {alreadyReleased ? 'Results Published' : 'Publish Results'}
         </button>
       </div>
     </div>

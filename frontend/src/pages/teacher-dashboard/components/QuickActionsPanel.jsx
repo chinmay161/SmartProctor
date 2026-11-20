@@ -31,13 +31,6 @@ const ACTIONS = [
     color: '#F59E0B',
     route: null,
   },
-  {
-    icon: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8z',
-    label: 'Student Management',
-    desc:  'Manage enrollments',
-    color: '#8B9BBE',
-    route: null,
-  },
 ];
 
 const QuickActionsPanel = ({ onCreateExam, onOpenTemplates }) => {

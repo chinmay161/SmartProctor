@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatIstDateTime } from '../../../utils/dateTime';
 
 const Ico = ({ d, size = 16 }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
@@ -19,7 +20,7 @@ const ScheduledExamCard = ({ exam, onEdit, onDelete, onUseTemplate, variant = 's
   const isDraft = variant === 'draft';
   const isTemplate = variant === 'template';
   const createdAt = exam?.created_at
-    ? new Date(exam.created_at).toLocaleString('en-US', { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    ? `${formatIstDateTime(exam.created_at, { month: 'short', day: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} IST`
     : 'N/A';
   const accentColor = isDraft ? '#F59E0B' : isTemplate ? '#8B5CF6' : '#3B82F6';
   const badgeStyles = isDraft
@@ -48,7 +49,7 @@ const ScheduledExamCard = ({ exam, onEdit, onDelete, onUseTemplate, variant = 's
       </div>
 
       {/* Meta chips */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px', marginBottom: '16px' }}>
         {[
           { label: 'Duration',   value: exam?.duration_minutes ? `${exam.duration_minutes} min` : 'Not set' },
           { label: 'Questions',  value: String(exam?.question_ids?.length || 0) },
@@ -63,14 +64,16 @@ const ScheduledExamCard = ({ exam, onEdit, onDelete, onUseTemplate, variant = 's
 
       {/* Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '14px', borderTop: '1px solid var(--color-border)' }}>
-        <button
-          onClick={() => onEdit?.(exam)}
-          style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px', borderRadius: '8px', background: 'transparent', border: '1px solid var(--color-border)', color: 'var(--color-muted-foreground)', fontFamily: 'var(--font-body)', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--sp-accent)'; e.currentTarget.style.color = 'var(--sp-accent)'; e.currentTarget.style.background = 'rgba(59,130,246,0.06)'; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-muted-foreground)'; e.currentTarget.style.background = 'transparent'; }}
-        >
-          <Ico d={ICONS.edit} size={14} /> {isTemplate ? 'Edit Template' : 'Edit'}
-        </button>
+        {(isDraft || isTemplate) && (
+          <button
+            onClick={() => onEdit?.(exam)}
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px', borderRadius: '8px', background: 'transparent', border: '1px solid var(--color-border)', color: 'var(--color-muted-foreground)', fontFamily: 'var(--font-body)', fontSize: '0.82rem', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--sp-accent)'; e.currentTarget.style.color = 'var(--sp-accent)'; e.currentTarget.style.background = 'rgba(59,130,246,0.06)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-muted-foreground)'; e.currentTarget.style.background = 'transparent'; }}
+          >
+            <Ico d={ICONS.edit} size={14} /> {isTemplate ? 'Edit Template' : 'Edit'}
+          </button>
+        )}
         {isTemplate && (
           <button
             onClick={() => onUseTemplate?.(exam)}

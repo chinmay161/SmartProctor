@@ -27,7 +27,7 @@ const ICONS = {
 
 const ActiveExamCard = ({ exam }) => {
   const navigate = useNavigate();
-  const violationCount = exam?.violationCount ?? 0;
+  const violationCount = exam?.violation_count ?? 0;
   const startTime = exam?.start_time || exam?.startTime;
   const endTime = exam?.end_time || exam?.endTime;
   const formattedStartTime = startTime
@@ -59,8 +59,8 @@ const ActiveExamCard = ({ exam }) => {
           </h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
             {[
-              { icon: ICONS.users, label: `${exam?.activeStudents ?? '?'}/${exam?.totalStudents ?? '?'} Active` },
-              { icon: ICONS.clock, label: exam?.timeRemaining || computedTimeRemaining || '—' },
+              { icon: ICONS.users, label: `${exam?.live_students ?? '?'} live / ${exam?.attempts_started ?? '?'} started` },
+              { icon: ICONS.clock, label: computedTimeRemaining || '—' },
               { icon: ICONS.cal, label: formattedStartTime },
             ].map(({ icon, label }, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--color-muted-foreground)' }}>
@@ -75,38 +75,6 @@ const ActiveExamCard = ({ exam }) => {
           LIVE
         </span>
       </div>
-
-      {exam?.studentPreviews?.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: '10px', marginBottom: '14px' }}>
-          {exam.studentPreviews.slice(0, 3).map((student) => (
-            <div
-              key={student?.id}
-              style={{ padding: '10px 12px', borderRadius: '10px', background: 'var(--color-muted)', border: '1px solid var(--color-border)', transition: 'border-color 0.2s' }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(59,130,246,0.3)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-                <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(59,130,246,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', color: 'var(--sp-accent)', fontSize: '1rem' }}>
-                    {student?.name?.[0]?.toUpperCase() || '?'}
-                  </div>
-                  <div style={{ position: 'absolute', bottom: '-2px', right: '-2px', width: '9px', height: '9px', borderRadius: '50%', background: student?.status === 'active' ? '#10B981' : '#EF4444', border: '2px solid var(--color-card)' }} />
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.79rem', fontWeight: 600, color: 'var(--color-foreground)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{student?.name}</p>
-                  <p style={{ fontFamily: 'var(--font-data)', fontSize: '0.7rem', color: 'var(--color-muted-foreground)' }}>{student?.studentId}</p>
-                </div>
-              </div>
-              {student?.violations > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#F59E0B' }}>
-                  <Ico d={ICONS.warn} size={12} color="#F59E0B" />
-                  <span style={{ fontFamily: 'var(--font-body)', fontSize: '0.72rem' }}>{student?.violations} violation{student?.violations !== 1 ? 's' : ''}</span>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', paddingTop: '14px', borderTop: '1px solid var(--color-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px', borderRadius: '8px', background: severity.bg }}>

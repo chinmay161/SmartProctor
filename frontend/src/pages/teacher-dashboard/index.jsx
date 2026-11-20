@@ -29,13 +29,16 @@ const TeacherDashboard = () => {
   const [scheduledExams, setScheduledExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
   const [statistics, setStatistics] = useState({});
+  const [_dashboardData, setDashboardData] = useState(null);
 
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  const [loadingScheduled, setLoadingScheduled] = useState(true);
+  const [loadingDashboard, setLoadingDashboard] = useState(true);
+  const [dashboardError, setDashboardError] = useState(null); // { message, requestId }
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deletingExam, setDeletingExam] = useState(false);
+  const [deleteModalError, setDeleteModalError] = useState('');
   const [releaseTarget, setReleaseTarget] = useState(null);
   const [releasingResults, setReleasingResults] = useState(false);
 
@@ -64,16 +67,21 @@ const TeacherDashboard = () => {
     { id: 'completed', label: 'Completed Exams', icon: 'CheckCircle', count: completedExams.length },
   ];
 
-  const fetchExams = async () => {
+  const fetchDashboard = async () => {
     try {
-      setLoadingScheduled(true);
-      const exams = await callApi('/exams/', 'GET');
-      const arr = Array.isArray(exams) ? exams : [];
-      setTemplateExams(arr.filter((e) => e?.is_template));
-      setDraftExams(arr.filter((e) => e?.status === 'DRAFT' && !e?.is_template));
-      setActiveExams(arr.filter((e) => e?.status === 'ACTIVE' && !e?.is_template));
-      setScheduledExams(arr.filter((e) => e?.status === 'SCHEDULED' && !e?.is_template));
-      setCompletedExams(arr.filter((e) => e?.status === 'ENDED' && !e?.is_template));
+      setLoadingDashboard(true);
+      setDashboardError(null);
+      const data = await apiGet('/teacher/dashboard');
+      const exams = Array.isArray(data?.exams) ? data.exams : [];
+      setTemplateExams(exams.filter((e) => e?.is_template === true));
+      setDraftExams(exams.filter((e) => e?.effective_status === 'DRAFT' && !e?.is_template));
+      setActiveExams(exams.filter((e) => e?.effective_status === 'ACTIVE' && !e?.is_template));
+      setScheduledExams(exams.filter((e) => e?.effective_status === 'SCHEDULED' && !e?.is_template));
+      setCompletedExams(exams.filter((e) => e?.effective_status === 'ENDED' && !e?.is_template));
+      const counts = data?.counts || {};
+      const attention = data?.attention || {};
+      setStatistics({ ...counts, attention });
+      setDashboardData(data);
       setErrorMessage('');
     } catch (error) {
       setTemplateExams([]);
@@ -81,9 +89,13 @@ const TeacherDashboard = () => {
       setActiveExams([]);
       setScheduledExams([]);
       setCompletedExams([]);
-      setErrorMessage(error?.detail || error?.message || 'Failed to load exams');
+      setStatistics({});
+      setDashboardData(null);
+      const message = error?.detail || error?.message || 'Failed to load dashboard data';
+      const requestId = error?.requestId || error?.request_id || null;
+      setDashboardError({ message, requestId });
     } finally {
-      setLoadingScheduled(false);
+      setLoadingDashboard(false);
     }
   };
 
@@ -92,19 +104,7 @@ const TeacherDashboard = () => {
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-
-    const fetchDashboard = async () => {
-      await fetchExams();
-
-      if (!mounted) return;
-      setStatistics({});
-    };
-
     fetchDashboard();
-    return () => {
-      mounted = false;
-    };
   }, [auth0Authenticated]);
 
   useEffect(() => {
@@ -127,6 +127,7 @@ const TeacherDashboard = () => {
   const confirmDelete = (exam) => {
     setDeleteTarget(exam);
     setReleaseTarget(null);
+    setDeleteModalError('');
     setErrorMessage('');
     setStatusMessage('');
   };
@@ -141,13 +142,15 @@ const TeacherDashboard = () => {
   const deleteExam = async () => {
     if (!deleteTarget) return;
     setDeletingExam(true);
+    setDeleteModalError('');
     try {
       await callApi(`/exams/${deleteTarget.id}`, 'DELETE');
       setStatusMessage('Exam deleted successfully');
       setDeleteTarget(null);
-      await fetchExams();
+      await fetchDashboard();
     } catch (error) {
-      setErrorMessage(error?.detail || error?.message || 'Failed to delete exam');
+      const msg = error?.detail || error?.message || 'Failed to delete exam';
+      setDeleteModalError(msg);
     } finally {
       setDeletingExam(false);
     }
@@ -175,6 +178,39 @@ const TeacherDashboard = () => {
       setReleasingResults(false);
     }
   };
+
+  // Error state panel shown inside each tab when dashboard failed to load
+  const ErrorPanel = () => (
+    <div className="rounded-lg border border-error/40 bg-error/10 px-6 py-8 text-center space-y-3">
+      <div className="w-12 h-12 bg-error/20 rounded-full flex items-center justify-center mx-auto">
+        <Icon name="AlertCircle" size={24} className="text-error" />
+      </div>
+      <h3 className="text-base font-semibold text-foreground">Failed to load dashboard</h3>
+      <p className="text-sm text-muted-foreground">{dashboardError?.message}</p>
+      {dashboardError?.requestId && (
+        <p className="text-xs text-muted-foreground font-mono">Request ID: {dashboardError.requestId}</p>
+      )}
+      <Button onClick={fetchDashboard} iconName="RefreshCw" size="sm">
+        Retry
+      </Button>
+    </div>
+  );
+
+  // Empty state with primary CTA
+  const EmptyState = ({ icon, title, description, showCreate = false }) => (
+    <div className="text-center py-12 md:py-16">
+      <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+        <Icon name={icon} size={32} className="text-muted-foreground" />
+      </div>
+      <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">{title}</h3>
+      <p className="text-sm md:text-base text-muted-foreground mb-4">{description}</p>
+      {showCreate && (
+        <Button onClick={openCreateWizard} iconName="Plus" size="sm">
+          Create your first exam
+        </Button>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -242,23 +278,20 @@ const TeacherDashboard = () => {
                         </Button>
                       </div>
 
-                      {loadingScheduled ? (
+                      {dashboardError ? (
+                        <ErrorPanel />
+                      ) : loadingDashboard ? (
                         <div className="space-y-4">
                           <SkeletonExamCard />
                           <SkeletonExamCard delay="0.08s" />
                         </div>
                       ) : templateExams.length === 0 ? (
-                        <div className="text-center py-12 md:py-16">
-                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Icon name="Copy" size={32} className="text-muted-foreground" />
-                          </div>
-                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
-                            No Exam Templates
-                          </h3>
-                          <p className="text-sm md:text-base text-muted-foreground">
-                            Save a reusable template to speed up future exam creation
-                          </p>
-                        </div>
+                        <EmptyState
+                          icon="Copy"
+                          title="No Exam Templates"
+                          description="Save a reusable template to speed up future exam creation"
+                          showCreate
+                        />
                       ) : (
                         templateExams.map((exam) => (
                           <ScheduledExamCard
@@ -282,23 +315,20 @@ const TeacherDashboard = () => {
                         </Button>
                       </div>
 
-                      {loadingScheduled ? (
+                      {dashboardError ? (
+                        <ErrorPanel />
+                      ) : loadingDashboard ? (
                         <div className="space-y-4">
                           <SkeletonExamCard />
                           <SkeletonExamCard delay="0.08s" />
                         </div>
                       ) : draftExams.length === 0 ? (
-                        <div className="text-center py-12 md:py-16">
-                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Icon name="FileText" size={32} className="text-muted-foreground" />
-                          </div>
-                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
-                            No Draft Exams
-                          </h3>
-                          <p className="text-sm md:text-base text-muted-foreground">
-                            Saved drafts will appear here for quick editing
-                          </p>
-                        </div>
+                        <EmptyState
+                          icon="FileText"
+                          title="No Draft Exams"
+                          description="Saved drafts will appear here for quick editing"
+                          showCreate
+                        />
                       ) : (
                         draftExams.map((exam) => (
                           <ScheduledExamCard
@@ -315,18 +345,20 @@ const TeacherDashboard = () => {
 
                   {activeTab === 'active' && (
                     <div className="space-y-4 md:space-y-6">
-                      {activeExams.length === 0 ? (
-                        <div className="text-center py-12 md:py-16">
-                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Icon name="PlayCircle" size={32} className="text-muted-foreground" />
-                          </div>
-                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
-                            No Active Exams
-                          </h3>
-                          <p className="text-sm md:text-base text-muted-foreground">
-                            There are no exams currently in progress
-                          </p>
+                      {dashboardError ? (
+                        <ErrorPanel />
+                      ) : loadingDashboard ? (
+                        <div className="space-y-4">
+                          <SkeletonExamCard />
+                          <SkeletonExamCard delay="0.08s" />
                         </div>
+                      ) : activeExams.length === 0 ? (
+                        <EmptyState
+                          icon="PlayCircle"
+                          title="No Active Exams"
+                          description="There are no exams currently in progress"
+                          showCreate
+                        />
                       ) : (
                         activeExams.map((exam) => <ActiveExamCard key={exam?.id} exam={exam} />)
                       )}
@@ -341,23 +373,20 @@ const TeacherDashboard = () => {
                         </Button>
                       </div>
 
-                      {loadingScheduled ? (
+                      {dashboardError ? (
+                        <ErrorPanel />
+                      ) : loadingDashboard ? (
                         <div className="space-y-4">
                           <SkeletonExamCard />
                           <SkeletonExamCard delay="0.08s" />
                         </div>
                       ) : scheduledExams.length === 0 ? (
-                        <div className="text-center py-12 md:py-16">
-                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Icon name="Calendar" size={32} className="text-muted-foreground" />
-                          </div>
-                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
-                            No Scheduled Exams
-                          </h3>
-                          <p className="text-sm md:text-base text-muted-foreground">
-                            Create your first exam to get started
-                          </p>
-                        </div>
+                        <EmptyState
+                          icon="Calendar"
+                          title="No Scheduled Exams"
+                          description="Schedule your first exam to get started"
+                          showCreate
+                        />
                       ) : (
                         scheduledExams.map((exam) => (
                           <ScheduledExamCard
@@ -373,18 +402,20 @@ const TeacherDashboard = () => {
 
                   {activeTab === 'completed' && (
                     <div className="space-y-4 md:space-y-6">
-                      {completedExams.length === 0 ? (
-                        <div className="text-center py-12 md:py-16">
-                          <div className="w-16 h-16 md:w-20 md:h-20 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Icon name="CheckCircle" size={32} className="text-muted-foreground" />
-                          </div>
-                          <h3 className="text-base md:text-lg font-heading font-semibold text-foreground mb-2">
-                            No Completed Exams
-                          </h3>
-                          <p className="text-sm md:text-base text-muted-foreground">
-                            Completed exams will appear here
-                          </p>
+                      {dashboardError ? (
+                        <ErrorPanel />
+                      ) : loadingDashboard ? (
+                        <div className="space-y-4">
+                          <SkeletonExamCard />
+                          <SkeletonExamCard delay="0.08s" />
                         </div>
+                      ) : completedExams.length === 0 ? (
+                        <EmptyState
+                          icon="CheckCircle"
+                          title="No Completed Exams"
+                          description="Completed exams will appear here"
+                          showCreate
+                        />
                       ) : (
                         completedExams.map((exam) => (
                           <CompletedExamCard
@@ -419,8 +450,16 @@ const TeacherDashboard = () => {
               <p className="text-sm text-muted-foreground">
                 Delete <span className="font-medium text-foreground">{deleteTarget.title}</span>? This cannot be undone.
               </p>
+              <p className="text-xs text-muted-foreground">
+                Only DRAFT exams or exams with no attempts can be deleted.
+              </p>
+              {deleteModalError && (
+                <div className="rounded-md border border-error/40 bg-error/10 px-3 py-2 text-sm text-error">
+                  {deleteModalError}
+                </div>
+              )}
               <div className="flex items-center justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setDeleteTarget(null)} disabled={deletingExam}>
+                <Button type="button" variant="outline" onClick={() => { setDeleteTarget(null); setDeleteModalError(''); }} disabled={deletingExam}>
                   Cancel
                 </Button>
                 <Button type="button" variant="danger" loading={deletingExam} onClick={deleteExam}>
