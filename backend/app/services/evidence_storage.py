@@ -66,7 +66,7 @@ class LocalStorage(EvidenceStorage):
     def resolve_url(self, stored_value: Optional[str]) -> Optional[str]:
         if not stored_value:
             return stored_value
-        if stored_value.startswith("http://") or stored_value.startswith("https://"):
+        if stored_value.startswith("http://") or stored_value.startswith("https://") or stored_value.startswith("data:"):
             return stored_value
         if stored_value.startswith("/"):
             return stored_value
@@ -136,7 +136,7 @@ class S3Storage(EvidenceStorage):
     def resolve_url(self, stored_value: Optional[str]) -> Optional[str]:
         if not stored_value:
             return stored_value
-        if stored_value.startswith("http://") or stored_value.startswith("https://"):
+        if stored_value.startswith("http://") or stored_value.startswith("https://") or stored_value.startswith("data:"):
             return stored_value
         # Legacy values starting with "/evidence/" pass through unchanged
         if stored_value.startswith("/evidence/"):
@@ -145,11 +145,15 @@ class S3Storage(EvidenceStorage):
             raise StorageNotConfiguredError("S3 storage is not configured: S3_BUCKET is empty")
 
         clean_key = stored_value.lstrip("/\\")
-        return self.s3.generate_presigned_url(
-            ClientMethod="get_object",
-            Params={"Bucket": self.bucket, "Key": clean_key},
-            ExpiresIn=self.ttl_seconds,
-        )
+        try:
+            return self.s3.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": self.bucket, "Key": clean_key},
+                ExpiresIn=self.ttl_seconds,
+            )
+        except Exception as err:
+            logger.warning("Failed to generate S3 presigned URL for key %s: %s", clean_key, err)
+            return None
 
     def delete(self, key: str) -> None:
         if not key or key.startswith("/evidence/"):

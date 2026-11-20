@@ -4,7 +4,7 @@ from ..models.exam_session import ExamSession
 from ..models.exam_attempt import ExamAttempt
 from ..models.violation import Violation
 from ..models.user_profile import UserProfile
-from .evidence_storage import resolve_evidence_field
+from .evidence_storage import get_evidence_storage, resolve_evidence_field
 import io
 import csv
 
@@ -214,50 +214,77 @@ def generate_pdf_export(db: Session, exam_id: str):
     return buffer
 
 def get_exam_evidence(db: Session, exam_id: str):
+    storage = None
+    try:
+        storage = get_evidence_storage()
+    except Exception:
+        storage = None
+
+    attempts = db.query(ExamAttempt).filter_by(exam_id=exam_id).all()
+    attempt_ids = [attempt.id for attempt in attempts]
+    attempt_by_id = {attempt.id: attempt for attempt in attempts}
+
     sessions = db.query(ExamSession).filter_by(exam_id=exam_id).all()
+    session_ids = [session.id for session in sessions]
+    session_by_id = {session.id: session for session in sessions}
+
+    violations_by_key: dict[str, Violation] = {}
+    if attempt_ids:
+        attempt_violations = db.query(Violation).filter(Violation.attempt_id.in_(attempt_ids)).all()
+        for v in attempt_violations:
+            violations_by_key[str(v.id)] = v
+    if session_ids:
+        session_violations = db.query(Violation).filter(Violation.session_id.in_(session_ids)).all()
+        for v in session_violations:
+            violations_by_key[str(v.id)] = v
+
+    violations_by_student: dict[str, list[dict]] = {}
+    student_sessions: dict[str, str] = {}
+
+    for v in violations_by_key.values():
+        att = attempt_by_id.get(v.attempt_id) if v.attempt_id else None
+        ses = session_by_id.get(v.session_id) if v.session_id else None
+        uid = v.student_id or (att.student_id if att else (ses.student_id if ses else "unknown"))
+        sid = str(v.session_id or (ses.id if ses else (att.id if att else "unknown")))
+        student_sessions[uid] = sid
+
+        ev_files = None
+        ev_status = getattr(v, "evidence_status", None)
+        if v.evidence_files:
+            try:
+                ev_files = resolve_evidence_field(v.evidence_files, storage)
+                if ev_files:
+                    ev_status = ev_status or "captured"
+                else:
+                    ev_status = "url_failed"
+            except Exception:
+                ev_status = "url_failed"
+        elif not ev_status:
+            ev_status = "no_image_in_request"
+
+        violations_by_student.setdefault(uid, []).append({
+            "id": str(v.id),
+            "type": v.type or "UNKNOWN",
+            "severity": v.severity,
+            "evidence_file": ev_files,
+            "evidence_files": ev_files,
+            "evidence_status": ev_status,
+            "timestamp": v.timestamp.isoformat() if v.timestamp else None,
+            "review_status": getattr(v, "review_status", None) or "NONE",
+            "review_note": getattr(v, "review_note", None) or "",
+            "reviewed_by": getattr(v, "reviewed_by", None),
+            "reviewed_at": v.reviewed_at.isoformat() if getattr(v, "reviewed_at", None) else None,
+        })
+
     evidence_data = []
-    
-    for s in sessions:
-        uid = s.student_id
+    for uid, viols in violations_by_student.items():
         user = db.query(UserProfile).filter_by(auth0_sub=uid).first()
         name = _display_name_for_profile(user, uid)
-        
-        violations = db.query(Violation).filter_by(session_id=s.id).all()
-        student_violations = []
-        for v in violations:
-            ev_files = None
-            ev_status = getattr(v, "evidence_status", None)
-            if v.evidence_files:
-                try:
-                    ev_files = resolve_evidence_field(v.evidence_files)
-                    if ev_files:
-                        ev_status = ev_status or "captured"
-                    else:
-                        ev_status = "url_failed"
-                except Exception:
-                    ev_status = "url_failed"
-            elif not ev_status:
-                ev_status = "no_image_in_request"
+        evidence_data.append({
+            "session_id": student_sessions.get(uid, "unknown"),
+            "student_id": uid,
+            "name": name,
+            "violations": sorted(viols, key=lambda x: x["timestamp"] or "", reverse=True),
+        })
 
-            student_violations.append({
-                "id": str(v.id),
-                "type": v.type or "UNKNOWN",
-                "severity": v.severity,
-                "evidence_file": ev_files,
-                "evidence_status": ev_status,
-                "timestamp": v.timestamp.isoformat() if v.timestamp else None,
-                "review_status": getattr(v, "review_status", None) or "NONE",
-                "review_note": getattr(v, "review_note", None) or "",
-                "reviewed_by": getattr(v, "reviewed_by", None),
-                "reviewed_at": v.reviewed_at.isoformat() if getattr(v, "reviewed_at", None) else None,
-            })
-        
-        if student_violations:
-            evidence_data.append({
-                "session_id": str(s.id),
-                "student_id": uid,
-                "name": name,
-                "violations": sorted(student_violations, key=lambda x: x["timestamp"] or "", reverse=True)
-            })
-            
-    return evidence_data
+    return sorted(evidence_data, key=lambda x: x["name"])

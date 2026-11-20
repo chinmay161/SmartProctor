@@ -37,6 +37,15 @@ const normalizeEvidencePaths = (rawValue) => {
   return [String(rawValue)];
 };
 
+const resolveEvidenceUrl = (path, origin) => {
+  if (!path) return null;
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('data:')) {
+    return path;
+  }
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  return `${origin}${cleanPath}`;
+};
+
 const EVIDENCE_STATUS_LABELS = {
   no_image_in_request: 'No image sent',
   invalid_image: 'Invalid image',
@@ -44,6 +53,7 @@ const EVIDENCE_STATUS_LABELS = {
   storage_not_configured: 'Storage not configured',
   upload_failed: 'Upload failed',
   url_failed: 'Link failed',
+  captured: 'Evidence captured',
 };
 
 const REVIEW_BADGES = {
@@ -61,6 +71,8 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
   const [filterType, setFilterType] = useState('ALL');
   const [reviews, setReviews] = useState({});
   const [savingId, setSavingId] = useState(null);
+  const [previewEvidence, setPreviewEvidence] = useState(null);
+  const [failedImages, setFailedImages] = useState({});
   const backendOrigin = getBackendOrigin();
   
   const allViolations = [];
@@ -183,13 +195,10 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
            ) : (
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                {filteredViolations.map(v => {
-                 const evidencePaths = normalizeEvidencePaths(v.evidence_file);
+                 const evidencePaths = normalizeEvidencePaths(v.evidence_file || v.evidence_files);
                  const primaryEvidence = evidencePaths[0] || null;
-                 const imageSrc = primaryEvidence
-                   ? (primaryEvidence.startsWith('http://') || primaryEvidence.startsWith('https://')
-                      ? primaryEvidence
-                      : `${backendOrigin}${primaryEvidence}`)
-                   : null;
+                 const imageSrc = resolveEvidenceUrl(primaryEvidence, backendOrigin);
+                 const isImageFailed = Boolean(failedImages[v.id]);
 
                  const reviewState = getReviewState(v);
                  const badgeInfo = REVIEW_BADGES[reviewState.status] || REVIEW_BADGES.NONE;
@@ -197,21 +206,40 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
 
                  return (
                  <div key={v.id} className="bg-card border border-border rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col">
-                   <div className="h-44 bg-black flex items-center justify-center relative group">
-                      {imageSrc ? (
-                        <img 
-                          src={imageSrc}
-                          alt={v.type}
-                          className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
-                          onError={(e) => e.target.style.display = 'none'}
-                        />
+                   <div className="h-44 bg-black/90 flex items-center justify-center relative group overflow-hidden">
+                      {imageSrc && !isImageFailed ? (
+                        <>
+                          <img 
+                            src={imageSrc}
+                            alt={v.type}
+                            className="w-full h-full object-cover opacity-90 group-hover:opacity-100 group-hover:scale-105 transition-all duration-200 cursor-pointer"
+                            onClick={() => setPreviewEvidence({
+                              url: imageSrc,
+                              type: v.type,
+                              studentName: v.student_name,
+                              timestamp: v.timestamp,
+                              severity: v.severity,
+                              allPaths: evidencePaths.map(p => resolveEvidenceUrl(p, backendOrigin)),
+                            })}
+                            onError={() => setFailedImages(prev => ({ ...prev, [v.id]: true }))}
+                          />
+                          <div 
+                            className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer pointer-events-none"
+                          >
+                            <span className="text-white text-xs font-semibold flex items-center gap-1.5 bg-black/60 px-2.5 py-1 rounded-md">
+                              <Icon name="Maximize2" size={13} /> View Snapshot
+                            </span>
+                          </div>
+                        </>
                       ) : (
                         <div className="flex flex-col items-center justify-center text-xs text-muted-foreground p-2 text-center gap-1">
                           <Icon name="CameraOff" size={20} className="opacity-50" />
-                          <span>{EVIDENCE_STATUS_LABELS[v.evidence_status] || 'No snapshot captured'}</span>
+                          <span>
+                            {isImageFailed ? 'Snapshot unavailable' : (EVIDENCE_STATUS_LABELS[v.evidence_status] || 'No snapshot captured')}
+                          </span>
                         </div>
                       )}
-                      <div className="absolute top-2 right-2 flex gap-1">
+                      <div className="absolute top-2 right-2 flex gap-1 z-10 pointer-events-none">
                          <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded shadow-sm ${v.severity === 'severe' ? 'bg-destructive/90 text-white' : v.severity === 'major' ? 'bg-warning/90 text-white' : 'bg-primary/90 text-white'}`}>
                            {v.severity}
                          </span>
@@ -298,6 +326,61 @@ const EvidenceGallery = ({ evidenceData, onClose }) => {
            )}
         </div>
       </div>
+
+      {/* Lightbox / Enlarged Evidence Modal */}
+      {previewEvidence && (
+        <div className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+            <div className="p-3.5 border-b border-border flex items-center justify-between bg-muted/30">
+              <div className="flex items-center gap-2">
+                <Icon name="Camera" className="text-primary" size={18} />
+                <span className="font-semibold text-sm">
+                  {formatViolationType(previewEvidence.type)} - {previewEvidence.studentName}
+                </span>
+                {previewEvidence.severity && (
+                  <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded ${
+                    previewEvidence.severity === 'severe' ? 'bg-destructive/20 text-destructive' :
+                    previewEvidence.severity === 'major' ? 'bg-warning/20 text-warning' : 'bg-primary/20 text-primary'
+                  }`}>
+                    {previewEvidence.severity}
+                  </span>
+                )}
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setPreviewEvidence(null)}>
+                <Icon name="X" size={18} />
+              </Button>
+            </div>
+            <div className="flex-1 bg-black flex items-center justify-center overflow-auto p-2 min-h-[350px]">
+              <img
+                src={previewEvidence.url}
+                alt={previewEvidence.type}
+                className="max-h-[72vh] max-w-full object-contain rounded"
+              />
+            </div>
+            <div className="p-3 border-t border-border bg-card flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-3">
+                <span>Student: <strong className="text-foreground">{previewEvidence.studentName}</strong></span>
+                {previewEvidence.timestamp && (
+                  <span>Time: {new Date(previewEvidence.timestamp).toLocaleString()}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewEvidence.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline flex items-center gap-1 font-medium"
+                >
+                  <Icon name="ExternalLink" size={14} /> Open Full Resolution
+                </a>
+                <Button size="xs" variant="outline" onClick={() => setPreviewEvidence(null)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

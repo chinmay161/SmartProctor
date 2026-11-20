@@ -653,15 +653,20 @@ const TeacherMonitoringPage = () => {
                     <div key={ev.id} className="bg-card border border-border rounded-lg overflow-hidden shadow-sm flex flex-col md:flex-row">
                       {images.length > 0 ? (
                         <div className="w-full md:w-1/3 bg-black flex gap-1 overflow-x-auto items-center p-1">
-                          {images.map((img, i) => (
-                            <img 
-                              key={i}
-                              src={(img.startsWith('http://') || img.startsWith('https://')) ? img : `${backendOrigin}${img}`}
-                              alt="Violation Evidence" 
-                              className="w-full h-32 md:min-w-[150px] object-cover flex-shrink-0"
-                              onError={(e) => e.target.style.display = 'none'}
-                            />
-                          ))}
+                          {images.map((img, i) => {
+                            const src = (img.startsWith('http://') || img.startsWith('https://') || img.startsWith('data:'))
+                              ? img
+                              : `${backendOrigin}${img.startsWith('/') ? '' : '/'}${img}`;
+                            return (
+                              <img 
+                                key={i}
+                                src={src}
+                                alt="Violation Evidence" 
+                                className="w-full h-32 md:min-w-[150px] object-cover flex-shrink-0"
+                                onError={(e) => { e.target.style.display = 'none'; }}
+                              />
+                            );
+                          })}
                         </div>
                       ) : (
                         <div className="w-full md:w-1/3 bg-muted flex flex-col items-center justify-center h-32 text-xs text-muted-foreground text-center px-4 gap-1">
